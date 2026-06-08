@@ -31,7 +31,7 @@ struct PerHourStats {
     bucket: HourBucketStats,
 }
 
-/// 持久化：单小时单模型累计统计（仅数值，不含时间戳）
+/// 持久化：单小时单模型累计统计
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HourBucketStats {
     pub prompt_tokens: u64,
@@ -43,6 +43,12 @@ pub struct HourBucketStats {
     pub failures: u64,
     #[serde(default)]
     pub system_hash_distribution: HashMap<[u8; 32], u64>,
+    /// 该桶内首次记录时间（ISO 8601），用于计算实际活跃时长
+    #[serde(default)]
+    pub first_record_at: Option<String>,
+    /// 该桶内末次记录时间（ISO 8601）
+    #[serde(default)]
+    pub last_record_at: Option<String>,
 }
 
 /// 持久化：summary 中按 provider/model 聚合后的最终统计（含 avg 字段）
@@ -55,7 +61,7 @@ pub struct ModelSummaryStats {
     pub total_cache_hit_tokens: u64,
     pub total_calls: u64,
     pub total_failures: u64,
-    pub active_hours: u64,
+    pub active_hours: f64,
     pub first_record_at: String,
     pub last_record_at: String,
     /// 每活跃小时平均 prompt token（active_hours > 0 时计算）
@@ -154,7 +160,9 @@ pub fn record_token_usage(
     system_hash: [u8; 32],
 ) {
     let key = model_key(provider, model);
-    let hk = hour_key(Utc::now());
+    let now = Utc::now();
+    let hk = hour_key(now);
+    let now_iso = now.to_rfc3339();
     if let Ok(mut stats) = token_stats().lock() {
         let model_entry = stats.entry(key).or_default();
         let hour_entry = model_entry.entry(hk).or_default();
@@ -163,18 +171,28 @@ pub fn record_token_usage(
         hour_entry.bucket.cache_hit_tokens += cache_hit;
         hour_entry.bucket.calls += 1;
         *hour_entry.bucket.system_hash_distribution.entry(system_hash).or_insert(0) += 1;
+        if hour_entry.bucket.first_record_at.is_none() {
+            hour_entry.bucket.first_record_at = Some(now_iso.clone());
+        }
+        hour_entry.bucket.last_record_at = Some(now_iso);
     }
 }
 
 /// Record a failed LLM call for a specific provider-model, bucketed by current UTC hour
 pub fn record_failure(provider: &LlmProvider, model: &str) {
     let key = model_key(provider, model);
-    let hk = hour_key(Utc::now());
+    let now = Utc::now();
+    let hk = hour_key(now);
+    let now_iso = now.to_rfc3339();
     if let Ok(mut stats) = token_stats().lock() {
         let model_entry = stats.entry(key).or_default();
         let hour_entry = model_entry.entry(hk).or_default();
         hour_entry.bucket.calls += 1;
         hour_entry.bucket.failures += 1;
+        if hour_entry.bucket.first_record_at.is_none() {
+            hour_entry.bucket.first_record_at = Some(now_iso.clone());
+        }
+        hour_entry.bucket.last_record_at = Some(now_iso);
     }
 }
 
@@ -234,16 +252,18 @@ pub fn snapshot_all_stats() -> Vec<ModelTokenStats> {
 ///
 /// 设计要点：
 /// - total_* 来自 detail 全量累加
-/// - active_hours = detail 中该 model_key 出现的 hour bucket 数量
+/// - active_hours = 各 hour bucket 实际活跃时长之和（小时）
+///   每桶时长 = last_record_at - first_record_at，最少 1 分钟
 /// - avg_*_per_hour = total_* / active_hours（active_hours=0 时为 0.0）
 /// - avg_cache_hit_ratio = total_cache_hit / total_prompt（总命中率）
-/// - first/last_record_at = detail 中该 model_key 出现的最早/最晚 hour 整点
+/// - first/last_record_at = detail 中该 model_key 出现的最早/最晚时间戳
 fn rebuild_summary(p: &mut PersistedTokenStats) {
-    /// 每 model 的 (累计 stats, 最早 hour 整点, 最晚 hour 整点)
+    /// 每 model 的 (累计 stats, 最早时间, 最晚时间, 累计活跃小时数)
     type ModelAgg = (
         HourBucketStats,
         Option<DateTime<Utc>>,
         Option<DateTime<Utc>>,
+        f64, // cumulative active hours
     );
     let mut agg: BTreeMap<String, ModelAgg> = BTreeMap::new();
 
@@ -252,44 +272,54 @@ fn rebuild_summary(p: &mut PersistedTokenStats) {
         for (model_key, bucket) in models {
             let entry = agg
                 .entry(model_key.clone())
-                .or_insert_with(|| (HourBucketStats::default(), None, None));
+                .or_insert_with(|| (HourBucketStats::default(), None, None, 0.0));
             entry.0.prompt_tokens += bucket.prompt_tokens;
             entry.0.completion_tokens += bucket.completion_tokens;
             entry.0.cache_hit_tokens += bucket.cache_hit_tokens;
             entry.0.calls += bucket.calls;
             entry.0.failures += bucket.failures;
+
+            // 计算该桶的实际活跃时长
+            let bucket_hours = bucket_active_hours(bucket);
+            entry.3 += bucket_hours;
+
+            // 更新最早/最晚时间：优先用桶内时间戳，回退到 hour 整点
+            let bucket_first = bucket
+                .first_record_at
+                .as_deref()
+                .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+                .unwrap_or(hour_dt);
+            let bucket_last = bucket
+                .last_record_at
+                .as_deref()
+                .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+                .unwrap_or(hour_dt);
             entry.1 = Some(match entry.1 {
-                Some(f) => f.min(hour_dt),
-                None => hour_dt,
+                Some(f) => f.min(bucket_first),
+                None => bucket_first,
             });
             entry.2 = Some(match entry.2 {
-                Some(l) => l.max(hour_dt),
-                None => hour_dt,
+                Some(l) => l.max(bucket_last),
+                None => bucket_last,
             });
         }
     }
 
     p.summary.by_provider_model.clear();
-    for (model_key, (acc, first, last)) in agg {
+    for (model_key, (acc, first, last, active_hours)) in agg {
         let (provider, model) = split_model_key(&model_key);
-        // active_hours = detail 中包含此 model_key 的 hour bucket 数
-        let active_hours = p
-            .detail
-            .values()
-            .filter(|models| models.contains_key(&model_key))
-            .count() as u64;
-        let avg_pt = if active_hours > 0 {
-            acc.prompt_tokens as f64 / active_hours as f64
+        let avg_pt = if active_hours > 0.0 {
+            acc.prompt_tokens as f64 / active_hours
         } else {
             0.0
         };
-        let avg_ct = if active_hours > 0 {
-            acc.completion_tokens as f64 / active_hours as f64
+        let avg_ct = if active_hours > 0.0 {
+            acc.completion_tokens as f64 / active_hours
         } else {
             0.0
         };
-        let avg_calls = if active_hours > 0 {
-            acc.calls as f64 / active_hours as f64
+        let avg_calls = if active_hours > 0.0 {
+            acc.calls as f64 / active_hours
         } else {
             0.0
         };
@@ -317,6 +347,58 @@ fn rebuild_summary(p: &mut PersistedTokenStats) {
                 avg_cache_hit_ratio: cache_ratio,
             },
         );
+    }
+}
+
+/// 计算单个 hour bucket 的实际活跃时长（小时）
+/// 规则：last_record_at - first_record_at，最少 1 分钟（单次调用场景）
+/// 无时间戳时（旧数据）回退为 1.0 小时（保持桶计数语义）
+fn bucket_active_hours(bucket: &HourBucketStats) -> f64 {
+    let first = match bucket
+        .first_record_at
+        .as_deref()
+        .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+    {
+        Some(t) => t,
+        None => return 1.0, // 旧数据无时间戳，回退为 1 小时
+    };
+    let last = match bucket
+        .last_record_at
+        .as_deref()
+        .and_then(|s| s.parse::<DateTime<Utc>>().ok())
+    {
+        Some(t) => t,
+        None => return 0.0,
+    };
+    let duration = (last - first).to_std().unwrap_or(std::time::Duration::ZERO);
+    // 最少 1 分钟（避免单次调用除以 0）
+    let min_duration = std::time::Duration::from_secs(60);
+    let effective = duration.max(min_duration);
+    effective.as_secs_f64() / 3600.0
+}
+
+/// 合并两个可选时间戳：earliest=true 取更早的，false 取更晚的
+fn merge_timestamp(target: &mut Option<String>, source: &Option<String>, earliest: bool) {
+    match (target.as_deref(), source.as_deref()) {
+        (_, None) => {}
+        (None, Some(s)) => *target = Some(s.to_string()),
+        (Some(t), Some(s)) => {
+            let t_dt = t.parse::<DateTime<Utc>>().ok();
+            let s_dt = s.parse::<DateTime<Utc>>().ok();
+            match (t_dt, s_dt) {
+                (None, Some(s_dt)) => *target = Some(s_dt.to_rfc3339()),
+                (Some(_), None) => {}
+                (None, None) => {}
+                (Some(t_dt), Some(s_dt)) => {
+                    let pick = if earliest {
+                        t_dt.min(s_dt)
+                    } else {
+                        t_dt.max(s_dt)
+                    };
+                    *target = Some(pick.to_rfc3339());
+                }
+            }
+        }
     }
 }
 
@@ -350,6 +432,9 @@ pub fn persist_and_reset() {
         bucket.cache_hit_tokens += phs.bucket.cache_hit_tokens;
         bucket.calls += phs.bucket.calls;
         bucket.failures += phs.bucket.failures;
+        // 合并时间戳：取最早 first 和最晚 last
+        merge_timestamp(&mut bucket.first_record_at, &phs.bucket.first_record_at, true);
+        merge_timestamp(&mut bucket.last_record_at, &phs.bucket.last_record_at, false);
     }
 
     // 重建 summary（reduce detail）
@@ -537,6 +622,8 @@ mod tests {
                 calls: 5,
                 failures: 0,
                 system_hash_distribution: HashMap::new(),
+                first_record_at: Some("2026-06-01T01:00:00+00:00".to_string()),
+                last_record_at: Some("2026-06-01T01:59:00+00:00".to_string()),
             },
         );
         p.detail.insert("2026-06-01-01".to_string(), h01);
@@ -551,6 +638,8 @@ mod tests {
                 calls: 10,
                 failures: 2,
                 system_hash_distribution: HashMap::new(),
+                first_record_at: Some("2026-06-01T02:00:00+00:00".to_string()),
+                last_record_at: Some("2026-06-01T02:59:00+00:00".to_string()),
             },
         );
         p.detail.insert("2026-06-01-02".to_string(), h02);
@@ -567,13 +656,13 @@ mod tests {
         assert_eq!(s.total_cache_hit_tokens, 1600);
         assert_eq!(s.total_calls, 15);
         assert_eq!(s.total_failures, 2);
-        assert_eq!(s.active_hours, 2);
-        assert_eq!(s.avg_prompt_tokens_per_hour, 1500.0);
-        assert_eq!(s.avg_completion_tokens_per_hour, 300.0);
-        assert_eq!(s.avg_calls_per_hour, 7.5);
+        // 桶1: 01:00~01:59 = 59min, 桶2: 02:00~02:59 = 59min → 共 118min ≈ 1967 ms→约 1967
+        assert!((s.active_hours - 1.967).abs() < 0.01); // (59+59)min / 60 ≈ 1.967h
+        // avg = 3000 / (118*60/3600) = 3000 / 1.9667 ≈ 1525.4
+        assert!((s.avg_prompt_tokens_per_hour - 1525.4).abs() < 1.0);
         assert!((s.avg_cache_hit_ratio - 1600.0 / 3000.0).abs() < 1e-9);
         assert_eq!(s.first_record_at, "2026-06-01T01:00:00+00:00");
-        assert_eq!(s.last_record_at, "2026-06-01T02:00:00+00:00");
+        assert_eq!(s.last_record_at, "2026-06-01T02:59:00+00:00");
     }
 
     // ---- 6. rebuild_summary 边界：active_hours = 0 → avg = 0 ----
@@ -626,7 +715,8 @@ mod tests {
             .expect("m1 summary");
         assert_eq!(m1_summary.total_prompt_tokens, 300);
         assert_eq!(m1_summary.total_calls, 2);
-        assert!(m1_summary.active_hours >= 1);
+        // 快速连续调用，实际活跃时长接近最小值 (1 min = ~17 when stored as *1000)
+        assert!(m1_summary.active_hours > 0.0);
 
         // detail 应至少 1 个 hour bucket
         assert!(!parsed.detail.is_empty());
