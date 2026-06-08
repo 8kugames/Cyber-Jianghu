@@ -2,11 +2,11 @@
 // ============================================================================
 
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Json},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::{error, info};
 
@@ -588,11 +588,26 @@ pub(crate) async fn death_events_handler(State(state): State<HttpApiState>) -> i
 // LLM Metrics
 // ============================================================================
 
+/// Query 参数：可选 system_hash hex 过滤
+#[derive(Deserialize, Default, Debug, Clone)]
+pub struct MetricsQuery {
+    pub system_hash: Option<String>,
+}
+
 /// GET /api/v1/metrics — LLM 性能指标
-pub async fn get_metrics_handler() -> Json<serde_json::Value> {
+pub async fn get_metrics_handler(Query(q): Query<MetricsQuery>) -> Json<serde_json::Value> {
     use crate::component::llm::snapshot_all_stats;
 
-    let stats = snapshot_all_stats();
+    let mut stats = snapshot_all_stats();
+    if let Some(hash_hex) = q.system_hash.as_deref()
+        && let Ok(bytes) = hex::decode(hash_hex)
+        && bytes.len() == 32
+    {
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        stats.retain(|s| s.system_hash_distribution.contains_key(&arr));
+    }
+
     let mut total_prompt: u64 = 0;
     let mut total_cache_hit: u64 = 0;
 
@@ -638,6 +653,57 @@ pub async fn get_metrics_handler() -> Json<serde_json::Value> {
         "total_prompt_tokens": total_prompt,
         "cache_hit_rate": format!("{:.1}%", overall_cache_hit_rate * 100.0),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::component::llm::LlmProvider;
+    use crate::component::llm::token_tracking::ModelTokenStats;
+    use std::collections::HashMap;
+
+    #[test]
+    fn metrics_query_filters_by_system_hash() {
+        let mut stats = vec![
+            ModelTokenStats {
+                provider: LlmProvider::OpenAICompatible.as_str().to_string(),
+                model: "model-A".to_string(),
+                system_hash_distribution: {
+                    let mut m = HashMap::new();
+                    m.insert([1u8; 32], 5);
+                    m.insert([2u8; 32], 3);
+                    m
+                },
+                ..Default::default()
+            },
+            ModelTokenStats {
+                provider: LlmProvider::OpenAICompatible.as_str().to_string(),
+                model: "model-B".to_string(),
+                system_hash_distribution: {
+                    let mut m = HashMap::new();
+                    m.insert([3u8; 32], 7);
+                    m
+                },
+                ..Default::default()
+            },
+        ];
+
+        assert_eq!(stats.len(), 2);
+
+        let target = [1u8; 32];
+        stats.retain(|s| s.system_hash_distribution.contains_key(&target));
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].model, "model-A");
+    }
+
+    #[test]
+    fn metrics_query_hex_decode_32_bytes() {
+        let hex_str = "0101010101010101010101010101010101010101010101010101010101010101";
+        let bytes = hex::decode(hex_str).unwrap();
+        assert_eq!(bytes.len(), 32);
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        assert_eq!(arr, [1u8; 32]);
+    }
 }
 
 // ============================================================================

@@ -194,6 +194,26 @@ pub struct DirectLlmClientConfig {
     pub enable_thinking: Option<bool>,
     /// 上下文窗口大小（tokens）
     pub context_window_tokens: u32,
+    /// Prompt 配置（D8 reasoning 剥离 + D9 schema 规范化开关）
+    pub prompt: PromptConfig,
+}
+
+/// Prompt 配置（D8 reasoning 剥离 + D9 schema 规范化开关）
+#[derive(Debug, Clone)]
+pub struct PromptConfig {
+    /// 是否从 LLM 输出中剥离 reasoning content（D8）
+    pub strip_reasoning_content: bool,  // env var: CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT
+    /// 是否规范化 tool/parameter schema 输出（D9）
+    pub canonicalize_schemas: bool,    // env var: CYBER_JIANGHU_PROMPT_CANONICALIZE_SCHEMAS
+}
+
+impl Default for PromptConfig {
+    fn default() -> Self {
+        Self {
+            strip_reasoning_content: crate::config::env_or("CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT", true),
+            canonicalize_schemas: crate::config::env_or("CYBER_JIANGHU_PROMPT_CANONICALIZE_SCHEMAS", true),
+        }
+    }
 }
 
 impl DirectLlmClientConfig {
@@ -219,6 +239,7 @@ impl DirectLlmClientConfig {
             prefer_stream: false,
             enable_thinking: None,
             context_window_tokens: 32000,
+            prompt: PromptConfig::default(),
         }
     }
 
@@ -643,6 +664,7 @@ impl DirectLlmClient {
                 model, actual_model
             );
         }
+        let system_hash = Self::extract_system_hash_from_request(request);
         if let Some(ref usage) = response_data.usage {
             let cache_hit = usage.cache_hit_tokens().unwrap_or(0);
             record_token_usage(
@@ -651,6 +673,7 @@ impl DirectLlmClient {
                 usage.prompt_tokens,
                 usage.completion_tokens,
                 cache_hit,
+                system_hash,
             );
             debug!(
                 "Token usage: provider={}, model={}, prompt={}, completion={}, cache_hit={}",
@@ -674,7 +697,14 @@ impl DirectLlmClient {
                 .and_then(|c| c.message.content.as_ref())
                 .map(|s| (s.len() as u64 / 3).max(1))
                 .unwrap_or(0);
-            record_token_usage(&self.config.provider, &model, est_pt, est_ct, 0);
+            record_token_usage(
+                &self.config.provider,
+                &model,
+                est_pt,
+                est_ct,
+                0,
+                system_hash,
+            );
             debug!(
                 "Token usage (estimated): provider={}, model={}, prompt~{}, completion~{}",
                 self.config.provider.as_str(),
@@ -687,6 +717,22 @@ impl DirectLlmClient {
         Ok(response_data)
     }
 
+    /// 从 request 中提取 system 字符串（按 OpenAI 约定 messages[0] 为 system）
+    /// 若 messages[0] 不是 system role 或 content 为 None, 返回空字符串 (hash 仍可计算, 区别于 `[0u8;32]`)
+    fn extract_system_from_request(request: &OpenAIRequest) -> String {
+        request
+            .messages
+            .first()
+            .filter(|m| m.role == "system")
+            .and_then(|m| m.content.clone())
+            .unwrap_or_default()
+    }
+
+    fn extract_system_hash_from_request(request: &OpenAIRequest) -> [u8; 32] {
+        let system = Self::extract_system_from_request(request);
+        crate::soul::actor::compute_system_hash(&system)
+    }
+
     /// 流式降级：用 streaming 收集完整响应，组装为 OpenAIResponse
     ///
     /// 当 send_request 遇到 "only support stream mode" 错误时调用此方法。
@@ -696,6 +742,7 @@ impl DirectLlmClient {
         use futures_util::StreamExt;
 
         info!("[地魂] send_request_via_stream 入口（流式路径）");
+        let system_hash = Self::extract_system_hash_from_request(request);
         let mut stream = self.send_streaming_request(request).await?;
         let mut acc = StreamAccumulator::new();
         let mut transport_error: Option<anyhow::Error> = None;
@@ -778,6 +825,7 @@ impl DirectLlmClient {
                     pt,
                     0,
                     0,
+                    system_hash,
                 );
             }
             anyhow::bail!(
@@ -821,6 +869,7 @@ impl DirectLlmClient {
                 final_pt,
                 ct,
                 cache_hit,
+                system_hash,
             );
             debug!(
                 "Stream token usage: provider={}, model={}, prompt={}, completion={}, cache_hit={}, real_usage={}",
@@ -846,6 +895,7 @@ impl DirectLlmClient {
                 est_pt,
                 est_ct,
                 0,
+                system_hash,
             );
             debug!(
                 "Stream token usage (estimated fallback): provider={}, model={}, prompt~{}, completion~{}",
@@ -1004,6 +1054,7 @@ impl DirectLlmClient {
             summary,
             turns,
             current_prompt,
+            self.config.prompt.strip_reasoning_content,
         );
         let model = self.config.get_model_with_default();
         let request = OpenAIRequest {
@@ -1122,6 +1173,7 @@ impl DirectLlmClient {
             summary,
             turns,
             current_prompt,
+            self.config.prompt.strip_reasoning_content,
         );
 
         let model = self.config.get_model_with_default();
@@ -1232,7 +1284,18 @@ impl LlmClient for DirectLlmClient {
             messages,
             temperature: Some(config.temperature),
             max_tokens: config.max_tokens.or(Some(self.config.max_tokens)),
-            tools: tools.map(|t| t.to_vec()),
+            tools: tools.map(|t| {
+                t.iter()
+                    .map(|tool| {
+                        if self.config.prompt.canonicalize_schemas {
+                            serde_json::from_str(&tool.canonical_json())
+                                .unwrap_or_else(|_| serde_json::to_value(tool).unwrap_or(serde_json::Value::Null))
+                        } else {
+                            serde_json::to_value(tool).unwrap_or(serde_json::Value::Null)
+                        }
+                    })
+                    .collect()
+            }),
             tool_choice: tools.and(Some(serde_json::json!("auto"))),
             enable_thinking: config.enable_thinking,
             stream: None,
@@ -1335,7 +1398,11 @@ impl LlmClient for DirectLlmClient {
             messages.push(ChatMessage::user(&turn.user));
             messages.push(ChatMessage::assistant_with_reasoning(
                 &turn.assistant,
-                turn.reasoning_content.clone(),
+                if self.config.prompt.strip_reasoning_content {
+                    None
+                } else {
+                    turn.reasoning_content.clone()
+                },
             ));
         }
         messages.push(ChatMessage::user(input.current_prompt));
@@ -1371,11 +1438,14 @@ impl LlmClient for DirectLlmClient {
                 anyhow::bail!("LLM 调用已被停止");
             }
             let prompt_chars = (system.len() + prompt.len()) as u64;
+            let system_hash =
+                crate::soul::actor::compute_system_hash(system);
             let stream = self.complete_streaming(system, prompt).await?;
             let tracking = super::streaming::UsageTrackingStream::new(
                 stream,
                 self.config.provider,
                 self.config.get_model_with_default(),
+                system_hash,
                 prompt_chars,
             );
             Ok(tracking.into_llm_stream())
@@ -1418,10 +1488,13 @@ impl LlmClient for DirectLlmClient {
                     current_prompt,
                 )
                 .await?;
+            let system_hash =
+                crate::soul::actor::compute_system_hash(system);
             let tracking = super::streaming::UsageTrackingStream::new(
                 stream,
                 self.config.provider,
                 self.config.get_model_with_default(),
+                system_hash,
                 prompt_chars,
             );
             Ok(tracking.into_llm_stream())

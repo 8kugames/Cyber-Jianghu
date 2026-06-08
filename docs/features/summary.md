@@ -218,6 +218,18 @@
   - [x] 支持通过 `--port 0` 自动探测并分配可用通信端口。
   - [x] `CYBER_JIANGHU_DATA_DIR` 环境变量：Docker 容器内数据持久化到挂载卷。
 
+### P0 性能
+
+- [x] **[DeepSeek 前缀缓存调优](../../crates/agent/docs/architecture/p0_perf/deepseek_prefix_cache.md)**: 针对 DeepSeek API ~33% 缓存命中率, 引入 3 阶段数据驱动调优, 目标 80%+.
+  - [x] **Phase 0 测量**: `compute_system_hash(system: &str) -> [u8; 32]` 纯函数 (SHA256); `record_token_usage` 扩展接受 system_hash; `HourBucketStats` / `ModelTokenStats` 新增 `system_hash_distribution: HashMap<[u8; 32], u64>` 持久化字段; `UsageTrackingStream` 携带 system_hash 字段; HTTP endpoint `GET /api/v1/metrics?system_hash=<hex64>` 按维度过滤
+  - [x] **D8 reasoning 剥离**: `build_conversation_messages` 加 `strip_reasoning: bool` 参数 (helper 路径); `complete_with_conversation_and_tools` inline 路径读 `self.config.prompt.strip_reasoning_content`; Cognitive/Claw 双模式共享路径同步
+  - [x] **D9 schema 规范化**: `canonicalize.rs` 模块 (sort object keys + sort `required` 数组递归); `ToolDefinition::canonical_json()` 字节级稳定; `send_chat_exchange` 按 `prompt.canonicalize_schemas` 条件调用
+  - [x] **数据驱动**: 所有阈值/开关由 `CYBER_JIANGHU_CACHE_DIAGNOSTICS_*` / `CYBER_JIANGHU_PROMPT_*` 环境变量驱动, 0 硬编码
+  - [x] **Cognitive/Claw 双模式**: 0 功能差分, 7 处 `record_token_usage` 调用点全覆盖
+  - [ ] **48h baseline 测量** (Phase 0 部署运维): 阻塞于 live 部署, 待灰度基础设施 issue 实现后推进
+  - [ ] **5% cohort 灰度**: 阻塞于 per-agent 灰度部署机制 ISSUE, 需先实现 `crc32(agent_uuid) % 20 == 0` cohort 选择 + selective restart 基础设施
+  - [ ] **E2E dual-path 完整测试**: 当前 1 unit test PASS + 2 `todo!()` 占位, 跟踪 `ISSUE-FOLLOWUP-MOCK-CAPTURE` (扩展 `MockLlmClient` 捕获 outbound request body)
+
 ---
 
 ## 待实装/优化功能 (Roadmap)
