@@ -326,7 +326,6 @@ mod tests {
             persona_info: PersonaInfo::default(),
             world_context: String::new(),
             tick_id: 10,
-            history_intents: vec![],
             attributes,
             available_item_ids: vec![],
             reachable_node_ids: vec![],
