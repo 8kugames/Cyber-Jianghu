@@ -31,10 +31,22 @@ where
     }
 }
 
+fn soul_from_stage(stage: &str) -> &str {
+    if stage == "ReflectorSoul" {
+        "ReflectorSoul"
+    } else {
+        "ActorSoul"
+    }
+}
+
 pub fn log_thinking(agent_name: &str, tick_id: i64, content: &str) {
     let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
     with_writer(|w| {
-        let _ = writeln!(w, "\n[{}] [{} - Tick {}]", timestamp, agent_name, tick_id);
+        let _ = writeln!(
+            w,
+            "\n[{}] [agent={}] [tick={}] [kind=thinking] [soul=ActorSoul]",
+            timestamp, agent_name, tick_id
+        );
         let _ = writeln!(w, "{}", content);
         let _ = writeln!(w, "{}", "-".repeat(60));
     });
@@ -45,24 +57,48 @@ pub fn log_llm(agent_name: &str, tick_id: i64, stage: &str, prompt: &str, respon
     with_writer(|w| {
         let _ = writeln!(
             w,
-            "\n[{}] [{} - Tick {}] LLM: {}",
-            timestamp, agent_name, tick_id, stage
+            "\n[{}] [agent={}] [tick={}] [kind=llm] [soul={}] [stage={}]",
+            timestamp,
+            agent_name,
+            tick_id,
+            soul_from_stage(stage),
+            stage
         );
-        let prompt_preview = if prompt.len() > 5000 {
-            let mut end = 5000;
-            while end > 0 && !prompt.is_char_boundary(end) {
-                end -= 1;
-            }
-            format!(
-                "{}...[truncated {} chars]",
-                &prompt[..end],
-                prompt.len() - end
-            )
-        } else {
-            prompt.to_string()
-        };
-        let _ = writeln!(w, "-- Prompt:\n{}", prompt_preview);
+        let _ = writeln!(w, "-- Prompt:\n{}", prompt);
         let _ = writeln!(w, "-- Response:\n{}", response);
         let _ = writeln!(w, "{}", "-".repeat(60));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_log_llm_writes_full_prompt_and_structured_tags() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        init_thinking_log(temp_dir.path()).expect("init thinking log");
+        let prompt = "甲".repeat(5001);
+
+        log_llm("裴无咎", 42, "Direct", &prompt, r#"{"ok":true}"#);
+
+        let log_path = fs::read_dir(temp_dir.path().join("logs"))
+            .expect("read logs dir")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("thinking"))
+            })
+            .expect("thinking log file");
+        let content = fs::read_to_string(log_path).expect("read thinking log");
+        assert!(content.contains("[agent=裴无咎]"));
+        assert!(content.contains("[tick=42]"));
+        assert!(content.contains("[kind=llm]"));
+        assert!(content.contains("[stage=Direct]"));
+        assert!(content.contains(&prompt));
+        assert!(!content.contains("[truncated"));
+    }
 }

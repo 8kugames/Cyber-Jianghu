@@ -56,7 +56,7 @@ character_generation:
       required: true
       min_chars: 2
       max_chars: 20
-      prompt_text: "name ({min_chars}-{max_chars} chars), {surname_constraint}"
+      prompt_text: "plain/realistic Chinese name (NOT Wuxia/martial-arts style, must be original), {min_chars}-{max_chars} chars, {surname_constraint}"
     - path: age
       type: integer
       required: true
@@ -94,7 +94,7 @@ character_generation:
     - path: language_style.tone
       type: enum
       required: true
-      options: ["豪迈", "温和", "冷漠", "狡黖", "文雅"]
+      options: ["豪迈", "温和", "冷漠", "狡黠", "文雅"]
     - path: language_style.speech_patterns
       type: enum_array
       required: true
