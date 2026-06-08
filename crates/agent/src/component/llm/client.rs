@@ -498,34 +498,6 @@ pub trait LlmClientExt: LlmClient {
     ) -> Result<D>;
 }
 
-/// 剥离 LLM 响应中的 thinking/reasoning 标签
-///
-/// 部分 LLM（如 MiniMax）在非流式调用时会在 JSON 前输出思考过程，
-/// 导致 `find('{')` 匹配到 thinking 内容中的 `{` 而非 JSON 的 `{`。
-fn strip_thinking_tags(response: &str) -> std::borrow::Cow<'_, str> {
-    // 匹配配对标签: <think_tag>...</think_tag>, <think attrs>...</think attrs>,
-    // <reasoning>...</reasoning>, <thought>...</thought>,
-    // <minimax:tool_call>...</minimax:tool_call>（MiniMax 专有 XML tool_call 格式）
-    let paired_re = regex::Regex::new(
-        r"(?is)<(?:think_tag|think|reasoning|thought|minimax:tool_call)[^>]*>.*?</(?:think_tag|think|reasoning|thought|minimax:tool_call)[^>]*>"
-    ).expect("static regex is valid");
-
-    let cleaned = paired_re.replace_all(response, "").to_string();
-
-    // 处理自闭合标签: <think/>, <think />, <think.../>, <think length="123"/>
-    let self_closing_re = regex::Regex::new(
-        r"(?i)<(?:think_tag|think|reasoning|thought|minimax:tool_call)[^>]*/>\s*",
-    )
-    .expect("static regex is valid");
-    let cleaned = self_closing_re.replace_all(&cleaned, "").to_string();
-
-    if cleaned == response {
-        std::borrow::Cow::Borrowed(response)
-    } else {
-        std::borrow::Cow::Owned(cleaned)
-    }
-}
-
 /// Normalize LLM 输出中错误转义的双花括号
 ///
 /// 部分 LLM（如 LongCat-2.0-Preview）将 JSON 结构中的 `{` 输出为 `{{`。
@@ -543,10 +515,6 @@ pub(super) fn normalize_double_braces(s: &str) -> std::borrow::Cow<'_, str> {
 /// 使用大括号计数找第一个完整 JSON 对象，避免 LLM 在 JSON 后输出额外内容
 /// 导致 "trailing characters" 解析错误（如 MiniMax 输出多行 JSON）。
 fn extract_json_str(response: &str) -> std::borrow::Cow<'_, str> {
-    // 先剥离 thinking tags
-    let cleaned = strip_thinking_tags(response);
-    let response = cleaned.as_ref();
-
     let normalized = normalize_double_braces(response);
     let response = normalized.as_ref();
 
@@ -849,10 +817,15 @@ fn is_truncation_error(e: &anyhow::Error) -> bool {
     })
 }
 
-/// 解析 LLM 响应为结构化类型（单遍修复 → serde 解析）
+/// 解析 LLM 响应为结构化类型（模型适配 → JSON 提取 → 修复 → serde 解析）
 fn parse_json_response<D: DeserializeOwned + Send>(response: &str) -> Result<D> {
-    let raw_json = extract_json_str(response);
+    let normalized = super::model_adaptation::normalize_llm_content(response);
+    let raw_json = extract_json_str(normalized.as_ref());
     let json_str = repair_llm_json(&raw_json);
+
+    if json_str.trim().is_empty() {
+        anyhow::bail!("LLM response content is empty after extraction");
+    }
 
     // 直接解析
     if let Ok(parsed) = serde_json::from_str::<D>(&json_str) {
@@ -1220,8 +1193,11 @@ pub fn classify_llm_error(error: &anyhow::Error) -> (ErrorAction, &'static str) 
         return (ErrorAction::FallbackAndDisable, "internal_server_error");
     }
 
-    // ── 空响应: 模型偶尔返回 null ────────────────────────────────
-    if msg.contains("response content is empty") {
+    // ── 空响应: 模型偶尔返回空 body / 空 content ────────────────
+    if msg.contains("empty response body")
+        || msg.contains("response content is empty")
+        || msg.contains("returned empty response")
+    {
         return (ErrorAction::FallbackAndDisable, "empty_response");
     }
 
@@ -1968,114 +1944,6 @@ mod tests {
     fn test_find_json_with_prefix() {
         let s = r#"some text {"a":1}"#;
         assert_eq!(find_first_json_end(s), Some(16));
-    }
-
-    // ========================================================================
-    // strip_thinking_tags tests
-    // ========================================================================
-
-    #[test]
-    fn test_strip_think_tag() {
-        let input = "<think_tag>reasoning</think_tag>{\"a\":1}";
-        let result = strip_thinking_tags(input);
-        assert_eq!(result.as_ref(), "{\"a\":1}");
-    }
-
-    #[test]
-    fn test_strip_reasoning_tag() {
-        let input = "<reasoning>let me think...</reasoning>{\"result\":42}";
-        let result = strip_thinking_tags(input);
-        assert_eq!(result.as_ref(), "{\"result\":42}");
-    }
-
-    #[test]
-    fn test_strip_no_tags() {
-        let input = "{\"a\":1}";
-        let result = strip_thinking_tags(input);
-        assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
-        assert_eq!(result.as_ref(), "{\"a\":1}");
-    }
-
-    #[test]
-    fn test_strip_empty_response() {
-        let input = "";
-        let result = strip_thinking_tags(input);
-        assert!(result.is_empty());
-    }
-
-    // MiniMax-M2.7 实际输出格式
-    #[test]
-    fn test_strip_minimax_think_with_attrs() {
-        let input = r#"<think.../>
-思考过程...
-
-{"action_type": "进食", "action_data": {"item_id": "馒头"}, "speech_content": ""}"#;
-        let result = strip_thinking_tags(input);
-        assert!(
-            result.contains(r#"{"action_type": "进食"#),
-            "应保留 JSON，实际: {}",
-            result
-        );
-        assert!(
-            !result.contains("<think"),
-            "应移除 think 标签，实际: {}",
-            result
-        );
-    }
-
-    #[test]
-    fn test_strip_think_self_closing() {
-        let input = "<think/>{\"a\":1}";
-        let result = strip_thinking_tags(input);
-        assert_eq!(result.as_ref(), "{\"a\":1}");
-    }
-
-    #[test]
-    fn test_strip_think_with_spaces() {
-        let input = "<think />{\"a\":1}";
-        let result = strip_thinking_tags(input);
-        assert_eq!(result.as_ref(), "{\"a\":1}");
-    }
-
-    #[test]
-    fn test_strip_thought_tag() {
-        let input = "<thought>思考中...</thought>{\"a\":1}";
-        let result = strip_thinking_tags(input);
-        assert_eq!(result.as_ref(), "{\"a\":1}");
-    }
-
-    #[test]
-    fn test_strip_minimax_full_response() {
-        // 完整 MiniMax 输出：self-closing think 后跟思考文字和 JSON
-        // <think.../> 是自闭合标签，后面的思考文字是普通文本（非标签包裹）
-        // extract_json_str 会通过 find_first_json_end 定位到 JSON
-        let input = "<think.../>\n考虑拾取馒头充饥\n\n{\"action_type\": \"drink\", \"action_data\": {\"item_id\": \"水\"}, \"speech_content\": \"\"}";
-        let result = strip_thinking_tags(input);
-        // 自闭合标签被移除，但思考文本仍在（非标签包裹无法剥离）
-        assert!(!result.contains("<think"), "think 标签应被移除");
-        assert!(result.contains("\"action_type\": \"drink\""), "JSON 应保留");
-    }
-
-    #[test]
-    fn test_strip_minimax_think_paired_with_attrs() {
-        // MiniMax M2.7 配对 think 标签：opening/closing 均含属性
-        let input = r#"<think HTaming>分析角色特征...</think HTaming>{"name": "测试", "age": 25}"#;
-        let result = strip_thinking_tags(input);
-        assert!(
-            !result.contains("<think"),
-            "think tag should be removed: {}",
-            result
-        );
-        assert!(
-            !result.contains("HTaming"),
-            "think content should be removed: {}",
-            result
-        );
-        assert!(
-            result.contains(r#""name": "测试""#),
-            "JSON should be preserved: {}",
-            result
-        );
     }
 
     // ========================================================================
