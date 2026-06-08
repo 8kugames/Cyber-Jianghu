@@ -134,3 +134,4 @@ flamegraph.svg
 *.so
 *.dylib
 .superpowers/
+doc/
