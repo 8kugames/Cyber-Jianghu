@@ -294,7 +294,7 @@ pub(crate) async fn update_llm_config_handler(
         },
     )
     .with_model(&req.actor.model)
-    .with_context_window_tokens(req.actor.context_window_tokens.unwrap_or(32000));
+    .with_context_window_tokens(req.actor.context_window_tokens.unwrap_or(32768));
 
     let test_config = if let Some(ref url) = req.actor.base_url {
         test_config.with_base_url(url)
