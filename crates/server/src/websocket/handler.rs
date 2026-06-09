@@ -1181,8 +1181,7 @@ async fn handle_intent(
                 Ok(id) => id,
                 Err(e) => {
                     tracing::warn!("无法解析 target_agent_id: {} ({})", target_id_str, e);
-                    return reject_and_notify(format!("无效的 target_agent_id: {}", e))
-                        .await;
+                    return reject_and_notify(format!("无效的 target_agent_id: {}", e)).await;
                 }
             };
 
