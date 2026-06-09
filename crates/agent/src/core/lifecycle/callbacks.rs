@@ -127,6 +127,33 @@ impl super::super::Agent {
                 self.character_name()
             );
         }
+
+        // narrative_config 热更新回调
+        let api_state_for_nc = self.http_api_state.clone();
+        self.client
+            .set_narrative_config_callback(Arc::new(
+                move |nc: cyber_jianghu_protocol::NarrativeConfig, hash: Option<String>| {
+                    info!(
+                        "Received narrative_config ConfigUpdate: version={}",
+                        nc.version
+                    );
+                    if let Some(ref api_state) = api_state_for_nc {
+                        // 用 tokio::spawn 避免在同步回调中 await
+                        let nc = nc.clone();
+                        let hash = hash.clone();
+                        let api_state = api_state.clone();
+                        tokio::spawn(async move {
+                            *api_state.narrative_config.write().await = Some(nc.clone());
+                            if let Err(e) =
+                                crate::config::save_narrative_config_to_disk(&nc, hash.as_deref())
+                            {
+                                warn!("热更新保存 narrative_config 失败: {}", e);
+                            }
+                        });
+                    }
+                },
+            ))
+            .await;
     }
 
     /// 构建并设置 Server 消息回调（链式：lifecycle 处理 + binary 回调透传）

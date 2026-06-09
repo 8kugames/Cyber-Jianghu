@@ -72,8 +72,24 @@ impl super::Agent {
                             world_building_rules,
                             registered_name,
                             is_alive,
+                            narrative_config,
+                            narrative_config_hash,
                         ))) => {
                             info!("重连后注册确认: agent_id={}, alive={}", agent_id, is_alive);
+
+                            // 注入 narrative_config（重连时从 Registered 刷新）
+                            if let Some(ref nc) = narrative_config
+                                && let Some(ref api_state) = self.http_api_state
+                            {
+                                *api_state.narrative_config.write().await = Some(nc.clone());
+                                if let Err(e) = crate::config::save_narrative_config_to_disk(
+                                    nc,
+                                    narrative_config_hash.as_deref(),
+                                ) {
+                                    warn!("重连后保存 narrative_config 到磁盘失败: {}", e);
+                                }
+                                info!("重连后刷新 narrative_config");
+                            }
 
                             // 更新 agent 名称和人设（与 lifecycle 注册确认逻辑对齐）
                             if let Some(ref name) = registered_name {

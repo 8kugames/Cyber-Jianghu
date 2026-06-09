@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 use cyber_jianghu_protocol::{CalendarConfig, Entity, WorldTime, game_day_from_world_time};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::models::Intent;
@@ -183,6 +183,12 @@ impl super::super::Agent {
         let Some(ref device_cfg) = self.device_config else {
             return;
         };
+
+        // WS 后台线程已成功投递 prompt_templates 时跳过 HTTP 拉取
+        if self.client.is_prompt_template_received().await {
+            debug!("prompt_templates 已通过 WS ConfigUpdate 投递，跳过 HTTP 拉取");
+            return;
+        }
 
         let http_url = self.config.server.http_url.clone();
         let device_id = device_cfg.device_id;

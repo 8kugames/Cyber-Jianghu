@@ -62,6 +62,8 @@ struct RegistrationData {
     world_building_rules: Option<WorldBuildingRules>,
     agent_name: Option<String>,
     is_alive: bool,
+    narrative_config: Option<cyber_jianghu_protocol::NarrativeConfig>,
+    narrative_config_hash: Option<String>,
 }
 
 /// 实时意图执行结果
@@ -76,6 +78,10 @@ pub struct ExecutionResultData {
 
 /// 技能配置更新回调类型
 pub type SkillUpdateCallback = Arc<dyn Fn(Vec<SkillContent>, Vec<String>) + Send + Sync>;
+
+/// 叙事化配置更新回调类型
+type NarrativeConfigCallback =
+    Arc<dyn Fn(cyber_jianghu_protocol::NarrativeConfig, Option<String>) + Send + Sync>;
 
 /// 连接状态
 struct ConnectionState {
@@ -105,10 +111,15 @@ struct ConnectionState {
         Option<Arc<dyn Fn(cyber_jianghu_protocol::PromptTemplateConfig) + Send + Sync>>,
     /// 上次收到的 prompt_templates content_hash（用于 skip-optimization）
     prompt_template_hash: Option<String>,
+    /// WS 后台线程是否已成功投递 prompt_templates（用于 HTTP 拉取条件跳过）
+    prompt_template_received: bool,
     /// 事件特质规则更新回调（ConfigUpdate with config_type="persona_event_rules"）
     /// 参数: Vec<TraitMappingRule>
     persona_event_rules_callback:
         Option<Arc<dyn Fn(Vec<crate::component::persona::TraitMappingRule>) + Send + Sync>>,
+    /// 叙事化配置更新回调（ConfigUpdate with config_type="narrative_config"）
+    /// 参数: (NarrativeConfig, Option<content_hash>)
+    narrative_config_callback: Option<NarrativeConfigCallback>,
 
     // ---- 后台任务架构 ----
     /// 后台 WebSocket 任务句柄
@@ -148,7 +159,9 @@ impl WebSocketClient {
                 skill_update_callback: None,
                 prompt_template_callback: None,
                 prompt_template_hash: None,
+                prompt_template_received: false,
                 persona_event_rules_callback: None,
+                narrative_config_callback: None,
                 reader_task: None,
                 shutdown_tx: None,
                 intent_tx: None,
@@ -367,8 +380,15 @@ impl WebSocketClient {
         });
     }
 
+    /// 检查 WS 后台线程是否已成功投递 prompt_templates
+    pub fn is_prompt_template_received(&self) -> bool {
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async { self.state.read().await.prompt_template_received })
+        })
+    }
+
     /// 设置事件特质规则更新回调（ConfigUpdate with config_type="persona_event_rules"）
-    /// 参数: Vec<TraitMappingRule>
     pub fn set_persona_event_rules_callback(
         &self,
         callback: Arc<dyn Fn(Vec<crate::component::persona::TraitMappingRule>) + Send + Sync>,
@@ -382,12 +402,24 @@ impl WebSocketClient {
         });
     }
 
+    /// 设置叙事化配置更新回调（ConfigUpdate with config_type="narrative_config"）
+    pub fn set_narrative_config_callback(&self, callback: NarrativeConfigCallback) {
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let mut state = self.state.write().await;
+                state.narrative_config_callback = Some(callback);
+            });
+        });
+    }
+
     /// 等待注册响应
     ///
     /// 返回值：
-    /// - `Ok(Some((agent_id, game_rules, world_building_rules, agent_name, is_alive)))` - 有角色（活或死）
+    /// - `Ok(Some((agent_id, game_rules, world_building_rules, agent_name, is_alive, narrative_config, narrative_config_hash)))` - 有角色
     /// - `Ok(None)` - 无角色，等待注册（agent_id 为 nil）
     /// - `Err(e)` - 连接错误
+    #[allow(clippy::type_complexity)]
     pub async fn wait_for_registration(
         &self,
     ) -> Result<
@@ -397,6 +429,8 @@ impl WebSocketClient {
             Option<WorldBuildingRules>,
             Option<String>,
             bool,
+            Option<cyber_jianghu_protocol::NarrativeConfig>,
+            Option<String>,
         )>,
     > {
         let mut rx = {
@@ -434,6 +468,8 @@ impl WebSocketClient {
                         data.world_building_rules.clone(),
                         data.agent_name.clone(),
                         data.is_alive,
+                        data.narrative_config.clone(),
+                        data.narrative_config_hash.clone(),
                     )));
                 }
                 None => {} // 尚未收到注册消息
@@ -721,7 +757,7 @@ async fn websocket_background_task(
                 match msg_result {
                     Some(Ok(Message::Text(text))) => {
                         // 克隆回调（避免在处理中持有锁）
-                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, skill_update_cb, prompt_template_cb, persona_event_rules_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
+                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, skill_update_cb, prompt_template_cb, persona_event_rules_cb, narrative_config_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
                             let state_guard = state.read().await;
                             (
                                 state_guard.game_rules_callback.clone(),
@@ -731,6 +767,7 @@ async fn websocket_background_task(
                                 state_guard.skill_update_callback.clone(),
                                 state_guard.prompt_template_callback.clone(),
                                 state_guard.persona_event_rules_callback.clone(),
+                                state_guard.narrative_config_callback.clone(),
                                 state_guard.server_msg_callback.clone(),
                                 state_guard.worldstate_tx.clone(),
                                 state_guard.registered_tx.clone(),
@@ -780,8 +817,9 @@ async fn websocket_background_task(
                                             warn!("Failed to parse skills content from ConfigUpdate");
                                         }
                                     // 处理 actions 配置更新
+                                    // 当前仅支持 full update，增量更新暂未实现
+                                    // actions 通过 action_update_callback 透传整个 ServerMessage
                                     } else if config_type == "actions" {
-                                        // actions 仍通过 action_update_callback 处理（接收整个 ServerMessage）
                                         if let Some(ref cb) = action_update_cb {
                                             cb(msg.clone());
                                         }
@@ -832,6 +870,11 @@ async fn websocket_background_task(
                                                 state_guard.prompt_template_hash = Some(hash.clone());
                                             }
                                             if let Ok(config) = cyber_jianghu_protocol::PromptTemplateConfig::from_json_value(content.clone()) {
+                                                // 标记 WS 已成功投递，HTTP 拉取可跳过
+                                                {
+                                                    let mut state_guard = state.write().await;
+                                                    state_guard.prompt_template_received = true;
+                                                }
                                                 if let Some(ref cb) = prompt_template_cb {
                                                     cb(config);
                                                 }
@@ -859,6 +902,15 @@ async fn websocket_background_task(
                                                     e
                                                 );
                                             }
+                                        }
+                                    // 处理 narrative_config 配置更新
+                                    } else if config_type == "narrative_config" {
+                                        if let Ok(nc) = serde_json::from_value::<cyber_jianghu_protocol::NarrativeConfig>(content.clone()) {
+                                            if let Some(ref cb) = narrative_config_cb {
+                                                cb(nc, content_hash.clone());
+                                            }
+                                        } else {
+                                            warn!("Failed to parse narrative_config content from ConfigUpdate");
                                         }
                                     }
                                 }
@@ -933,6 +985,8 @@ async fn websocket_background_task(
                                 world_building_rules,
                                 is_alive,
                                 agent_name,
+                                narrative_config,
+                                narrative_config_hash,
                             }) => {
                                 info!("Background: Registered agent_id={}, alive={}", agent_id, is_alive);
                                 // 保存注册数据到 watch channel
@@ -943,6 +997,8 @@ async fn websocket_background_task(
                                         world_building_rules,
                                         agent_name,
                                         is_alive,
+                                        narrative_config,
+                                        narrative_config_hash,
                                     }));
                                 }
                             }
@@ -1187,13 +1243,24 @@ impl AgentClient {
         client.set_prompt_template_callback(callback);
     }
 
-    /// 设置事件特质规则更新回调（ConfigUpdate with config_type="persona_event_rules"）
+    /// 检查 WS 后台线程是否已成功投递 prompt_templates
+    pub async fn is_prompt_template_received(&self) -> bool {
+        self.client.read().await.is_prompt_template_received()
+    }
+
+    /// 设置事件特质规则更新回调（ConfigUpdate with config_type="persona_event_rules")
     pub async fn set_persona_event_rules_callback(
         &self,
         callback: Arc<dyn Fn(Vec<crate::component::persona::TraitMappingRule>) + Send + Sync>,
     ) {
         let client = self.client.read().await;
         client.set_persona_event_rules_callback(callback);
+    }
+
+    /// 设置叙事化配置更新回调（ConfigUpdate with config_type="narrative_config"）
+    pub async fn set_narrative_config_callback(&self, callback: NarrativeConfigCallback) {
+        let client = self.client.read().await;
+        client.set_narrative_config_callback(callback);
     }
 
     /// 设置 Server 消息透传回调（用于 OpenClaw 集成）
@@ -1217,11 +1284,7 @@ impl AgentClient {
     }
 
     /// 等待注册响应
-    ///
-    /// 返回值：
-    /// - `Ok(Some((agent_id, game_rules, world_building_rules, agent_name, is_alive)))` - 有角色（活或死）
-    /// - `Ok(None)` - 无角色，等待注册（agent_id 为 nil）
-    /// - `Err(e)` - 连接错误
+    #[allow(clippy::type_complexity)]
     pub async fn wait_for_registration(
         &self,
     ) -> Result<
@@ -1231,6 +1294,8 @@ impl AgentClient {
             Option<WorldBuildingRules>,
             Option<String>,
             bool,
+            Option<cyber_jianghu_protocol::NarrativeConfig>,
+            Option<String>,
         )>,
     > {
         let client = self.client.read().await;
