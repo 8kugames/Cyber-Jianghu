@@ -51,7 +51,7 @@
   - Agent 可单次提交原子意图队列 (`subsequent_intents`)，Server 顺序独立执行每个原子意图，一旦某环节失败，仅回滚当前失败的意图并打断后续流程，已成功的意图保持成功。
 - **Token 极致优化**
   - **DeltaEngine 与 AttentionController**: 对比本地 WorldStateStore 增量，提取 `FocusSummary`，替代全量世界状态注入 Prompt。
-  - **DeepSeek 缓存调优**: 基于 `system_hash` 跟踪、剥离推理过程 (D8)、JSON Schema 规范化 (D9)，最大化 Prefix Cache 命中。
+  - **DeepSeek 缓存调优**: 基于 `system_hash` 跟踪、剥离推理过程 (D8, 默认关闭，通过 `CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT` 启用)、JSON Schema 规范化 (D9)，最大化 Prefix Cache 命中。
 - **元认知行为框架 (Procedural Skills)**
   - 基于经验阈值的被动技能系统。掌握 "进退之道" 等 AI 思考模型后，经由地魂 `skill_view` 工具供 LLM 按需查阅。
 - **社交网络自动迁移**

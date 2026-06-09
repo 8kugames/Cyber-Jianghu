@@ -192,7 +192,7 @@ ActorSoul (人魂) → ReflectorSoul (天魂)
 
 #### Token Optimization & Performance
 - **AttentionController & DeltaEngine**: Lean prompts via WorldStateStore diffing and two-stage focus summarization
-- **DeepSeek Cache Tuning**: system_hash metric tracking, reasoning stripping (D8), and schema canonicalization (D9)
+- **DeepSeek Cache Tuning**: system_hash metric tracking, reasoning stripping (D8, 默认关闭，env var `CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT` 启用), and schema canonicalization (D9)
 
 ### Data-Driven Design
 

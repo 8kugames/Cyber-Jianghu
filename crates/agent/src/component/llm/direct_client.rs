@@ -214,7 +214,7 @@ impl Default for PromptConfig {
         Self {
             strip_reasoning_content: crate::config::env_or(
                 "CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT",
-                true,
+                false,
             ),
             canonicalize_schemas: crate::config::env_or(
                 "CYBER_JIANGHU_PROMPT_CANONICALIZE_SCHEMAS",
