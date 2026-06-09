@@ -371,7 +371,11 @@ impl super::CognitiveEngine {
         if !world_state.entities.is_empty() {
             ws_parts.push("\n## 附近的人".to_string());
             for entity in &world_state.entities {
-                ws_parts.push(format!("- {} (UUID: {})", entity.name, entity.id));
+                ws_parts.push(format!(
+                    "- {} (ID: {})",
+                    entity.name,
+                    cyber_jianghu_protocol::short_id(&entity.id)
+                ));
                 for action in &entity.recent_actions {
                     let content_hint = action
                         .content
