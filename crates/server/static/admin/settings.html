@@ -111,7 +111,8 @@
                                 placeholder="http://localhost:11434/v1"
                             />
                             <p class="hint">
-                                Ollama 默认: <code>http://localhost:11434/v1</code>
+                                Ollama 默认:
+                                <code>http://localhost:11434/v1</code>
                             </p>
                         </div>
 
@@ -179,7 +180,7 @@
                                     min="4096"
                                     max="1048576"
                                     step="1024"
-                                    value="32000"
+                                    value="32768"
                                 />
                                 <p class="hint">模型上下文窗口大小 (tokens)</p>
                             </div>
@@ -264,18 +265,26 @@
                 document.getElementById("llm-max-tokens").value =
                     config.data?.max_tokens ?? 4096;
                 document.getElementById("llm-context-window").value =
-                    config.data?.context_window_tokens ?? 32000;
+                    config.data?.context_window_tokens ?? 32768;
                 updateProviderHint();
                 updateFormState(enabled);
             }
 
             function maskApiKey(key) {
                 if (!key || key.length < 4) return "••••••••";
-                return key.substring(0, 2) + "••••••••" + key.substring(key.length - 2);
+                return (
+                    key.substring(0, 2) +
+                    "••••••••" +
+                    key.substring(key.length - 2)
+                );
             }
 
             function isMasked(value) {
-                return value.includes("••••") || value === "" || value === "已填写（修改请输入新值）";
+                return (
+                    value.includes("••••") ||
+                    value === "" ||
+                    value === "已填写（修改请输入新值）"
+                );
             }
 
             function updateFormState(enabled) {
@@ -302,14 +311,17 @@
                 btn.disabled = true;
                 btn.textContent = "保存中...";
 
-                const apiKeyInput = document.getElementById("llm-api-key").value;
+                const apiKeyInput =
+                    document.getElementById("llm-api-key").value;
                 const apiKey = isMasked(apiKeyInput) ? "" : apiKeyInput;
 
                 const config = {
                     version: "0.0.1",
                     description: "LLM 配置",
                     meta: {
-                        created_at: originalConfig?.meta?.created_at ?? new Date().toISOString().split("T")[0],
+                        created_at:
+                            originalConfig?.meta?.created_at ??
+                            new Date().toISOString().split("T")[0],
                         author: originalConfig?.meta?.author ?? "Cyber-Jianghu",
                     },
                     data: {
@@ -341,7 +353,8 @@
                         body: JSON.stringify(config),
                     });
 
-                    const result = await res.json();
+                    const text = await res.text();
+                    const result = text ? JSON.parse(text) : {};
                     if (res.ok) {
                         showResult("配置已保存", true);
                     } else {
@@ -369,7 +382,8 @@
                 .addEventListener("change", async function () {
                     const enabled = this.checked;
                     try {
-                        const res = await apiFetch(API.BASE + "/config/llm/enabled",
+                        const res = await apiFetch(
+                            API.BASE + "/config/llm/enabled",
                             {
                                 method: "POST",
                                 headers: {
@@ -421,7 +435,9 @@
 
             async function loadTokenStats() {
                 try {
-                    const res = await apiFetch(API.BASE + "/chronicles/llm-stats");
+                    const res = await apiFetch(
+                        API.BASE + "/chronicles/llm-stats",
+                    );
                     if (res.ok) {
                         const data = await res.json();
                         document.getElementById(
