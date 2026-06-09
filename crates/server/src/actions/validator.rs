@@ -416,6 +416,15 @@ async fn validate_teach_recipe(
             reason: "不能向自己传授配方".to_string(),
         });
     }
+    let candidates = vec![agent_state.agent_id];
+    if let Some(target_uuid) =
+        cyber_jianghu_protocol::resolve_agent_id_lenient(target_id_str, &candidates)
+        && target_uuid == agent_state.agent_id
+    {
+        return Err(GameError::InvalidActionData {
+            reason: "不能向自己传授配方".to_string(),
+        });
+    }
 
     // 传授者必须知道该配方
     let known = crate::db::get_known_recipe_ids(db_pool, agent_state.agent_id)
@@ -430,7 +439,6 @@ async fn validate_teach_recipe(
     Ok(())
 }
 
-/// 验证目标 Agent 存在
 fn validate_target_exists(intent: &Intent, all_states: &[AgentState]) -> Result<(), GameError> {
     let target_id_str =
         get_field_string(&intent.action_data, "target_agent_id").ok_or_else(|| {
@@ -439,9 +447,13 @@ fn validate_target_exists(intent: &Intent, all_states: &[AgentState]) -> Result<
             }
         })?;
 
-    let target_id = Uuid::parse_str(&target_id_str).map_err(|_| GameError::InvalidActionData {
-        reason: format!("无效的 target_agent_id: {}", target_id_str),
-    })?;
+    let candidates: Vec<Uuid> = all_states.iter().map(|s| s.agent_id).collect();
+    let target_id =
+        cyber_jianghu_protocol::resolve_agent_id(&target_id_str, &candidates).map_err(|e| {
+            GameError::InvalidActionData {
+                reason: format!("无效的 target_agent_id: {}", e),
+            }
+        })?;
 
     let target_exists = all_states.iter().any(|s| s.agent_id == target_id);
 
@@ -461,9 +473,13 @@ fn validate_target_alive(intent: &Intent, all_states: &[AgentState]) -> Result<(
             }
         })?;
 
-    let target_id = Uuid::parse_str(&target_id_str).map_err(|_| GameError::InvalidActionData {
-        reason: format!("无效的 target_agent_id: {}", target_id_str),
-    })?;
+    let candidates: Vec<Uuid> = all_states.iter().map(|s| s.agent_id).collect();
+    let target_id =
+        cyber_jianghu_protocol::resolve_agent_id(&target_id_str, &candidates).map_err(|e| {
+            GameError::InvalidActionData {
+                reason: format!("无效的 target_agent_id: {}", e),
+            }
+        })?;
 
     let target_state = all_states
         .iter()
@@ -490,9 +506,13 @@ fn validate_target_colocated(
             }
         })?;
 
-    let target_id = Uuid::parse_str(&target_id_str).map_err(|_| GameError::InvalidActionData {
-        reason: format!("无效的 target_agent_id: {}", target_id_str),
-    })?;
+    let candidates: Vec<Uuid> = all_states.iter().map(|s| s.agent_id).collect();
+    let target_id =
+        cyber_jianghu_protocol::resolve_agent_id(&target_id_str, &candidates).map_err(|e| {
+            GameError::InvalidActionData {
+                reason: format!("无效的 target_agent_id: {}", e),
+            }
+        })?;
 
     let target_state = all_states
         .iter()

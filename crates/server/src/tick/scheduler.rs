@@ -82,6 +82,9 @@ pub struct TickScheduler {
     /// 上次加载的 skills/ 目录修改时间
     last_skills_mtime: Option<std::time::SystemTime>,
 
+    /// 上次加载的 narrative_config.yaml 修改时间
+    last_narrative_config_mtime: Option<std::time::SystemTime>,
+
     /// 上次加载的 game_rules.yaml 修改时间
     last_game_rules_mtime: Option<std::time::SystemTime>,
 
@@ -126,6 +129,7 @@ impl TickScheduler {
             accepting_tick_id,
             last_actions_mtime: None,
             last_skills_mtime: None,
+            last_narrative_config_mtime: None,
             last_game_rules_mtime: None,
             last_world_building_rules_mtime: None,
             last_prompt_templates_mtime: None,
@@ -578,6 +582,65 @@ impl TickScheduler {
         Ok(())
     }
 
+    /// 检查 narrative_config.yaml 是否变更，若变更则重新加载并广播
+    async fn check_and_reload_narrative_config(&mut self) -> Result<()> {
+        let config_dir = get_config_dir();
+        let nc_path = config_dir.join("narrative_config.yaml");
+
+        if !nc_path.exists() {
+            return Ok(());
+        }
+
+        let metadata = match fs::metadata(&nc_path) {
+            Ok(m) => m,
+            Err(_) => return Ok(()),
+        };
+
+        let modified = match metadata.modified() {
+            Ok(t) => t,
+            Err(_) => return Ok(()),
+        };
+
+        let should_reload = match self.last_narrative_config_mtime {
+            Some(last) => modified > last,
+            None => true,
+        };
+
+        if !should_reload {
+            return Ok(());
+        }
+
+        self.last_narrative_config_mtime = Some(modified);
+
+        // 从 GameData 重新加载 narrative_config（在块内克隆以避免跨 await 持有锁）
+        let (nc, nc_hash) = {
+            let gd = self.game_data_cache.get();
+            let nc = gd.narrative.clone();
+            let nc_hash = serde_json::to_vec(&nc)
+                .ok()
+                .map(|bytes| format!("{:x}", sha2::Sha256::digest(&bytes)));
+            (nc, nc_hash)
+        };
+
+        let config_update = ServerMessage::ConfigUpdate {
+            config_type: "narrative_config".to_string(),
+            update_type: "full".to_string(),
+            version: "1.0".to_string(),
+            content: serde_json::to_value(&nc).unwrap_or_default(),
+            content_hash: nc_hash,
+            updated_items: vec![],
+            removed_items: vec![],
+        };
+
+        if let Err(e) = broadcast_config_update(config_update, &self.connection_manager).await {
+            warn!("广播 narrative_config 更新失败: {}", e);
+        } else {
+            info!("narrative_config 热重载广播完成");
+        }
+
+        Ok(())
+    }
+
     /// Vendor 自动补货：从 DB 读取补货规则，低于 threshold 时触发，扣除银两
     async fn refill_vendors(&mut self, tick_id: i64) -> Result<()> {
         let refill_rules = crate::db::get_all_enabled_vendor_refills(&self.db_pool)
@@ -778,6 +841,11 @@ impl TickScheduler {
             // 热重载 skills/
             if let Err(e) = self.check_and_reload_skills().await {
                 warn!("技能热重载检查失败: {}", e);
+            }
+
+            // 热重载 narrative_config.yaml
+            if let Err(e) = self.check_and_reload_narrative_config().await {
+                warn!("叙事化配置热重载检查失败: {}", e);
             }
 
             interval.tick().await;
