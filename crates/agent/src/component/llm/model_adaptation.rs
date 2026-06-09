@@ -8,6 +8,8 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+// ── 标准 XML 标签 (think, reasoning 等) ──
+
 static PAIRED_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?is)<(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call)[^>]*>.*?</(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call)[^>]*>"
@@ -29,6 +31,24 @@ static CLOSING_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("closing tag regex valid")
 });
 
+// ── DeepSeek DSML 标签 (全角竖线 ｜ U+FF5C) ──
+// 格式: <｜｜DSML｜｜tag_name>...</｜｜DSML｜｜tag_name>
+// 也兼容半角竖线 | 的变体
+
+/// DSML 标签对（含内容移除）：匹配完整 DSML 块
+static DSML_PAIRED_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?is)</?[｜|]{2}DSML[｜|]{2}[^>]*>.*?</?[｜|]{2}DSML[｜|]{2}[^>]*>"#)
+        .expect("DSML paired tag regex valid")
+});
+
+/// DSML 单个标签：`<｜｜DSML｜｜...>` 或 `</｜｜DSML｜｜...>`
+static DSML_TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)</?[｜|]{2}DSML[｜|]{2}[^>]*>\s*"#).expect("DSML single tag regex valid")
+});
+
+/// DSML 标签的快速检测子串（全角版本 — 实际输出格式）
+const DSML_MARKER: &str = "\u{ff5c}\u{ff5c}DSML\u{ff5c}\u{ff5c}";
+
 const TAG_NAMES: &[&str] = &[
     "think_tag",
     "think",
@@ -41,13 +61,30 @@ const TAG_NAMES: &[&str] = &[
 /// 规范化 LLM 响应内容中的模型专有格式
 ///
 /// 策略：
-/// 1. 先尝试移除标签及其内容（常见情况：JSON 在标签之后）
-/// 2. 若结果为空，则仅移除标签保留内容（罕见情况：JSON 被包裹在标签内）
+/// 1. DeepSeek DSML 标签剥离（全角竖线格式，优先处理）
+/// 2. 标准 thinking 标签剥离
+/// 3. 若标签移除后为空，尝试保留标签内内容
 pub(crate) fn normalize_llm_content(content: &str) -> Cow<'_, str> {
     if !content.contains('<') {
         return Cow::Borrowed(content);
     }
 
+    // Phase 1: DeepSeek DSML 标签剥离
+    let after_dsml = strip_dsml_tags(content);
+    let content = match &after_dsml {
+        Cow::Owned(s) => s.as_str(),
+        Cow::Borrowed(_) => return handle_standard_tags(content),
+    };
+
+    // DSML 剥离后，继续检查标准标签
+    match handle_standard_tags(content) {
+        Cow::Owned(s) => Cow::Owned(s),
+        Cow::Borrowed(_) => after_dsml,
+    }
+}
+
+/// 处理标准 thinking/reasoning 标签
+fn handle_standard_tags(content: &str) -> Cow<'_, str> {
     let has_any_tag = TAG_NAMES
         .iter()
         .any(|tag| content.contains(&format!("<{}", tag)));
@@ -68,6 +105,36 @@ pub(crate) fn normalize_llm_content(content: &str) -> Cow<'_, str> {
     }
 
     Cow::Borrowed(content)
+}
+
+/// 剥离 DeepSeek DSML 标签（<｜｜DSML｜｜...> 格式）
+///
+/// DSML 标签是 DeepSeek v4 在 tool calling 时输出的非标准格式。
+/// 标签使用全角竖线 ｜ (U+FF5C) 作为分隔符。
+fn strip_dsml_tags(content: &str) -> Cow<'_, str> {
+    // 快速路径：不含 DSML 标记
+    if !content.contains(DSML_MARKER) && !content.contains("||DSML||") {
+        return Cow::Borrowed(content);
+    }
+
+    // 先尝试移除 DSML 标签对及其内容
+    let stripped = DSML_PAIRED_RE.replace_all(content, "");
+    let result = DSML_TAG_RE.replace_all(&stripped, "");
+
+    if result.trim().is_empty() {
+        // 移除标签后内容为空 — 尝试仅移除标签保留内容
+        let preserved = DSML_TAG_RE.replace_all(content, "");
+        if preserved != content {
+            return Cow::Owned(preserved.into_owned());
+        }
+        return Cow::Borrowed(content);
+    }
+
+    if result == content {
+        return Cow::Borrowed(content);
+    }
+
+    Cow::Owned(result.into_owned())
 }
 
 /// 移除 thinking 标签对及其全部内容
@@ -162,5 +229,56 @@ mod tests {
         let input = r#"<div>content</div>{"x":1}"#;
         let result = normalize_llm_content(input);
         assert!(matches!(result, Cow::Borrowed(_)));
+    }
+
+    // ── DeepSeek DSML 标签测试 ──
+
+    #[test]
+    fn dsml_tool_calls_stripped() {
+        // 实际 DeepSeek 输出格式 (全角竖线 U+FF5C)
+        let input = "<\u{ff5c}\u{ff5c}DSML\u{ff5c}\u{ff5c}tool_calls><\u{ff5c}\u{ff5c}DSML\u{ff5c}\u{ff5c}invoke name=\"query_world\"><\u{ff5c}\u{ff5c}DSML\u{ff5c}\u{ff5c}parameter name=\"section\" string=\"true\">location</\u{ff5c}\u{ff5c}DSML\u{ff5c}\u{ff5c}parameter></\u{ff5c}\u{ff5c}DSML\u{ff5c}\u{ff5c}invoke></\u{ff5c}\u{ff5c}DSML\u{ff5c}\u{ff5c}tool_calls>{\"actions\":[{\"action_type\":\"说话\"}]}";
+        let result = normalize_llm_content(input);
+        assert_eq!(result.as_ref(), r#"{"actions":[{"action_type":"说话"}]}"#);
+    }
+
+    #[test]
+    fn dsml_only_returns_empty_stripped() {
+        // 纯 DSML 内容, 无 JSON — 移除后为空
+        let input = "<\u{ff5c}\u{ff5c}DSML\u{ff5c}\u{ff5c}tool_calls>some content</\u{ff5c}\u{ff5c}DSML\u{ff5c}\u{ff5c}tool_calls>";
+        let result = normalize_llm_content(input);
+        // 策略 2: 保留标签内内容
+        assert_eq!(result.as_ref(), "some content");
+    }
+
+    #[test]
+    fn dsml_halfwidth_pipe_compatible() {
+        // 半角竖线变体 (以防万一)
+        let input = r#"<||DSML||tool_calls>reasoning</||DSML||tool_calls>{"x":1}"#;
+        let result = normalize_llm_content(input);
+        assert_eq!(result.as_ref(), r#"{"x":1}"#);
+    }
+
+    #[test]
+    fn dsml_closing_tag_before_json() {
+        // 闭标签出现在 JSON 前 (实际错误场景)
+        let input = "</\u{ff5c}\u{ff5c}DSML\u{ff5c}\u{ff5c}tool_calls>{\"result\":true}";
+        let result = normalize_llm_content(input);
+        assert_eq!(result.as_ref(), r#"{"result":true}"#);
+    }
+
+    #[test]
+    fn dsml_mixed_with_think_tag() {
+        // DSML + think 标签混合
+        let input = "<\u{ff5c}\u{ff5c}DSML\u{ff5c}\u{ff5c}tool_calls>dsml content</\u{ff5c}\u{ff5c}DSML\u{ff5c}\u{ff5c}tool_calls><think_tag>reasoning</think_tag>{\"x\":1}";
+        let result = normalize_llm_content(input);
+        assert_eq!(result.as_ref(), r#"{"x":1}"#);
+    }
+
+    #[test]
+    fn no_dsml_returns_borrowed() {
+        assert!(matches!(
+            normalize_llm_content("plain text without tags"),
+            Cow::Borrowed(_)
+        ));
     }
 }
