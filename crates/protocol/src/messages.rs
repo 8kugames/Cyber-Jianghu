@@ -18,7 +18,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::types::{GameRules, WorldBuildingRules, WorldEvent, WorldState};
+use crate::types::{GameRules, NarrativeConfig, WorldBuildingRules, WorldEvent, WorldState};
 
 // ============================================================================
 // 对话消息类型
@@ -117,10 +117,13 @@ pub struct DialogueSession {
 ///     world_building_rules: None,
 ///     is_alive: true,
 ///     agent_name: None,
+///     narrative_config: None,
+///     narrative_config_hash: None,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum ServerMessage {
     /// 注册成功（包含游戏规则）
     Registered {
@@ -135,6 +138,12 @@ pub enum ServerMessage {
         /// 角色名称（可选，首次连接时由服务器填充）
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_name: Option<String>,
+        /// 叙事化配置（属性描述转换规则）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        narrative_config: Option<NarrativeConfig>,
+        /// 叙事化配置哈希（用于增量跳过）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        narrative_config_hash: Option<String>,
     },
 
     /// 世界状态下发
@@ -145,7 +154,7 @@ pub enum ServerMessage {
 
     /// 通用配置更新（统一收拢所有配置下发消息）
     ///
-    /// config_type: "game_rules" | "actions" | "world_building_rules" | "skills"
+    /// config_type: "game_rules" | "actions" | "world_building_rules" | "skills" | "narrative_config"
     /// update_type: "full" | "incremental"
     /// content: JSON 格式的具体配置内容
     ConfigUpdate {
@@ -555,6 +564,8 @@ mod tests {
             world_building_rules: None,
             is_alive: true,
             agent_name: None,
+            narrative_config: None,
+            narrative_config_hash: None,
         };
 
         let json = msg.to_json().unwrap();
@@ -766,6 +777,8 @@ mod tests {
             world_building_rules: Some(world_rules),
             is_alive: true,
             agent_name: None,
+            narrative_config: None,
+            narrative_config_hash: None,
         };
 
         let json = msg.to_json().unwrap();
