@@ -124,17 +124,28 @@ fn public_llm_config(config: LlmConfigWrapper) -> LlmConfigResponse {
     }
 }
 
+fn json_err(status: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
+    (
+        status,
+        Json(serde_json::json!({ "success": false, "message": msg })),
+    )
+}
+
 /// GET /api/config/llm - 读取 LLM 配置
-pub async fn get_llm_config() -> Result<Json<LlmConfigResponse>, StatusCode> {
-    Ok(Json(public_llm_config(read_llm_config_raw()?)))
+pub async fn get_llm_config()
+-> Result<Json<LlmConfigResponse>, (StatusCode, Json<serde_json::Value>)> {
+    read_llm_config_raw()
+        .map(|c| Json(public_llm_config(c)))
+        .map_err(|e| json_err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))
 }
 
 /// POST /api/config/llm - 保存 LLM 配置
 pub async fn save_llm_config(
     Json(mut config): Json<LlmConfigWrapper>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let config_dir = crate::paths::get_config_dir();
-    fs::create_dir_all(&config_dir).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    fs::create_dir_all(&config_dir)
+        .map_err(|_| json_err(StatusCode::INTERNAL_SERVER_ERROR, "创建配置目录失败"))?;
     let config_path = config_dir.join("llm.yaml");
 
     if config.data.api_key.is_empty()
@@ -143,8 +154,10 @@ pub async fn save_llm_config(
         config.data.api_key = existing.data.api_key;
     }
 
-    let yaml = serde_yaml::to_string(&config).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    fs::write(&config_path, yaml).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let yaml = serde_yaml::to_string(&config)
+        .map_err(|_| json_err(StatusCode::INTERNAL_SERVER_ERROR, "序列化配置失败"))?;
+    fs::write(&config_path, yaml)
+        .map_err(|_| json_err(StatusCode::INTERNAL_SERVER_ERROR, "写入配置文件失败"))?;
 
     tracing::info!("LLM 配置已保存至 {:?}", config_path);
 
