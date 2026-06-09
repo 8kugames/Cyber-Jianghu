@@ -246,7 +246,7 @@ impl DirectLlmClientConfig {
             max_tokens: crate::config::DEFAULT_LLM_MAX_TOKENS,
             prefer_stream: Arc::new(AtomicBool::new(false)),
             enable_thinking: None,
-            context_window_tokens: 32000,
+            context_window_tokens: 32768,
             prompt: PromptConfig::default(),
         }
     }

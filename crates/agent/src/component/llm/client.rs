@@ -148,7 +148,7 @@ pub trait LlmClient: Send + Sync {
 
     /// 获取模型的上下文窗口大小（tokens）
     fn context_window_tokens(&self) -> u32 {
-        32000
+        32768
     }
 
     /// 截断重试时的 max_tokens 基线

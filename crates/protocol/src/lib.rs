@@ -86,7 +86,7 @@ pub const DEFAULT_IDLE_ROTATE_THRESHOLD: u32 = 24;
 /// 模型上下文窗口默认大小（tokens）
 ///
 /// agent LlmConfig + server LlmConfig + 任何上下文窗口相关字段的单一来源。
-pub const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 32000;
+pub const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 32768;
 
 /// Summary 触发比例（0.0-1.0），token 数超过此比例时触发压缩
 pub const DEFAULT_SUMMARY_TRIGGER_RATIO: f64 = 0.75;
