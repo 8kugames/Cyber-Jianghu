@@ -33,16 +33,16 @@ async function loadData() {
     if (llmConfig.status === 'fulfilled') {
         const resp = llmConfig.value;
         const c = resp.actor || resp; // API 返回 {actor: {...}, reflector, ...}，兼容旧格式
-        const fields = { 's-provider': c.provider, 's-model': c.model, 's-base-url': c.base_url, 's-api-key': c.api_key, 's-temperature': c.temperature, 's-max-tokens': c.max_tokens, 's-context-window': c.context_window };
+        const fields = { 's-provider': c.provider, 's-model': c.model, 's-base-url': c.base_url, 's-api-key': c.api_key, 's-temperature': c.temperature, 's-max-tokens': c.max_tokens, 's-context-window': c.context_window_tokens ?? c.context_window };
         for (const [id, val] of Object.entries(fields)) {
             const el = document.getElementById(id);
             if (el && val != null) el.value = val;
         }
         const streamEl = document.getElementById('s-streaming');
-        if (streamEl) streamEl.checked = c.streaming !== false;
+        if (streamEl) streamEl.checked = (c.enable_streaming ?? c.streaming) === true;
 
         // Advanced
-        const advFields = { 's-summary-trigger': c.summary_trigger_ratio, 's-keep-turns': c.summary_keep_turns, 's-idle-rotate': c.idle_rotate_threshold };
+        const advFields = { 's-summary-trigger': c.summary_trigger_ratio, 's-keep-turns': c.keep_recent_turns ?? c.summary_keep_turns, 's-idle-rotate': c.idle_rotate_threshold };
         for (const [id, val] of Object.entries(advFields)) {
             const el = document.getElementById(id);
             if (el && val != null) el.value = val;
@@ -201,12 +201,12 @@ function render(container) {
                             </div>
                             <div class="form-group" style="flex:1;min-width:120px">
                                 <label class="form-label">上下文窗口</label>
-                                <input class="form-input" type="number" id="s-context-window" min="4096" max="1048576" step="1024" value="32000">
+                                <input class="form-input" type="number" id="s-context-window" min="4096" max="1048576" step="1024" value="32768">
                             </div>
                         </div>
                         <div class="form-group">
                             <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                                <input type="checkbox" id="s-streaming" checked> 启用流式输出
+                                <input type="checkbox" id="s-streaming"> 启用流式输出
                             </label>
                         </div>
                         <details style="margin-top:12px;border:1px solid var(--border);border-radius:6px;padding:10px">
@@ -309,19 +309,23 @@ function bindEvents() {
         const fallbackText = document.getElementById('s-fallback-models')?.value?.trim();
 
         const config = {
-            provider: document.getElementById('s-provider')?.value,
-            model: document.getElementById('s-model')?.value?.trim(),
-            base_url: document.getElementById('s-base-url')?.value?.trim(),
-            api_key: document.getElementById('s-api-key')?.value?.trim(),
-            temperature: parseFloat(document.getElementById('s-temperature')?.value) || 0.7,
-            max_tokens: parseInt(document.getElementById('s-max-tokens')?.value) || 8192,
-            context_window: parseInt(document.getElementById('s-context-window')?.value) || 32000,
-            streaming: document.getElementById('s-streaming')?.checked ?? true,
-            summary_trigger_ratio: parseFloat(document.getElementById('s-summary-trigger')?.value) || 0.75,
-            summary_keep_turns: parseInt(document.getElementById('s-keep-turns')?.value) || 4,
-            idle_rotate_threshold: parseInt(document.getElementById('s-idle-rotate')?.value) || 24,
-            enable_thinking: thinkingVal ? thinkingVal === 'true' : null,
-            fallback_models: fallbackText ? fallbackText.split('\n').map(s => s.trim()).filter(Boolean) : [],
+            actor: {
+                provider: document.getElementById('s-provider')?.value,
+                model: document.getElementById('s-model')?.value?.trim(),
+                base_url: document.getElementById('s-base-url')?.value?.trim(),
+                api_key: document.getElementById('s-api-key')?.value?.trim(),
+                temperature: parseFloat(document.getElementById('s-temperature')?.value) || 0.7,
+                max_tokens: parseInt(document.getElementById('s-max-tokens')?.value) || 8192,
+                context_window_tokens: parseInt(document.getElementById('s-context-window')?.value) || 32768,
+                enable_streaming: document.getElementById('s-streaming')?.checked ?? false,
+                summary_trigger_ratio: parseFloat(document.getElementById('s-summary-trigger')?.value) || 0.75,
+                keep_recent_turns: parseInt(document.getElementById('s-keep-turns')?.value) || 4,
+                idle_rotate_threshold: parseInt(document.getElementById('s-idle-rotate')?.value) || 24,
+                enable_thinking: thinkingVal ? thinkingVal === 'true' : null,
+                fallback_models: fallbackText ? fallbackText.split('\n').map(s => s.trim()).filter(Boolean) : [],
+            },
+            reflector: null,
+            reflector_inherits_actor: true,
         };
 
         try {
