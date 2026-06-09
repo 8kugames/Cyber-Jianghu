@@ -98,25 +98,34 @@ impl super::Agent {
 
         // 等待注册确认（包含游戏规则）
         // Ok(None) = agent_id 为 nil，等待角色注册（保持连接，不 close/reconnect）
-        let (agent_id, game_rules, world_building_rules, registered_name, is_alive) =
-            match self.client.wait_for_registration().await {
-                Ok(Some((id, rules, wb_rules, name, alive))) => (id, rules, wb_rules, name, alive),
-                Ok(None) => {
-                    info!(
-                        "Agent '{}' 等待角色注册（保持连接）...",
-                        self.character_name()
-                    );
-                    self.death_reported = true;
-                    if let Some(ref api_state) = self.http_api_state {
-                        api_state
-                            .is_dead
-                            .store(true, std::sync::atomic::Ordering::Relaxed);
-                    }
-                    self.wait_for_rebirth().await?;
-                    return Ok(());
+        let (
+            agent_id,
+            game_rules,
+            world_building_rules,
+            registered_name,
+            is_alive,
+            narrative_config,
+            narrative_config_hash,
+        ) = match self.client.wait_for_registration().await {
+            Ok(Some((id, rules, wb_rules, name, alive, nc, nc_hash))) => {
+                (id, rules, wb_rules, name, alive, nc, nc_hash)
+            }
+            Ok(None) => {
+                info!(
+                    "Agent '{}' 等待角色注册（保持连接）...",
+                    self.character_name()
+                );
+                self.death_reported = true;
+                if let Some(ref api_state) = self.http_api_state {
+                    api_state
+                        .is_dead
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
                 }
-                Err(e) => return Err(e),
-            };
+                self.wait_for_rebirth().await?;
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
         // 重置重试计数器
         self.reconnect_backoff = 0;
         info!("Agent '{}' registered with server", self.character_name());
@@ -289,6 +298,19 @@ impl super::Agent {
                     config.session_timeout_ticks,
                     config.dialogue_action_types.clone(),
                 );
+            }
+        }
+
+        // 注入从 Registered WS 消息获取的 narrative_config
+        if let Some(ref nc) = narrative_config
+            && let Some(ref api_state) = self.http_api_state
+        {
+            *api_state.narrative_config.write().await = Some(nc.clone());
+            let hash = narrative_config_hash.as_deref();
+            if let Err(e) = crate::config::save_narrative_config_to_disk(nc, hash) {
+                warn!("保存 narrative_config 到磁盘失败: {}", e);
+            } else {
+                info!("已从 Registered 消息注入 narrative_config");
             }
         }
 
