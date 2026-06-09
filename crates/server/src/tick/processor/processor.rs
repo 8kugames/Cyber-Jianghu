@@ -76,9 +76,28 @@ impl StateProcessor {
         let events_len_before = events.len();
 
         // 验证并执行（统一 result 变量确保所有路径都可访问）
+        // 先解析 target_agent_id prefix → 完整 UUID, 确保后续 executor 能正确反序列化
+        let mut resolved_intent = intent.clone();
+        if let Some(ref action_data) = resolved_intent.action_data
+            && let Some(target_str) =
+                action_data.get("target_agent_id").and_then(|v| v.as_str())
+        {
+            let candidates: Vec<uuid::Uuid> = all_states.iter().map(|s| s.agent_id).collect();
+            if let Ok(resolved) =
+                cyber_jianghu_protocol::resolve_agent_id(target_str, &candidates)
+                && let Some(ref mut data) = resolved_intent.action_data
+                && let Some(obj) = data.as_object_mut()
+            {
+                obj.insert(
+                    "target_agent_id".to_string(),
+                    serde_json::Value::String(resolved.to_string()),
+                );
+            }
+        }
+
         let result = match self
             .resolver
-            .validate_intent(intent, &agent_state, all_states)
+            .validate_intent(&resolved_intent, &agent_state, all_states)
             .await
         {
             Err(e) => {
@@ -89,7 +108,7 @@ impl StateProcessor {
                     Some(intent.intent_id),
                 )
             }
-            Ok(()) => executor.execute(intent, &mut agent_state),
+            Ok(()) => executor.execute(&resolved_intent, &mut agent_state),
         };
 
         let execution_failed = !result.success;

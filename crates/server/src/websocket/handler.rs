@@ -20,6 +20,7 @@ use axum::{
 };
 use futures_util::SinkExt;
 use futures_util::stream::StreamExt;
+use sha2::Digest as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use tracing::{debug, error, info, warn};
@@ -275,6 +276,16 @@ async fn handle_websocket(
         // 加载世界观规则（可选）
         let world_building_rules = load_world_building_rules();
 
+        // 加载叙事化配置
+        let (narrative_config, narrative_config_hash) = {
+            let gd = state.game_data.get();
+            let nc = gd.narrative.clone();
+            let hash = serde_json::to_vec(&nc)
+                .ok()
+                .map(|bytes| format!("{:x}", sha2::Sha256::digest(&bytes)));
+            (Some(nc), hash)
+        };
+
         let registered_msg = ServerMessage::Registered {
             agent_id,
             game_rules,
@@ -285,6 +296,8 @@ async fn handle_websocket(
             } else {
                 None
             },
+            narrative_config,
+            narrative_config_hash,
         };
         serde_json::to_string(&registered_msg).ok()
     };
@@ -304,112 +317,8 @@ async fn handle_websocket(
         }
     }
 
-    // ===== 发送 game_rules 配置（ConfigUpdate） =====
-    if agent_id != uuid::Uuid::nil() {
-        let tick_duration_secs;
-        let survival;
-        let game_rules_version;
-        let immediate_events;
-        let intent_batch;
-        let dialogue_context;
-        {
-            let gd = state.game_data.get();
-            tick_duration_secs = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
-            survival = super::types::SurvivalConfig {
-                rebirth_delay_ticks: gd.game_rules.data.agent_state.survival.rebirth.delay_ticks,
-                rebirth_retry_max_attempts: gd
-                    .game_rules
-                    .data
-                    .agent_state
-                    .survival
-                    .rebirth
-                    .retry_max_attempts,
-                rebirth_retry_interval_secs: gd
-                    .game_rules
-                    .data
-                    .agent_state
-                    .survival
-                    .rebirth
-                    .retry_interval_secs,
-            };
-            game_rules_version = gd.game_rules.version.clone();
-            immediate_events = gd.game_rules.data.immediate_events.clone();
-            intent_batch = gd.game_rules.data.intent_batch.clone();
-            dialogue_context = gd.game_rules.data.dialogue_context.clone();
-        }
-
-        let game_rules_for_protocol = build_game_rules_from_config(
-            tick_duration_secs,
-            survival,
-            game_rules_version,
-            immediate_events,
-            intent_batch,
-            dialogue_context,
-        );
-
-        let config_update = ServerMessage::ConfigUpdate {
-            config_type: "game_rules".to_string(),
-            update_type: "full".to_string(),
-            version: game_rules_for_protocol.version.clone(),
-            content: serde_json::to_value(&game_rules_for_protocol).unwrap_or_default(),
-            content_hash: None,
-            updated_items: vec![],
-            removed_items: vec![],
-        };
-
-        if let Err(e) = broadcast::send_config_update(
-            agent_id,
-            config_update,
-            &state.connection_manager,
-            &state.agent_to_device_map,
-        )
-        .await
-        {
-            warn!(
-                "Failed to send game_rules ConfigUpdate to agent {}: {}",
-                agent_id, e
-            );
-        } else {
-            debug!(
-                "Sent game_rules ConfigUpdate to agent '{}' ({})",
-                agent_name, agent_id
-            );
-        }
-    }
-
-    // ===== 发送 world_building_rules 配置（ConfigUpdate） =====
-    if agent_id != uuid::Uuid::nil()
-        && let Some(wb_rules) = crate::websocket::types::load_world_building_rules()
-    {
-        let config_update = ServerMessage::ConfigUpdate {
-            config_type: "world_building_rules".to_string(),
-            update_type: "full".to_string(),
-            version: wb_rules.version.clone(),
-            content: serde_json::to_value(&wb_rules).unwrap_or_default(),
-            content_hash: None,
-            updated_items: vec![],
-            removed_items: vec![],
-        };
-
-        if let Err(e) = broadcast::send_config_update(
-            agent_id,
-            config_update,
-            &state.connection_manager,
-            &state.agent_to_device_map,
-        )
-        .await
-        {
-            warn!(
-                "Failed to send world_building_rules ConfigUpdate to agent {}: {}",
-                agent_id, e
-            );
-        } else {
-            debug!(
-                "Sent world_building_rules ConfigUpdate to agent '{}' ({})",
-                agent_name, agent_id
-            );
-        }
-    }
+    // game_rules 和 world_building_rules 已通过 Registered 消息下发，无需重复发送 ConfigUpdate
+    // 热更新路径（admin reload-config）仍通过 broadcast_config_update 触发
 
     // ===== 发送技能配置（ConfigUpdate） =====
     // Agent 连接后仅下发该 Agent 已掌握的技能内容
@@ -554,6 +463,46 @@ async fn handle_websocket(
                     agent_id, e
                 );
             }
+        }
+    }
+
+    // ===== 发送 narrative_config（ConfigUpdate，JSON 格式） =====
+    if agent_id != uuid::Uuid::nil() {
+        let (nc, nc_hash) = {
+            let gd = state.game_data.get();
+            let narrative = gd.narrative.clone();
+            let hash = serde_json::to_vec(&narrative)
+                .ok()
+                .map(|bytes| format!("{:x}", sha2::Sha256::digest(&bytes)));
+            (narrative, hash)
+        };
+        let config_update = ServerMessage::ConfigUpdate {
+            config_type: "narrative_config".to_string(),
+            update_type: "full".to_string(),
+            version: "1.0".to_string(),
+            content: serde_json::to_value(&nc).unwrap_or_default(),
+            content_hash: nc_hash,
+            updated_items: vec![],
+            removed_items: vec![],
+        };
+
+        if let Err(e) = broadcast::send_config_update(
+            agent_id,
+            config_update,
+            &state.connection_manager,
+            &state.agent_to_device_map,
+        )
+        .await
+        {
+            warn!(
+                "Failed to send narrative_config ConfigUpdate to agent {}: {}",
+                agent_id, e
+            );
+        } else {
+            debug!(
+                "Sent narrative_config ConfigUpdate to agent '{}' ({})",
+                agent_name, agent_id
+            );
         }
     }
 
@@ -1221,8 +1170,22 @@ async fn handle_intent(
     if transmission == Transmission::Session
         && let Some(target_value) = action_data.as_ref().and_then(|d| d.get("target_agent_id"))
         && let Some(target_id_str) = target_value.as_str()
-        && let Ok(target_agent_id) = uuid::Uuid::parse_str(target_id_str)
     {
+        let candidates: Vec<uuid::Uuid> = state
+            .agent_state_cache
+            .iter()
+            .map(|r| r.value().agent_id)
+            .collect();
+        let target_agent_id =
+            match cyber_jianghu_protocol::resolve_agent_id(target_id_str, &candidates) {
+                Ok(id) => id,
+                Err(e) => {
+                    tracing::warn!("无法解析 target_agent_id: {} ({})", target_id_str, e);
+                    return reject_and_notify(format!("无效的 target_agent_id: {}", e))
+                        .await;
+                }
+            };
+
         match state
             .dialogue_manager
             .create_session(agent_id, target_agent_id)
