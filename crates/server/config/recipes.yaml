@@ -47,7 +47,6 @@ data:
         quantity: 2
     tools: []
     stamina_cost: 5
-    aliases: ["make_flour"]
 
   揉面团:
     name: 揉面团
@@ -61,7 +60,6 @@ data:
         quantity: 1
     tools: []
     stamina_cost: 5
-    aliases: ["make_dough"]
 
   蒸馒头:
     name: 蒸馒头
@@ -73,7 +71,6 @@ data:
         quantity: 1
     tools: []
     stamina_cost: 10
-    aliases: ["cooked_mantou"]
 
   晒杏干:
     name: 晒杏干
@@ -85,7 +82,6 @@ data:
         quantity: 2
     tools: []
     stamina_cost: 5
-    aliases: ["dried_apricot"]
 
   # --------------------------------------------------------------------------
   # 武器制作
@@ -102,4 +98,3 @@ data:
     tools:
       - 刀
     stamina_cost: 20
-    aliases: ["wooden_sword"]
