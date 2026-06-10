@@ -206,8 +206,6 @@ let expPage = 1;
 
 const LAYER_NAMES = { layer1: '动作审查', layer2: '规则校验', layer3: '意图审查' };
 const SPEAK_TYPES = { speak: true, talk: true, say: true, chat: true, 说话: true };
-const WHISPER_TYPES = { whisper: true, murmur: true, 私语: true };
-const SHOUT_TYPES = { shout: true, yell: true, 大喊: true };
 
 async function mountExperiences(container, ctx) {
     expPage = 1;
@@ -383,12 +381,12 @@ function renderActionText(actionType, actionData) {
     const targetId = ad.target_agent_id;
 
     let html = '<div class="soul-text">';
-    if (SPEAK_TYPES[at] && content) {
+    if (SPEAK_TYPES[at] && (!ad || !ad.channel || ad.channel === "public") && content) {
         const label = targetId ? `对${targetId.substring(0, 8)}...说话` : '向在场众人说话';
         html += `${escapeHtml(label)}："${escapeHtml(content)}"`;
-    } else if (WHISPER_TYPES[at] && content) {
+    } else if (at === "说话" && ad && ad.channel === "private" && content) {
         html += `密语："${escapeHtml(content)}"`;
-    } else if (SHOUT_TYPES[at] && content) {
+    } else if (at === "说话" && ad && ad.channel === "broadcast" && content) {
         html += `大喊："${escapeHtml(content)}"`;
     } else {
         html += escapeHtml(at);

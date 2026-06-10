@@ -466,7 +466,7 @@ function renderTianhunCell(cycles, entry) {
     return html || "-";
 }
 
-// 地魂 action_type 中文映射（常量定义在 utils.js: SPEAK_TYPES / WHISPER_TYPES / SHOUT_TYPES）
+// 地魂 action_type 中文映射（说话检测函数在 utils.js: isSpeakAtype / isWhisperAtype / isShoutAtype，纯 channel 字段判断）
 
 function parseActionData(raw) {
     if (!raw) return {};
@@ -480,13 +480,13 @@ function parseActionData(raw) {
 // 渲染单个 action 的地魂描述文本
 function renderSingleAction(aType, aData) {
     const content = aData.content || "";
-    if (SPEAK_TYPES[aType] && content)
+    if (isSpeakAtype(aType, aData) && content)
         return `向在场众人说话："${escapeHtml(content)}"`;
-    if (WHISPER_TYPES[aType] && content) {
+    if (isWhisperAtype(aType, aData) && content) {
         const name = resolveTargetName(aData.target_agent_id);
         return `向${escapeHtml(name)}密语："${escapeHtml(content)}"`;
     }
-    if (SHOUT_TYPES[aType] && content)
+    if (isShoutAtype(aType, aData) && content)
         return `大喊："${escapeHtml(content)}"`;
     let text = escapeHtml(getActionTypeDisplay(aType));
     // 选取关键字段展示（非全量 JSON dump）
@@ -515,13 +515,13 @@ function renderDihunCell(cycles, entry) {
         const topData = parseActionData(entry.action_data);
         const topType = entry.action_type || "";
         const topContent = topData.content || "";
-        if (SPEAK_TYPES[topType] && topContent)
+        if (isSpeakAtype(topType, topData) && topContent)
             return `<div class="exp-meta-text">"${escapeHtml(topContent)}"</div>`;
-        if (WHISPER_TYPES[topType] && topContent) {
+        if (isWhisperAtype(topType, topData) && topContent) {
             const name = resolveTargetName(topData.target_agent_id);
             return `<div class="exp-meta-text">向${escapeHtml(name)}密语: "${escapeHtml(topContent)}"</div>`;
         }
-        if (SHOUT_TYPES[topType] && topContent)
+        if (isShoutAtype(topType, topData) && topContent)
             return `<div class="exp-meta-text">大喊: "${escapeHtml(topContent)}"</div>`;
         return "-";
     }
