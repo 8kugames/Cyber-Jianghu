@@ -47,7 +47,6 @@ data:
         value: 60
     description: "热腾腾的馒头，吃了不饿。恢复60点饥饿值。"
     stack_size: 10
-    aliases: ["mantou"]
 
   - item_id: "水"
     name: "水"
@@ -58,7 +57,6 @@ data:
         value: 60
     description: "清凉的井水，解渴必备。恢复60点口渴值。"
     stack_size: 10
-    aliases: ["water", "清水", "井水", "泉水"]
 
   - item_id: "李广杏"
     name: "李广杏"
@@ -72,7 +70,6 @@ data:
         value: 10
     description: "敦煌特产李广杏，甘甜多汁。恢复10点饥饿与口渴。"
     stack_size: 20
-    aliases: ["li_guang_apricot", "杏"]
 
   - item_id: "李广杏干"
     name: "李广杏干"
@@ -86,7 +83,6 @@ data:
         value: -5 # 吃干果会口渴
     description: "风干后的李广杏，更耐饥饿，但有些干。恢复20点饥饿，扣除5点水分。"
     stack_size: 20
-    aliases: ["dried_li_guang_apricot", "杏干"]
 
   # ============================================================================
   # 货币
@@ -98,7 +94,6 @@ data:
     effects: []
     description: "流通货币，可以用来购买物品。"
     stack_size: 9999
-    aliases: ["silver", "银两", "银"]
 
   # ============================================================================
   # 武器
@@ -113,7 +108,6 @@ data:
         value: 5
     description: "一把锋利的刀，增加5点攻击力。"
     stack_size: 1
-    aliases: ["knife"]
 
   - item_id: "木剑"
     name: "木剑"
@@ -124,7 +118,6 @@ data:
         value: 3
     description: "简单削制的木剑，适合防身。增加3点攻击力。"
     stack_size: 1
-    aliases: ["wooden_sword"]
 
   # ============================================================================
   # 材料
@@ -136,7 +129,6 @@ data:
     effects: []
     description: "精细的小麦面粉，是制作面食的基础材料。"
     stack_size: 20
-    aliases: ["flour"]
 
   - item_id: "小麦"
     name: "小麦"
@@ -144,7 +136,6 @@ data:
     effects: []
     description: "金黄的小麦，可以磨成面粉。"
     stack_size: 50
-    aliases: ["wheat"]
 
   - item_id: "生面团"
     name: "生面团"
@@ -152,7 +143,6 @@ data:
     effects: []
     description: "未加工的生面团，可以用来制作馒头。"
     stack_size: 20
-    aliases: ["dough", "面团"]
 
   - item_id: "木材"
     name: "木材"
@@ -160,4 +150,3 @@ data:
     effects: []
     description: "普通的木材，用于制作工具或武器。"
     stack_size: 50
-    aliases: ["wood", "木头"]

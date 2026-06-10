@@ -199,9 +199,7 @@ data:
     session_timeout_ticks: 100
     # 触发对话上下文追踪的动作类型
     dialogue_action_types:
-      - "私语"
       - "说话"
-      - "大喊"
 
   # Agent 状态定义（数据驱动）
   # 用于前端显示状态标签、颜色和描述

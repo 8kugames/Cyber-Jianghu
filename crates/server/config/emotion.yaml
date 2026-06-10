@@ -80,7 +80,7 @@ sensation:
 
 # 社交动作到 outcome 的映射（顶层字段，属于 EmotionConfig）
 outcome_mapping:
-  "给予": friendly
+  "予": friendly
   "说话": friendly
   "攻击": hostile
-  "偷窃": hostile
+  "取": hostile
