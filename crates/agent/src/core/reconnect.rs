@@ -264,7 +264,7 @@ impl super::Agent {
 
                             // 热更新认知引擎的动作列表缓存
                             if let Some(ref engine) = self.cognitive_engine {
-                                engine.update_action_aliases(&game_rules.available_actions);
+                                engine.update_action_index(&game_rules.available_actions);
                                 engine.set_available_actions(game_rules.available_actions.clone());
                             }
 

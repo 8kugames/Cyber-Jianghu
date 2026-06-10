@@ -22,7 +22,7 @@ impl super::super::Agent {
                     agent_name_for_callback, game_rules.version
                 );
                 if let Some(ref engine) = cognitive_engine_for_rules {
-                    engine.update_action_aliases(&game_rules.available_actions);
+                    engine.update_action_index(&game_rules.available_actions);
                     engine.set_available_actions(game_rules.available_actions.clone());
                 }
             }))

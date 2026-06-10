@@ -23,7 +23,7 @@ pub fn get_action_detail_definition() -> ToolDefinition {
             "properties": {
                 "action_type": {
                     "type": "string",
-                    "description": "动作类型名称（如 攻击, 采集, 制造 等），必须是可用动作列表中的精确名称"
+                    "description": "动作类型名称（如 攻击, 移动, 制造 等），必须是可用动作列表中的精确名称"
                 }
             },
             "required": ["action_type"]
@@ -351,8 +351,6 @@ mod tests {
             valid_targets: None,
             required_fields: vec![],
             ooc_risk: "low".to_string(),
-            aliases: vec![],
-            field_aliases: HashMap::new(),
             requirements: vec![],
             effects: vec![],
         }
@@ -360,7 +358,7 @@ mod tests {
 
     #[test]
     fn test_get_action_detail_exact_match() {
-        let actions = vec![make_action("attack", "攻击"), make_action("gather", "采集")];
+        let actions = vec![make_action("attack", "攻击"), make_action("qu", "取")];
         let result = execute_get_action_detail("attack", &actions);
         assert!(result["success"].as_bool().unwrap());
         assert_eq!(result["action"], "attack");
@@ -449,7 +447,6 @@ mod tests {
                     quantity: 3,
                     is_equipped: false,
                     item_type: "consumable".to_string(),
-                    aliases: vec![],
                 }],
                 skills: vec![],
                 recipe_details: vec![],

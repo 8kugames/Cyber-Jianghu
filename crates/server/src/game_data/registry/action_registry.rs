@@ -93,12 +93,6 @@ impl ActionRegistry {
                         .map(|v| v.required_fields.clone())
                         .unwrap_or_default(),
                     ooc_risk: config.ooc_risk.clone(),
-                    aliases: config.aliases.clone(),
-                    field_aliases: config
-                        .validation
-                        .as_ref()
-                        .map(|v| v.field_aliases.clone())
-                        .unwrap_or_default(),
                     requirements: config
                         .requirements
                         .iter()

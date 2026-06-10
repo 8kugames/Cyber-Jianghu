@@ -232,8 +232,7 @@ impl LocationRegistry {
                 },
                 environmental_damage: node.environmental_damage,
                 gatherable_items: node.gatherable_items.clone().unwrap_or_default(),
-                implicit_travel_cost: None, // 从 locations.yaml 读取（暂不支持 per-node 覆盖）
-                aliases: node.aliases.clone(),
+                implicit_travel_cost: None,
             };
             graph.add_node(location_node);
         }
@@ -551,7 +550,6 @@ mod tests {
                         description: None,
                         environmental_damage: None,
                         gatherable_items: None,
-                        aliases: vec![],
                     },
                     LocationNodeData {
                         node_id: "kitchen".to_string(),
@@ -561,7 +559,6 @@ mod tests {
                         description: None,
                         environmental_damage: None,
                         gatherable_items: None,
-                        aliases: vec![],
                     },
                 ],
                 edges: vec![LocationEdgeData {

@@ -47,7 +47,7 @@ pub struct CognitiveEngineConfig {
 /// 单个结构化 action
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DirectCognitiveAction {
-    /// 结构化 action_type（如 "进食", "移动", "休息"）
+    /// 结构化 action_type（如 "用", "移动", "休整"）
     pub action_type: String,
     /// 结构化 action_data（精确 ID）
     pub action_data: Option<serde_json::Value>,
@@ -126,7 +126,7 @@ impl DirectCognitiveResponse {
             }]
         } else {
             vec![DirectCognitiveAction {
-                action_type: "休息".to_string(),
+                action_type: "休整".to_string(),
                 action_data: None,
             }]
         }
@@ -814,8 +814,8 @@ impl CognitiveEngine {
         }
     }
 
-    /// 更新动作列表（收到 game_rules_update 后调用）
-    pub fn update_action_aliases(&self, actions: &[cyber_jianghu_protocol::AvailableAction]) {
+    /// 更新动作索引（收到 game_rules_update 后调用）
+    pub fn update_action_index(&self, actions: &[cyber_jianghu_protocol::AvailableAction]) {
         let descriptions = Self::build_action_index_pub(actions);
         let field_hints = String::new();
         {
@@ -841,7 +841,7 @@ impl CognitiveEngine {
 
     /// 重建 semi-static 内容并写入字段
     ///
-    /// 由初始化、update_action_aliases、update_skill_cache 调用。
+    /// 由初始化、update_action_index、update_skill_cache 调用。
     fn rebuild_semi_static(&self) {
         let msg = self.build_semi_static_message();
         let mut guard = self.semi_static_message.write().expect("rwlock poisoned");
@@ -1706,7 +1706,7 @@ impl CognitiveEngine {
                     Ok(chain) => chain.final_intent,
                     Err(e) => {
                         tracing::error!("多阶段认知失败: {}", e);
-                        Intent::new(agent_id, tick_id, "休息", None)
+                        Intent::new(agent_id, tick_id, "休整", None)
                             .with_thought("忽然心神不宁，难以决断，只得暂且静候".to_string())
                     }
                 }
