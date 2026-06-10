@@ -63,7 +63,39 @@ data:
 
   用:
     name: "用"
-    description: "消耗或激活背包中的物品。所有物品消耗（进食、饮水、服药、使用道具）统一走此动作。效果由物品定义中的 effects 决定，动作本身不做语义过滤。用不涉及物品的转移或丢弃，仅触发消耗+效果。"
+    description: "消耗或激活背包中的物品。所有物品消耗统一走此动作。效果由物品定义中的 effects 决定，动作本身不做语义过滤。不涉及物品转移，仅触发消耗与效果。"
+    category: survival
+    ooc_risk: low
+    transmission: silent
+    validation:
+      required_fields:
+        - item_id
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 1
+        cost: 1
+
+  吃:
+    name: "吃"
+    display_name: "进食"
+    description: "摄入食物。快捷代理动作，接收后自动转为 用 的逻辑执行。底层与 用 共享同一执行器，不产生额外效果。具体消耗效果由物品定义（items.yaml）决定。"
+    category: survival
+    ooc_risk: low
+    transmission: silent
+    validation:
+      required_fields:
+        - item_id
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 1
+        cost: 1
+
+  喝:
+    name: "喝"
+    display_name: "饮水"
+    description: "摄入饮品。快捷代理动作，接收后自动转为 用 的逻辑执行。底层与 用 共享同一执行器，不产生额外效果。具体消耗效果由物品定义（items.yaml）决定。"
     category: survival
     ooc_risk: low
     transmission: silent
@@ -98,7 +130,7 @@ data:
   说话:
     name: "说话"
     display_name: "交谈"
-    description: "发出信息。channel=public（默认）对当前位置所有人可见；channel=private 仅 target_agent_id 可见（私语）；channel=broadcast 附近位置均可闻（大喊）。必须指定 content。消耗体力并增加口渴感。"
+    description: "发出信息。channel=public（默认）对当前位置所有人可见；channel=private 仅 target_agent_id 可见；channel=broadcast 附近位置均可闻。必须指定 content。消耗体力并增加口渴感。"
     category: social
     ooc_risk: high
     transmission: broadcast
