@@ -1,13 +1,5 @@
-// ============================================================================
-// 动作执行器 - 模块入口
-// ============================================================================
-//
-// 本模块完成动作执行的核心逻辑
-// ============================================================================
-
 mod basic;
 mod combat;
-mod interaction;
 
 use std::collections::HashSet;
 
@@ -22,9 +14,7 @@ use crate::models::{AgentState, Intent};
 
 use basic::BasicActionExecutor;
 use combat::CombatActionExecutor;
-use interaction::InteractionActionExecutor;
 
-/// 动作执行器
 pub struct ActionExecutor;
 
 impl ActionExecutor {
@@ -33,11 +23,12 @@ impl ActionExecutor {
     }
 
     /// 执行动作
-    ///
-    /// 根据意图执行对应的动作
-    /// 注意：验证逻辑已在调用前由 validator.rs 完成
-    pub fn execute(&self, intent: &Intent, agent_state: &mut AgentState) -> ActionExecutionResult {
-        // 0. 死亡检查：死亡的 Agent 将会被拒绝进入游戏
+    pub fn execute(
+        &self,
+        intent: &Intent,
+        agent_state: &mut AgentState,
+        all_states: &[AgentState],
+    ) -> ActionExecutionResult {
         if !agent_state.is_alive {
             return ActionExecutionResult::failure(
                 "Agent 已死亡，无法执行此动作。请重新转生入世。".to_string(),
@@ -46,7 +37,6 @@ impl ActionExecutor {
             );
         }
 
-        // 1. 处理通用消耗（返回已扣减的属性集合，防止下游 effects 双重扣减）
         let consumed_attrs = match self.consume_requirements(intent, agent_state) {
             Ok(attrs) => attrs,
             Err(e) => {
@@ -58,54 +48,22 @@ impl ActionExecutor {
             }
         };
 
-        // 2. 直接使用 action_data（LLM 必须输出精准字段名）
         let action_data = intent.action_data.clone();
+        let current_loc = agent_state.node_id.clone();
 
-        // 3. 执行特定逻辑（数据驱动：字符串匹配）
         let mut result = match intent.action_type.as_str() {
-            "休息" => BasicActionExecutor::execute_idle(intent),
-            "说话" => BasicActionExecutor::execute_speak(intent, action_data.clone()),
-            "移动" => BasicActionExecutor::execute_move(
-                intent,
-                action_data.clone(),
-                &agent_state.node_id.clone(),
-            ),
-            "给予" => InteractionActionExecutor::execute_give(intent, agent_state),
-            "偷窃" => InteractionActionExecutor::execute_steal(intent, agent_state),
-            "使用" | "进食" | "饮水" => {
-                CombatActionExecutor::execute_use(intent, agent_state)
-            }
-            "拾取" => BasicActionExecutor::execute_pickup(
-                intent,
-                action_data.clone(),
-                &agent_state.node_id.clone(),
-            ),
-            "丢弃" => BasicActionExecutor::execute_drop(
-                intent,
-                action_data.clone(),
-                &agent_state.node_id.clone(),
-            ),
-            "采集" => BasicActionExecutor::execute_gather(
-                intent,
-                action_data.clone(),
-                &agent_state.node_id.clone(),
-            ),
-            "制造" => BasicActionExecutor::execute_craft(intent, action_data.clone()),
-            "传授" => BasicActionExecutor::execute_teach(intent, action_data.clone()),
+            "予" => BasicActionExecutor::execute_yu(intent, action_data, &current_loc),
+            "取" => BasicActionExecutor::execute_qu(intent, action_data, &current_loc),
+            "用" | "吃" | "喝" => BasicActionExecutor::execute_yong(intent, action_data),
+            "说话" => BasicActionExecutor::execute_speak(intent, action_data),
+            "移动" => BasicActionExecutor::execute_move(intent, action_data, &current_loc),
+            "观察" => BasicActionExecutor::execute_observe(intent, action_data, all_states),
             "攻击" => CombatActionExecutor::execute_attack(intent, &action_data, agent_state),
-            "大喊" => BasicActionExecutor::execute_shout(intent, action_data.clone()),
-            // 修炼：纯数据驱动，无自定义 executor
-            // qi max +3 / qi +10 由 config effects 处理
-            "逃跑" => CombatActionExecutor::execute_flee(
-                intent,
-                action_data.clone(),
-                &agent_state.node_id.clone(),
-                agent_state,
-            ),
+            "休整" => BasicActionExecutor::execute_halt(intent),
+            "制造" => BasicActionExecutor::execute_craft(intent, action_data),
+            "教导" => BasicActionExecutor::execute_teach(intent, action_data),
             _ => {
-                // 未知动作类型：尝试从 ActionRegistry 获取配置
                 if let Some(config) = ActionRegistry::get(intent.action_type.as_str()) {
-                    // 有配置但无特殊逻辑，返回通用成功
                     ActionExecutionResult::success(
                         config.description.clone(),
                         intent.action_type.to_string(),
@@ -121,7 +79,6 @@ impl ActionExecutor {
             }
         };
 
-        // 3. 应用通用效果（跳过 consume_requirements 已处理的属性，防止双重扣减）
         if result.success {
             self.apply_generic_effects(intent, &mut result, &consumed_attrs);
         }
@@ -129,10 +86,6 @@ impl ActionExecutor {
         result
     }
 
-    /// 处理通用需求消耗（数据驱动方式）
-    ///
-    /// 仅处理 cost（扣减），recovery 已迁移至 effects 管线。
-    /// 返回已扣减的属性名集合，供 apply_generic_effects 跳过。
     fn consume_requirements(
         &self,
         intent: &Intent,
@@ -141,7 +94,6 @@ impl ActionExecutor {
         let mut consumed: HashSet<String> = HashSet::new();
         let action_name = intent.action_type.to_string();
 
-        // "移动" 动作的体力消耗由 travel_cost * 2 决定，在 execute_move 中动态计算
         if action_name == "移动" {
             return Ok(consumed);
         }
@@ -153,7 +105,6 @@ impl ActionExecutor {
                 match req.requirement_type.as_str() {
                     ActionRequirement::REQUIREMENT_TYPE_ATTRIBUTE => {
                         let attribute = req.get_attribute().unwrap_or("unknown");
-
                         if let Some(cost) = req.get_cost() {
                             let delta = -cost;
                             if agent_state
@@ -166,9 +117,7 @@ impl ActionExecutor {
                             consumed.insert(attribute.to_string());
                         }
                     }
-                    ActionRequirement::REQUIREMENT_TYPE_ITEM => {
-                        // MVP 阶段暂不支持通用物品消耗（需要异步 DB 操作）
-                    }
+                    ActionRequirement::REQUIREMENT_TYPE_ITEM => {}
                     _ => {}
                 }
             }
@@ -176,9 +125,6 @@ impl ActionExecutor {
         Ok(consumed)
     }
 
-    /// 应用通用效果（数据驱动方式）
-    ///
-    /// `skip_attrs`: 已被 consume_requirements 扣减的属性集合，跳过以防止双重扣减
     fn apply_generic_effects(
         &self,
         intent: &Intent,
@@ -191,20 +137,15 @@ impl ActionExecutor {
                 match effect.effect_type.as_str() {
                     ActionEffect::EFFECT_TYPE_ATTRIBUTE_CHANGE => {
                         let attribute = effect.get_str("attribute").unwrap_or("unknown");
-
-                        // 跳过已被 consume_requirements 扣减的属性
                         if skip_attrs.contains(attribute) {
                             continue;
                         }
-
                         let operation = effect.get_str("operation").unwrap_or("add");
                         let value = effect.get_i32("value").unwrap_or(0);
-
                         let delta = match operation {
                             "sub" => -value,
                             _ => value,
                         };
-
                         result.add_change(StateChange::AttributeChanged {
                             agent_id: intent.agent_id,
                             attribute: attribute.to_string(),
@@ -214,10 +155,11 @@ impl ActionExecutor {
                     ActionEffect::EFFECT_TYPE_ADD_ITEM => {
                         if let Some(item_id) = effect.get_str("item_id") {
                             let quantity = effect.get_i32("quantity").unwrap_or(1);
-                            result.add_change(StateChange::ItemGathered {
+                            result.add_change(StateChange::ItemAcquired {
                                 agent_id: intent.agent_id,
                                 item_id: item_id.to_string(),
                                 quantity,
+                                source: "effect".to_string(),
                             });
                         }
                     }
