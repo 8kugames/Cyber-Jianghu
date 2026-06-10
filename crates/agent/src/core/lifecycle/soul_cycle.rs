@@ -514,7 +514,7 @@ impl super::super::Agent {
 
         // 后置 chaos 替换：认知失败标记的休息 → chaos 生存 intent
         // 避免"认知失败 → 固定休息 → 饿死"死循环
-        if final_intent.action_type.as_str() == "休息"
+        if final_intent.action_type.as_str() == "休整"
             && final_intent
                 .thought_log
                 .as_ref()

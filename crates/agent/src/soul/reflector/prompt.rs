@@ -26,7 +26,7 @@ const REFLECTOR_SYSTEM_PROMPT: &str = r#"你是武侠世界的守护者（观察
 
 ## 生存凌驾原则
 - 生存本能是人类最底层的驱动力，优先级高于任何人设限制
-- 当角色处于生存危机（饥饿/口渴/重伤）时，为生存而做出的突破性格的行为（偷窃、抢夺、威胁、乞讨）应视为合理的人性表现，不构成 out_of_character
+- 当角色处于生存危机（饥饿/口渴/重伤）时，为生存而做出的突破性格的行为（夺取、抢夺、威胁、乞讨）应视为合理的人性表现，不构成 out_of_character
 - 具体标准：饥饿值低于40或口渴值低于40时，out_of_character 判定应极其谨慎——绝境中的人性突破不属于人设违规
 
 ## 输出格式
@@ -201,7 +201,7 @@ mod tests {
     #[test]
     fn test_build_validation_prompt() {
         let prompt = ReflectorPrompt::new();
-        let intent = crate::models::Intent::new(Uuid::new_v4(), 1, "休息", None);
+        let intent = crate::models::Intent::new(Uuid::new_v4(), 1, "休整", None);
         let persona = crate::soul::reflector::PersonaInfo::default();
         let world_rules = test_world_building_rules();
         let world_context = "测试世界状态";
@@ -212,7 +212,7 @@ mod tests {
         assert!(validation_prompt.contains("世界观规则"));
         assert!(validation_prompt.contains("玩家人设"));
         assert!(validation_prompt.contains("玩家意图"));
-        assert!(validation_prompt.contains("休息"));
+        assert!(validation_prompt.contains("休整"));
         assert!(
             validation_prompt.contains("世界观详细说明"),
             "prompt 应包含 narrative_rules 段"

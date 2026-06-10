@@ -46,6 +46,7 @@ impl ImportanceScorer {
             WorldEventType::EnvironmentalChange => 0.2,
             WorldEventType::SystemNotification => 0.2,
             WorldEventType::TimeUpdate => 0.1,
+            WorldEventType::Observation => 0.3,
         }
     }
 
@@ -55,7 +56,7 @@ impl ImportanceScorer {
         let mut adjustment: f32 = 0.0;
 
         let critical_keywords = ["死亡", "重伤", "濒死", "致命"];
-        let high_keywords = ["战斗", "攻击", "偷窃", "抢劫", "银两", "交易"];
+        let high_keywords = ["战斗", "攻击", "取", "抢劫", "银两", "交易"];
         let medium_keywords = ["伤害", "饥饿", "口渴", "疲劳"];
 
         for keyword in &critical_keywords {

@@ -39,8 +39,8 @@ mod tests {
     #[test]
     fn test_intent_creation() {
         let agent_id = uuid::Uuid::new_v4();
-        let intent = Intent::new(agent_id, 1, "休息", None);
-        assert_eq!(intent.action_type.as_str(), "休息");
+        let intent = Intent::new(agent_id, 1, "休整", None);
+        assert_eq!(intent.action_type.as_str(), "休整");
         assert_eq!(intent.tick_id, 1);
 
         let intent = Intent::new(
@@ -57,7 +57,7 @@ mod tests {
     fn test_intent_with_thought() {
         let agent_id = uuid::Uuid::new_v4();
         let intent =
-            Intent::new(agent_id, 1, "休息", None).with_thought("我需要休息一下".to_string());
-        assert_eq!(intent.thought_log, Some("我需要休息一下".to_string()));
+            Intent::new(agent_id, 1, "休整", None).with_thought("我需要休整一下".to_string());
+        assert_eq!(intent.thought_log, Some("我需要休整一下".to_string()));
     }
 }
