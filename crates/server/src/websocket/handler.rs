@@ -540,17 +540,12 @@ async fn handle_websocket(
                                     .as_ref()
                                     .map(|c| c.item_type.clone())
                                     .unwrap_or_default();
-                                let aliases = config
-                                    .as_ref()
-                                    .map(|c| c.aliases.clone())
-                                    .unwrap_or_default();
                                 crate::models::InventoryItem {
                                     item_id: item.item_id,
                                     name,
                                     quantity: item.quantity,
                                     is_equipped: item.is_equipped,
                                     item_type,
-                                    aliases,
                                 }
                             })
                             .collect(),
@@ -582,10 +577,6 @@ async fn handle_websocket(
                                     name,
                                     quantity: gi.quantity,
                                     item_type,
-                                    aliases: config
-                                        .as_ref()
-                                        .map(|c| c.aliases.clone())
-                                        .unwrap_or_default(),
                                 }
                             })
                             .collect(),
@@ -1045,6 +1036,24 @@ async fn handle_intent(
         "Intent received from agent {}: tick={}, action={}",
         agent_id, tick_id, action_type
     );
+
+    // 快捷代理：吃/喝 → 用（允许 LLM 以更自然的语言表达消耗意图）
+    // 归一化后再赋回 action_type，后续的 ActionRegistry 查询和 executor 分发
+    // 都使用归一化后的动作类型。原始值已记入日志供调试。
+    let action_type = match action_type.as_str() {
+        "吃" | "喝" => "用".to_string(),
+        other => other.to_string(),
+    };
+
+    // 递归归一化 subsequent_intents 中的动作类型
+    let mut subsequent_intents = subsequent_intents;
+    for sub in &mut subsequent_intents {
+        let normalized = match sub.action_type.as_str() {
+            "吃" | "喝" => "用".to_string(),
+            x => x.to_string(),
+        };
+        sub.action_type = crate::models::ActionType::new(normalized);
+    }
 
     // 解析动作类型（数据驱动：直接使用字符串）
     let action = crate::models::ActionType::new(&action_type);
