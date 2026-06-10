@@ -109,7 +109,7 @@ fn default_flee_success_rate() -> f64 {
 ///
 /// 决定动作执行后的传播行为：
 /// - `Broadcast`: 公共频道广播给同 Location 的所有 Agent（默认）
-/// - `Session`: 定向 + 服务器维护 Dialogue Session（私语）
+/// - `Session`: 定向 + 服务器维护 Dialogue Session
 /// - `Silent`: 触发方动作，仅修改状态不广播
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]

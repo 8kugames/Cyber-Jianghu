@@ -750,10 +750,6 @@ impl IntentWorker {
                                     .as_ref()
                                     .map(|c| c.item_type.clone())
                                     .unwrap_or_default(),
-                                aliases: config
-                                    .as_ref()
-                                    .map(|c| c.aliases.clone())
-                                    .unwrap_or_default(),
                             }
                         })
                         .collect::<Vec<_>>()
@@ -777,10 +773,6 @@ impl IntentWorker {
                                 item_type: config
                                     .as_ref()
                                     .map(|c| c.item_type.clone())
-                                    .unwrap_or_default(),
-                                aliases: config
-                                    .as_ref()
-                                    .map(|c| c.aliases.clone())
                                     .unwrap_or_default(),
                             }
                         })

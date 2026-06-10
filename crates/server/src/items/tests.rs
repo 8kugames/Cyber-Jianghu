@@ -41,7 +41,6 @@ fn test_init_item_cache_from_config() {
         description: "测试用食物".to_string(),
         max_durability: -1,
         decay_rate: 0,
-        aliases: vec![],
     }];
 
     let result = init_item_cache_from_config(&config_items);
@@ -91,7 +90,6 @@ fn test_get_item_definition() {
         description: "热腾腾的馒头".to_string(),
         max_durability: 100,
         decay_rate: 1,
-        aliases: vec![],
     }];
     let _ = init_item_cache_from_config(&config_items);
 
@@ -133,7 +131,6 @@ fn test_item_usability() {
             description: "测试食物".to_string(),
             max_durability: -1,
             decay_rate: 0,
-            aliases: vec![],
         },
         ItemConfigEntry {
             item_id: "weapon".to_string(),
@@ -144,7 +141,6 @@ fn test_item_usability() {
             description: "测试武器".to_string(),
             max_durability: 100,
             decay_rate: 0,
-            aliases: vec![],
         },
     ];
     let _ = init_item_cache_from_config(&config_items);

@@ -463,7 +463,7 @@ mod tests {
     #[test]
     fn test_action_type_display() {
         crate::game_data::init_test_registry();
-        assert_eq!(action_type_display("休息"), "静修");
+        assert_eq!(action_type_display("休整"), "静修");
         assert_eq!(action_type_display("说话"), "交谈");
         assert_eq!(action_type_display("移动"), "行走");
         assert_eq!(action_type_display("攻击"), "战斗");
@@ -483,7 +483,7 @@ mod tests {
                 name: "张三".to_string(),
                 location: "village_center".to_string(),
                 actions_count: 50,
-                top_actions: vec![("移动".to_string(), 20), ("采集".to_string(), 15)],
+                top_actions: vec![("移动".to_string(), 20), ("取".to_string(), 15)],
                 narratives: vec!["在江湖中行走，感受春风".to_string()],
                 died_this_period: false,
             }],
@@ -492,8 +492,8 @@ mod tests {
                 total: 100,
                 by_type: HashMap::from([
                     ("移动".to_string(), 40),
-                    ("休息".to_string(), 30),
-                    ("采集".to_string(), 30),
+                ("休整".to_string(), 30),
+                ("取".to_string(), 30),
                 ]),
                 success_rate: 0.85,
             },

@@ -17,7 +17,7 @@ pub struct ExperienceEntry {
     pub tick_id: i64,
     /// 动作原始类型（如 idle, speak）
     pub action_type: String,
-    /// 动作中文描述（如 "休息，不做任何操作"）
+    /// 动作中文描述（如 "静修"、"交谈"）
     pub action_type_display: Option<String>,
     pub action_data: serde_json::Value,
     /// 执行结果（success/failed）

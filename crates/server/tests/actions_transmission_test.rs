@@ -43,10 +43,10 @@ mod tests {
     }
 
     #[test]
-    fn transmission_session_for_whisper() {
+    fn transmission_session_for_speak() {
         let config = parse(
             r#"
-                name: "私语"
+                name: "说话"
                 description: "..."
                 transmission: session
             "#,
@@ -58,7 +58,7 @@ mod tests {
     fn display_name_optional_and_overrides_when_set() {
         let without = parse(
             r#"
-                name: "休息"
+                name: "休整"
                 description: "未配置 display_name"
             "#,
         );
@@ -66,7 +66,7 @@ mod tests {
 
         let with = parse(
             r#"
-                name: "休息"
+                name: "休整"
                 display_name: "静修"
                 description: "display_name 用于展示美化"
             "#,
@@ -78,7 +78,7 @@ mod tests {
     fn validator_kind_optional_with_snake_case_values() {
         let without = parse(
             r#"
-                name: "休息"
+                name: "休整"
                 description: "无预验证"
             "#,
         );
@@ -113,7 +113,7 @@ mod tests {
     fn highlight_kind_optional_with_snake_case_values() {
         let without = parse(
             r#"
-                name: "休息"
+                name: "休整"
                 description: "无 highlight"
             "#,
         );
@@ -145,7 +145,7 @@ mod tests {
 
         let social = parse(
             r#"
-                name: "给予"
+                name: "予"
                 description: "..."
                 highlight_kind: social
             "#,

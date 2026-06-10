@@ -57,7 +57,7 @@ mod tests {
                         "base_damage": 10,
                         "requirements": []
                     },
-                    "偷窃": {
+                    "取": {
                         "description": "偷取物品",
                         "success_rate": 0.5,
                         "requirements": []
@@ -70,7 +70,7 @@ mod tests {
         let actions = load_actions(dir.path()).unwrap();
         assert_eq!(actions.version, "2.0.0");
         assert!(actions.data.contains_key("攻击"));
-        assert!(actions.data.contains_key("偷窃"));
+        assert!(actions.data.contains_key("取"));
     }
 
     #[test]
@@ -84,15 +84,14 @@ data:
     description: "攻击目标"
     base_damage: 10
     requirements: []
-  偷窃:
-    description: "偷取物品"
-    success_rate: 0.5
+  取:
+    description: "从目标获取物品"
     requirements: []
 "#;
 
         let config: UnifiedActionsConfig = parse_config(yaml, ConfigFormat::Yaml).unwrap();
         assert_eq!(config.version, "2.0.0");
         assert!(config.data.contains_key("攻击"));
-        assert!(config.data.contains_key("偷窃"));
+        assert!(config.data.contains_key("取"));
     }
 }

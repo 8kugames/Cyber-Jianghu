@@ -90,7 +90,7 @@ pub fn create_test_config_dir() -> TempDir {
             "version": "0.0.1",
             "actions": {
                 "攻击": { "base_damage": 10 },
-                "偷窃": { "success_rate": 0.5 }
+                "取": {}  // 取无全局 success_rate，授权由 validator 处理
             }
         }"#,
     )

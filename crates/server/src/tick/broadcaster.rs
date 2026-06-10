@@ -104,10 +104,6 @@ impl Broadcaster {
                                 quantity: item.quantity,
                                 is_equipped: item.is_equipped,
                                 item_type,
-                                aliases: config
-                                    .as_ref()
-                                    .map(|c| c.aliases.clone())
-                                    .unwrap_or_default(),
                             }
                         })
                         .collect();
@@ -229,10 +225,6 @@ impl Broadcaster {
                                 name,
                                 quantity: gi.quantity,
                                 item_type,
-                                aliases: config
-                                    .as_ref()
-                                    .map(|c| c.aliases.clone())
-                                    .unwrap_or_default(),
                             }
                         })
                         .collect()
@@ -450,7 +442,6 @@ impl Broadcaster {
                                         item_id: id.clone(),
                                         name: entry.name.clone(),
                                         item_type: entry.item_type.clone(),
-                                        aliases: entry.aliases.clone(),
                                     }
                                 })
                             })
@@ -699,7 +690,6 @@ pub fn build_reactive_world_state(
                             item_id: id.clone(),
                             name: entry.name.clone(),
                             item_type: entry.item_type.clone(),
-                            aliases: entry.aliases.clone(),
                         }
                     })
                 })
@@ -863,7 +853,6 @@ pub fn build_initial_world_state(
                             item_id: id.clone(),
                             name: entry.name.clone(),
                             item_type: entry.item_type.clone(),
-                            aliases: entry.aliases.clone(),
                         }
                     })
                 })

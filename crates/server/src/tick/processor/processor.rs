@@ -106,7 +106,7 @@ impl StateProcessor {
                     Some(intent.intent_id),
                 )
             }
-            Ok(()) => executor.execute(&resolved_intent, &mut agent_state),
+            Ok(()) => executor.execute(&resolved_intent, &mut agent_state, all_states),
         };
 
         let execution_failed = !result.success;
@@ -161,7 +161,13 @@ impl StateProcessor {
                 }
             }
 
-            // 观察学习：ItemCrafted 成功后，同位置旁观者观察配方
+            // 观察学习（工艺配方）：ItemCrafted 成功后，同位置旁观者观察配方
+            // TODO(#D-plan): 将来可扩展为"观察"动作触发的配方观察学习
+            // 评估结论：D 方案（观察→配方学习）已评估但当前阶段 deferred。
+            // 原因：配方学习依赖 ItemCrafted 事件 + 同位置判定，观察动作
+            // 的 StateChange::Observation 尚未接入该链路。接入需要：
+            // 1. Observation StateChange 携带 recipe_id 上下文
+            // 2. processor 中 Observation→RecipeLearned 映射
             self.process_recipe_observations(
                 &result.state_changes,
                 &agent_state,
