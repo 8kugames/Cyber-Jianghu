@@ -436,7 +436,7 @@ impl super::CognitiveEngine {
     /// Action Index: 仅名称，通过 get_action_detail 按需查询详情
     pub(super) fn build_action_index_pub(actions: &[AvailableAction]) -> String {
         if actions.is_empty() {
-            return "- 休息 (查询详情: get_action_detail(\"休息\"))\n".to_string();
+            return "- 休整 (查询详情: get_action_detail(\"休整\"))\n".to_string();
         }
         let mut s = String::from(
             "## 可用动作 (查询详情: get_action_detail(action_name))\n\

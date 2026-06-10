@@ -283,7 +283,7 @@ mod tests {
         use uuid::Uuid;
 
         let agent_id = Uuid::new_v4();
-        let intent = Intent::new(agent_id, 1, "休息", None);
+        let intent = Intent::new(agent_id, 1, "休整", None);
 
         let mut attributes = HashMap::new();
         attributes.insert("health".to_string(), serde_json::json!(100));
@@ -313,7 +313,7 @@ mod tests {
         use uuid::Uuid;
 
         let agent_id = Uuid::new_v4();
-        let intent = Intent::new(agent_id, 1, "休息", None);
+        let intent = Intent::new(agent_id, 1, "休整", None);
 
         let request = ValidationRequest {
             intent,
@@ -336,36 +336,20 @@ mod tests {
     fn test_rule_json_roundtrip() {
         let rules = vec![
             Rule::new(
-                "valid_item_id_eat".to_string(),
-                "eat 的 item_id 必须在背包中".to_string(),
+                "valid_item_id_use".to_string(),
+                "用 的 item_id 必须在背包中".to_string(),
                 RuleType::ResourceConstraint,
                 RuleCondition::Or(vec![
                     RuleCondition::NotEquals(
                         "intent.action_type".to_string(),
-                        serde_json::json!("进食"),
+                        serde_json::json!("用"),
                     ),
                     RuleCondition::In(
                         "intent.action_data.item_id".to_string(),
                         "available_item_ids".to_string(),
                     ),
                 ]),
-                "吃东西失败：物品ID无效".to_string(),
-            ),
-            Rule::new(
-                "valid_item_id_drink".to_string(),
-                "drink 的 item_id 必须在背包中".to_string(),
-                RuleType::ResourceConstraint,
-                RuleCondition::Or(vec![
-                    RuleCondition::NotEquals(
-                        "intent.action_type".to_string(),
-                        serde_json::json!("饮水"),
-                    ),
-                    RuleCondition::In(
-                        "intent.action_data.item_id".to_string(),
-                        "available_item_ids".to_string(),
-                    ),
-                ]),
-                "喝水失败：物品ID无效".to_string(),
+                "使用物品失败：物品ID无效".to_string(),
             ),
             Rule::new(
                 "valid_target_node_move".to_string(),
@@ -388,8 +372,8 @@ mod tests {
         let json = serde_json::to_string_pretty(&rules).unwrap();
         let parsed: Vec<Rule> = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(parsed.len(), 3);
-        assert_eq!(parsed[0].id, "valid_item_id_eat");
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].id, "valid_item_id_use");
         assert_eq!(parsed[0].rule_type, RuleType::ResourceConstraint);
         assert!(parsed[0].enabled);
         match &parsed[0].condition {
@@ -402,12 +386,11 @@ mod tests {
                     matches!(&conds[1], RuleCondition::In(f, c) if f == "intent.action_data.item_id" && c == "available_item_ids")
                 );
             }
-            _ => panic!("Expected Or condition for eat rule"),
+            _ => panic!("Expected Or condition for use rule"),
         }
 
-        assert_eq!(parsed[1].id, "valid_item_id_drink");
-        assert_eq!(parsed[2].id, "valid_target_node_move");
-        assert_eq!(parsed[2].rule_type, RuleType::StateRestriction);
+        assert_eq!(parsed[1].id, "valid_target_node_move");
+        assert_eq!(parsed[1].rule_type, RuleType::StateRestriction);
 
         // 二次 round-trip 确保稳定
         let json2 = serde_json::to_string_pretty(&parsed).unwrap();
@@ -424,7 +407,7 @@ mod tests {
                 "rule_type": "ResourceConstraint",
                 "condition": {
                     "Or": [
-                        {"NotEquals": ["intent.action_type", "进食"]},
+                        {"NotEquals": ["intent.action_type", "用"]},
                         {"In": ["intent.action_data.item_id", "available_item_ids"]}
                     ]
                 },

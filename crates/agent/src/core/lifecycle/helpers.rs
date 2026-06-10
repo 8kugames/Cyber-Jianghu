@@ -86,7 +86,7 @@ impl super::super::Agent {
             "Chaos fallback 不可用，退回休息: agent={}",
             self.character_name()
         );
-        Intent::new(agent_id, world_state.tick_id, "休息", None).with_thought(fallback_thought)
+        Intent::new(agent_id, world_state.tick_id, "休整", None).with_thought(fallback_thought)
     }
 
     /// 将 action_type + action_data 生成可读简述
@@ -109,24 +109,20 @@ impl super::super::Agent {
 
         match action_type {
             "说话" => {
+                let channel = data
+                    .get("channel")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("public");
                 let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
                 let target = data.get("target_agent_id").and_then(|v| v.as_str());
-                match target {
-                    Some(tid) => format!("对{}说话：{}", resolve_name(tid), content),
-                    None => format!("向在场众人说话：{}", content),
+                match channel {
+                    "private" => match target {
+                        Some(tid) => format!("对{}（私密）：{}", resolve_name(tid), content),
+                        None => format!("向某人私语：{}", content),
+                    },
+                    "broadcast" => format!("大声喊道：{}", content),
+                    _ => format!("说道：{}", content),
                 }
-            }
-            "私语" => {
-                let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                let target = data.get("target_agent_id").and_then(|v| v.as_str());
-                match target {
-                    Some(tid) => format!("向{}密语：{}", resolve_name(tid), content),
-                    None => format!("向某人密语：{}", content),
-                }
-            }
-            "大喊" => {
-                let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                format!("大声喊道：{}", content)
             }
             "移动" => {
                 let target = data
@@ -135,39 +131,35 @@ impl super::super::Agent {
                     .unwrap_or("未知地点");
                 format!("从{}移动到{}", location, target)
             }
-            "进食" => {
-                let item = data
-                    .get("item_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("食物");
-                format!("吃了{}", item)
-            }
-            "饮水" => {
-                let item = data.get("item_id").and_then(|v| v.as_str()).unwrap_or("水");
-                format!("喝了{}", item)
-            }
-            "采集" => {
-                let resource = data
-                    .get("target_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("资源");
-                format!("采集{}", resource)
-            }
-            "拾取" => {
+            "用" => {
                 let item = data
                     .get("item_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("物品");
-                format!("拾起{}", item)
+                format!("使用了{}", item)
             }
-            "给予" => {
+            "取" => {
+                let source_type = data
+                    .get("source_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("ground");
                 let item = data
                     .get("item_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("物品");
-                format!("给予{}", item)
+                match source_type {
+                    "resource" => format!("采集了{}", item),
+                    _ => format!("获取了{}", item),
+                }
             }
-            "休息" => "原地休息".to_string(),
+            "予" => {
+                let item = data
+                    .get("item_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("物品");
+                format!("给出{}", item)
+            }
+            "休整" => "原地休整".to_string(),
             other => format!("执行{}", other),
         }
     }

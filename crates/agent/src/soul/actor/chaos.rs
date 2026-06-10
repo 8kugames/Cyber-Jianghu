@@ -382,7 +382,6 @@ mod tests {
             item_type: "food".into(),
             quantity: 1,
             is_equipped: false,
-            aliases: vec![],
         }];
 
         WorldState {
@@ -397,7 +396,6 @@ mod tests {
                     node_id: "loc_b".into(),
                     name: "地点B".into(),
                     travel_cost: 1,
-                    aliases: vec![],
                 }],
                 gatherable_items: vec![],
             },
@@ -414,7 +412,6 @@ mod tests {
                 name: "地面物品".into(),
                 item_type: "food".into(),
                 quantity: 1,
-                aliases: vec![],
             }],
             self_state: AgentSelfState {
                 attributes: attrs,

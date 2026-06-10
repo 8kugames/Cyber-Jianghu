@@ -133,7 +133,7 @@ impl super::Agent {
                 let is_speak = meta.contains_key("from_agent_id") && !meta.contains_key("action");
                 let resolved_action = if is_speak { "speak" } else { action };
                 let other_id_str = match resolved_action {
-                    "给予" | "trade_sell" => meta.get("target").and_then(|v| v.as_str()),
+                    "予" | "trade_sell" => meta.get("target").and_then(|v| v.as_str()),
                     "receive" | "trade_buy" | "stolen_from" => {
                         meta.get("from").and_then(|v| v.as_str())
                     }

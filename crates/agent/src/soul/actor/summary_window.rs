@@ -231,7 +231,7 @@ mod tests {
         window.push(NarrativeSummary::simple(2, "喝水", "成功"), true);
         assert_eq!(window.len(), 2);
 
-        window.push(NarrativeSummary::simple(3, "休息", "成功"), true);
+        window.push(NarrativeSummary::simple(3, "休整", "成功"), true);
         assert_eq!(window.len(), 3);
 
         // 超出窗口大小，应移除最旧的

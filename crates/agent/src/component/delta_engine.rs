@@ -506,7 +506,6 @@ mod tests {
             quantity: qty,
             is_equipped: false,
             item_type: "consumable".to_string(),
-            aliases: vec![],
         }
     }
 

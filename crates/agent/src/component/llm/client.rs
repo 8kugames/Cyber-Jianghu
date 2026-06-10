@@ -824,6 +824,11 @@ fn parse_json_response<D: DeserializeOwned + Send>(response: &str) -> Result<D> 
     let json_str = repair_llm_json(&raw_json);
 
     if json_str.trim().is_empty() {
+        tracing::warn!(
+            "[JSON parse] content empty after normalize+extract: raw_response_len={}, raw_preview={:?}",
+            response.len(),
+            &response[..response.len().min(300)]
+        );
         anyhow::bail!("LLM response content is empty after extraction");
     }
 
@@ -859,6 +864,12 @@ fn parse_json_response<D: DeserializeOwned + Send>(response: &str) -> Result<D> 
         column = parse_err.column(),
         json_len = json_str.len(),
         "\n{error_snippet}\n--- Full JSON ---\n{json_str}"
+    );
+    // 原始 content 追踪日志（诊断 JSON parse 失败的 LLM 原始输出）
+    tracing::warn!(
+        "[JSON parse] raw LLM content ({} chars): {:?}",
+        response.len(),
+        &response[..response.len().min(500)]
     );
     Err(parse_err.into())
 }

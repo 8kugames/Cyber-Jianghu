@@ -175,7 +175,7 @@ impl ReflectorSoul {
         &self,
         intent: &crate::models::Intent,
     ) -> std::result::Result<(), String> {
-        if intent.action_type.as_str() == "休息" {
+        if intent.action_type.as_str() == "休整" {
             return Ok(());
         }
 
@@ -212,7 +212,7 @@ impl ReflectorSoul {
             }
             // 对话类动作 content 占位符检测：LLM 偶尔输出 "..." 替代实际对话内容，
             // 导致前端经历日志显示省略号而非文字，此处拦截并要求重新生成
-            if matches!(intent.action_type.as_str(), "说话" | "私语" | "大喊")
+            if intent.action_type.as_str() == "说话"
                 && let Some(content) = intent
                     .action_data
                     .as_ref()
@@ -244,7 +244,7 @@ impl ReflectorSoul {
                 name_lower.contains(&action_input) || action_input.contains(&name_lower)
             })
             .map(|action| action.name.as_str())
-            .unwrap_or("休息");
+            .unwrap_or("休整");
 
         Err(format!(
             "action '{}' 不在合法列表中，合法值: [{}]，最接近: '{}'",
@@ -723,7 +723,6 @@ mod tests {
                     node_id: "loc_b".to_string(),
                     name: "地点B".to_string(),
                     travel_cost: 1,
-                    aliases: vec![],
                 }],
                 gatherable_items: vec![],
             },
@@ -739,7 +738,6 @@ mod tests {
                     item_type: "food".to_string(),
                     quantity: 1,
                     is_equipped: false,
-                    aliases: vec![],
                 }],
                 skills: vec![],
                 age_years: None,
@@ -759,7 +757,6 @@ mod tests {
                 name: "木棍".to_string(),
                 item_type: "weapon".to_string(),
                 quantity: 1,
-                aliases: vec![],
             }],
             events_log: vec![],
             private_dialogue_log: vec![],
@@ -782,7 +779,7 @@ mod tests {
             ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
 
         let request = ValidationRequest {
-            intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "休息", None),
+            intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "休整", None),
             persona: PersonaInfo::default(),
             world_context: "龙门客栈".to_string(),
             world_state: None,
@@ -813,7 +810,7 @@ mod tests {
             ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
 
         let request = ValidationRequest {
-            intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "休息", None),
+            intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "休整", None),
             persona: PersonaInfo::default(),
             world_context: "龙门客栈".to_string(),
             world_state: None,
@@ -857,7 +854,7 @@ mod tests {
             intent: crate::models::Intent::new(
                 world_state.agent_id.unwrap_or_default(),
                 world_state.tick_id,
-                "speak",
+                "说话",
                 Some(serde_json::json!({"content": "你好"})),
             ),
             persona: PersonaInfo::default(),
@@ -892,7 +889,7 @@ mod tests {
             intent: crate::models::Intent::new(
                 world_state.agent_id.unwrap_or_default(),
                 world_state.tick_id,
-                "speak",
+                "说话",
                 Some(serde_json::json!({"content": "在下沈暮烟，行走江湖"})),
             ),
             persona: PersonaInfo::default(),
@@ -933,7 +930,7 @@ mod tests {
             intent: crate::models::Intent::new(
                 world_state.agent_id.unwrap_or_default(),
                 world_state.tick_id,
-                "speak",
+                "说话",
                 Some(serde_json::json!({"content": "初次见面"})),
             ),
             persona: PersonaInfo::default(),

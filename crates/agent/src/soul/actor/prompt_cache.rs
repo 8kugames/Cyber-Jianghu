@@ -127,7 +127,7 @@ mod tests {
         let persona = create_test_persona();
         let cache = PromptCache::new(
             "你是一名行侠仗义的侠客。".to_string(),
-            "- idle: 休息".to_string(),
+            "- idle: 休整".to_string(),
             "- idle: (action_data: null)".to_string(),
             &persona,
         );
@@ -142,7 +142,7 @@ mod tests {
         let persona = create_test_persona();
         let cache = PromptCache::new(
             "你是一名行侠仗义的侠客。".to_string(),
-            "- idle: 休息".to_string(),
+            "- idle: 休整".to_string(),
             "- idle: (action_data: null)".to_string(),
             &persona,
         );
@@ -159,7 +159,7 @@ mod tests {
         let persona = create_test_persona();
         let mut cache = PromptCache::new(
             "旧描述".to_string(),
-            "- idle: 休息".to_string(),
+            "- idle: 休整".to_string(),
             "- idle: (action_data: null)".to_string(),
             &persona,
         );

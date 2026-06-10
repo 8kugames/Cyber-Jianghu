@@ -165,14 +165,14 @@ mod tests {
     #[test]
     fn test_parse_minimax_multiple_params() {
         let xml = r#"<minimax:tool_call>
-<invoke name="私语">
+<invoke name="说话">
 <parameter name="target_agent_id">abc-123</parameter>
 <parameter name="content">你好</parameter>
 </invoke>
 </minimax:tool_call>"#;
         let calls = parse_minimax_xml_tool_calls(xml).unwrap();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].function.name, "私语");
+        assert_eq!(calls[0].function.name, "说话");
         let args: serde_json::Value = serde_json::from_str(&calls[0].function.arguments).unwrap();
         assert_eq!(args["target_agent_id"], "abc-123");
         assert_eq!(args["content"], "你好");

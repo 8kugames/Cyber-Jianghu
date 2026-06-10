@@ -70,9 +70,9 @@ mod tests {
 
     #[test]
     fn test_social_interaction_with_mapping() {
-        let event = make_social_event("给予");
+        let event = make_social_event("予");
         let mut mapping = HashMap::new();
-        mapping.insert("给予".into(), "friendly".into());
+        mapping.insert("予".into(), "friendly".into());
         assert_eq!(extract_outcome(&event, &mapping), Some("friendly".into()));
     }
 

@@ -267,20 +267,14 @@ mod tests {
     use super::*;
 
     fn create_test_manager() -> DialogueContextManager {
-        DialogueContextManager::new(
-            3,
-            5,
-            10,
-            vec!["私语".to_string(), "说话".to_string(), "大喊".to_string()],
-        )
+        DialogueContextManager::new(3, 5, 10, vec!["说话".to_string()])
     }
 
     #[test]
     fn test_is_dialogue_action() {
         let manager = create_test_manager();
-        assert!(manager.is_dialogue_action("私语"));
         assert!(manager.is_dialogue_action("说话"));
-        assert!(!manager.is_dialogue_action("休息"));
+        assert!(!manager.is_dialogue_action("休整"));
     }
 
     #[test]

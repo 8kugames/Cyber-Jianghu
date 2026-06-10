@@ -430,7 +430,7 @@ mod tests {
         let mem = OutcomeMemory::new(&db, 10).unwrap();
 
         mem.record(OutcomeRecord {
-            action_type: "进食".into(),
+            action_type: "用".into(),
             action_data: Some(serde_json::json!({"item_id": "馒头"})),
             result: OutcomeResult::Success,
             target_agent_id: None,
@@ -439,7 +439,7 @@ mod tests {
         });
 
         mem.record(OutcomeRecord {
-            action_type: "进食".into(),
+            action_type: "用".into(),
             action_data: Some(serde_json::json!({"item_id": "invalid"})),
             result: OutcomeResult::Failed("物品不存在".into()),
             target_agent_id: None,
@@ -447,12 +447,12 @@ mod tests {
             tick_id: 101,
         });
 
-        let records = mem.query_recent("进食", 10);
+        let records = mem.query_recent("用", 10);
         assert_eq!(records.len(), 2);
         assert!(matches!(records[0].result, OutcomeResult::Failed(_)));
         assert!(matches!(records[1].result, OutcomeResult::Success));
 
-        let rate = mem.success_rate("进食");
+        let rate = mem.success_rate("用");
         assert!((rate - 0.5).abs() < 0.01);
 
         let _ = std::fs::remove_file(&db);
@@ -509,7 +509,7 @@ mod tests {
 
         let target_id = "agent-b";
         mem.record(OutcomeRecord {
-            action_type: "给予".into(),
+            action_type: "予".into(),
             action_data: Some(serde_json::json!({"item_id": "馒头", "quantity": 10, "target_agent_id": target_id})),
             result: OutcomeResult::Success,
             target_agent_id: Some(target_id.to_string()),
@@ -517,7 +517,7 @@ mod tests {
             tick_id: 100,
         });
         mem.record(OutcomeRecord {
-            action_type: "给予".into(),
+            action_type: "予".into(),
             action_data: None,
             result: OutcomeResult::Success,
             target_agent_id: Some(target_id.to_string()),
@@ -578,7 +578,7 @@ mod tests {
 
         // 有 target 的动作
         mem.record(OutcomeRecord {
-            action_type: "给予".into(),
+            action_type: "予".into(),
             action_data: None,
             result: OutcomeResult::Success,
             target_agent_id: Some("npc-a".to_string()),
@@ -586,7 +586,7 @@ mod tests {
             tick_id: 100,
         });
         mem.record(OutcomeRecord {
-            action_type: "给予".into(),
+            action_type: "予".into(),
             action_data: None,
             result: OutcomeResult::Failed("物品不足".into()),
             target_agent_id: Some("npc-a".to_string()),
@@ -594,7 +594,7 @@ mod tests {
             tick_id: 101,
         });
         mem.record(OutcomeRecord {
-            action_type: "给予".into(),
+            action_type: "予".into(),
             action_data: None,
             result: OutcomeResult::Success,
             target_agent_id: Some("npc-b".to_string()),
@@ -603,7 +603,7 @@ mod tests {
         });
         // 无 target 的动作
         mem.record(OutcomeRecord {
-            action_type: "进食".into(),
+            action_type: "用".into(),
             action_data: None,
             result: OutcomeResult::Success,
             target_agent_id: None,
@@ -613,22 +613,22 @@ mod tests {
 
         let ctx = mem.to_prompt_context();
         assert!(
-            ctx.contains("给予 npc-a"),
+            ctx.contains("予 npc-a"),
             "should contain per-target line: {}",
             ctx
         );
         assert!(
-            ctx.contains("给予 npc-b"),
+            ctx.contains("予 npc-b"),
             "should contain per-target line: {}",
             ctx
         );
         assert!(
-            ctx.contains("进食"),
+            ctx.contains("用"),
             "should contain no-target action: {}",
             ctx
         );
         assert!(
-            !ctx.contains("给予 →"),
+            !ctx.contains("予 →"),
             "should NOT contain action-only line: {}",
             ctx
         );

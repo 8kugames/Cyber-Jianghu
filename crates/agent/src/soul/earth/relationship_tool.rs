@@ -71,7 +71,7 @@ pub fn record_social_event_definition() -> ToolDefinition {
                 },
                 "action": {
                     "type": "string",
-                    "description": "事件类型，如：对话、交易、给予、攻击等"
+                    "description": "事件类型，如：对话、交易、予、攻击等"
                 },
                 "description": {
                     "type": "string",

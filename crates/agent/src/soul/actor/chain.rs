@@ -47,7 +47,7 @@ impl CognitiveChain {
             final_intent: Intent::new(
                 uuid::Uuid::new_v4(), // 临时 ID，后续会替换
                 tick_id,
-                "休息",
+                "休整",
                 None,
             ),
             duration_ms: 0,
@@ -67,7 +67,7 @@ impl CognitiveChain {
             final_intent: Intent::new(
                 uuid::Uuid::new_v4(), // 临时 ID，后续会替换
                 tick_id,
-                "休息",
+                "休整",
                 None,
             ),
             duration_ms: 0,
@@ -175,7 +175,7 @@ mod tests {
             CognitiveStage::Perception,
             "感知内容".to_string(),
         ));
-        chain.final_intent = Intent::new(uuid::Uuid::new_v4(), 1, "休息", None);
+        chain.final_intent = Intent::new(uuid::Uuid::new_v4(), 1, "休整", None);
 
         let summary = chain.summarize();
         assert!(summary.contains("测试侠客"));
