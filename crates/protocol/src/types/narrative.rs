@@ -500,7 +500,7 @@ mod tests {
 
     #[test]
     fn test_recognition_from_bool() {
-        let json = r#"{"relative_position":"远处","appearance":"老者","current_activity":"打坐","recognition":true}"#;
+        let json = r#"{"relative_position":"远处","appearance":"老者","current_activity":"静修","recognition":true}"#;
         let p: AgentPerception = serde_json::from_str(json).unwrap();
         let r = p.recognition.unwrap();
         assert!(r.is_known);
