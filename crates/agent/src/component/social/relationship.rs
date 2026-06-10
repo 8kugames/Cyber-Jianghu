@@ -673,7 +673,7 @@ mod tests {
 
         // 记录社交事件（新目标）
         store
-            .record_social_event(target_id, "李四", 10, "给予", "李四给了你一个馒头", 5)
+            .record_social_event(target_id, "李四", 10, "予", "李四给了你一个馒头", 5)
             .unwrap();
 
         // 验证关系自动创建
@@ -681,7 +681,7 @@ mod tests {
         assert_eq!(rel.target_name, "李四");
         assert_eq!(rel.favorability, 5);
         assert_eq!(rel.key_events.len(), 1);
-        assert_eq!(rel.key_events[0].event_type, "给予");
+        assert_eq!(rel.key_events[0].event_type, "予");
     }
 
     #[test]
@@ -695,13 +695,13 @@ mod tests {
 
         // 多次事件
         store
-            .record_social_event(target_id, "王五", 5, "给予", "送了馒头", 5)
+            .record_social_event(target_id, "王五", 5, "予", "送了馒头", 5)
             .unwrap();
         store
             .record_social_event(target_id, "王五", 10, "交易", "公平交易", 3)
             .unwrap();
         store
-            .record_social_event(target_id, "王五", 15, "偷窃", "偷了银子", -15)
+            .record_social_event(target_id, "王五", 15, "取", "取了银子", -15)
             .unwrap();
 
         let rel = store.get_relationship(target_id).unwrap().unwrap();
@@ -720,10 +720,10 @@ mod tests {
 
         // 超过上限
         store
-            .record_social_event(target_id, "赵六", 1, "给予", "大礼", 80)
+            .record_social_event(target_id, "赵六", 1, "予", "大礼", 80)
             .unwrap();
         store
-            .record_social_event(target_id, "赵六", 2, "给予", "再送礼", 50)
+            .record_social_event(target_id, "赵六", 2, "予", "再送礼", 50)
             .unwrap();
 
         let rel = store.get_relationship(target_id).unwrap().unwrap();

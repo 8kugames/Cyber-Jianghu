@@ -238,8 +238,7 @@ impl RuleEngine {
         context: &RuleValidationContext,
     ) -> String {
         let action_type = match rule_id {
-            "valid_item_id_eat" => "进食",
-            "valid_item_id_drink" => "饮水",
+            "valid_item_id_use" => "用",
             "valid_target_node_move" => "移动",
             _ => return base_reason.to_string(),
         };
@@ -253,7 +252,7 @@ impl RuleEngine {
             let mut vars = HashMap::new();
 
             match action_type {
-                "进食" | "饮水" => {
+                "用" => {
                     let items: Vec<&str> = context
                         .available_item_ids
                         .iter()
@@ -263,7 +262,7 @@ impl RuleEngine {
                     vars.insert(
                         "available_items".to_string(),
                         if items.is_empty() {
-                            "（背包为空，请先 pickup 或 gather）".to_string()
+                            "（背包为空，请先 取 或 制造 获取物品）".to_string()
                         } else {
                             items.join(", ")
                         },
@@ -512,29 +511,16 @@ mod tests {
         // 模拟 rules.json 内容
         let rules_json: serde_json::Value = serde_json::json!([
             {
-                "id": "valid_item_id_eat",
-                "name": "eat 的 item_id 必须在背包中",
+                "id": "valid_item_id_use",
+                "name": "用 的 item_id 必须在背包中",
                 "rule_type": "ResourceConstraint",
                 "condition": {
                     "Or": [
-                        {"NotEquals": ["intent.action_type", "进食"]},
+                        {"NotEquals": ["intent.action_type", "用"]},
                         {"In": ["intent.action_data.item_id", "available_item_ids"]}
                     ]
                 },
-                "error_message": "吃东西失败：物品ID无效，请使用背包中物品的精确ID",
-                "enabled": true
-            },
-            {
-                "id": "valid_item_id_drink",
-                "name": "drink 的 item_id 必须在背包中",
-                "rule_type": "ResourceConstraint",
-                "condition": {
-                    "Or": [
-                        {"NotEquals": ["intent.action_type", "饮水"]},
-                        {"In": ["intent.action_data.item_id", "available_item_ids"]}
-                    ]
-                },
-                "error_message": "喝水失败：物品ID无效，请使用背包中物品的精确ID",
+                "error_message": "使用物品失败：物品ID无效，请使用背包中物品的精确ID",
                 "enabled": true
             },
             {
@@ -554,35 +540,35 @@ mod tests {
 
         let engine = RuleEngine::from_config(&rules_json);
 
-        // eat + 有效 item_id → 通过
+        // 用 + 有效 item_id → 通过
         let mut ctx = create_test_context();
         ctx.intent = Intent::new(
             Uuid::new_v4(),
             1,
-            "进食",
+            "用",
             Some(serde_json::json!({"item_id": "馒头"})),
         );
         ctx.available_item_ids = vec!["馒头".to_string()];
         let result = engine.validate_context(&ctx).await.unwrap();
         assert!(
             matches!(result, ValidationResult::Approved { .. }),
-            "eat 有效 item_id 应通过"
+            "用 有效 item_id 应通过"
         );
 
-        // eat + 无效 item_id → 拒绝
+        // 用 + 无效 item_id → 拒绝
         ctx.available_item_ids = vec!["水".to_string()];
         let result = engine.validate_context(&ctx).await.unwrap();
         assert!(
             matches!(result, ValidationResult::Rejected { .. }),
-            "eat 无效 item_id 应拒绝"
+            "用 无效 item_id 应拒绝"
         );
 
-        // 非进食动作 → 通过（蕴含式放行）
+        // 非用动作 → 通过（蕴含式放行）
         ctx.intent = Intent::new(Uuid::new_v4(), 1, "说话", None);
         let result = engine.validate_context(&ctx).await.unwrap();
         assert!(
             matches!(result, ValidationResult::Approved { .. }),
-            "非进食动作应通过"
+            "非用动作应通过"
         );
 
         // move + 有效 target → 通过
@@ -617,14 +603,14 @@ mod tests {
         let result = engine.validate_context(&ctx).await.unwrap();
         assert!(matches!(result, ValidationResult::Approved { .. }));
 
-        // 加载规则：禁止进食（NotEquals 蕴含式）
+        // 加载规则：禁止用（NotEquals 蕴含式）
         let rules_json = serde_json::json!([
             {
-                "id": "block_eat",
-                "name": "禁止进食",
+                "id": "block_use",
+                "name": "禁止用",
                 "rule_type": "ActionCooldown",
-                "condition": {"NotEquals": ["intent.action_type", "进食"]},
-                "error_message": "禁止进食",
+                "condition": {"NotEquals": ["intent.action_type", "用"]},
+                "error_message": "禁止使用物品",
                 "enabled": true
             }
         ]);
@@ -636,20 +622,20 @@ mod tests {
         let loaded = engine.registry().all_enabled().await;
         assert_eq!(loaded.len(), 1, "应加载 1 条规则");
 
-        // 说话（非进食）→ NotEquals 满足 → 通过
+        // 说话（非用）→ NotEquals 满足 → 通过
         let result = engine.validate_context(&ctx).await.unwrap();
         assert!(
             matches!(result, ValidationResult::Approved { .. }),
-            "说话应通过（非进食）"
+            "说话应通过（非用）"
         );
 
-        // 进食 → NotEquals 不满足 → 拒绝
-        let mut ctx_eat = create_test_context();
-        ctx_eat.intent = Intent::new(Uuid::new_v4(), 1, "进食", None);
-        let result = engine.validate_context(&ctx_eat).await.unwrap();
+        // 用 → NotEquals 不满足 → 拒绝
+        let mut ctx_use = create_test_context();
+        ctx_use.intent = Intent::new(Uuid::new_v4(), 1, "用", None);
+        let result = engine.validate_context(&ctx_use).await.unwrap();
         assert!(
             matches!(result, ValidationResult::Rejected { .. }),
-            "进食应被拒绝"
+            "用应被拒绝"
         );
     }
 }

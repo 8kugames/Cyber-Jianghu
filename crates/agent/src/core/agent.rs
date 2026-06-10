@@ -654,7 +654,7 @@ impl Agent {
     /// （注：这不是复合动作，而是原子动作排队执行）
     pub(crate) fn assemble_pipeline(intents: Vec<Intent>) -> Intent {
         if intents.is_empty() {
-            return Intent::new(uuid::Uuid::nil(), 0, "休息", None);
+            return Intent::new(uuid::Uuid::nil(), 0, "休整", None);
         }
         if intents.len() == 1 {
             return intents
@@ -763,7 +763,7 @@ mod tests {
     fn noop_decision_callback() -> crate::runtime::DecisionCallback {
         Arc::new(
             |tick_id: i64, agent_id: Uuid| -> BoxFuture<'static, Intent> {
-                Box::pin(async move { Intent::new(agent_id, tick_id, "休息", None) })
+                Box::pin(async move { Intent::new(agent_id, tick_id, "休整", None) })
             },
         )
     }

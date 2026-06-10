@@ -243,7 +243,7 @@ pub struct HttpDecisionState {
 pub struct IntentRequest {
     /// Intent 唯一 ID（可选，如果未提供则自动生成）
     pub intent_id: Option<String>,
-    /// 动作类型（如 "休息", "说话", "移动" 等）
+    /// 动作类型（如 "休整", "说话", "移动" 等）
     pub action_type: String,
     /// Agent ID（可选，默认使用服务端配置的 agent_id）
     pub agent_id: Option<String>,
@@ -362,13 +362,13 @@ pub fn http_decision(
                     error!("[http] Channel closed, defaulting to idle");
                     let guard = agent_id_clone.read().await;
                     let id = *guard;
-                    Intent::new(id, world_state.tick_id, "休息", None)
+                    Intent::new(id, world_state.tick_id, "休整", None)
                 }
                 Err(_) => {
                     // 超时是正常的（表示没有外部决策）
                     let guard = agent_id_clone.read().await;
                     let id = *guard;
-                    Intent::new(id, world_state.tick_id, "休息", None)
+                    Intent::new(id, world_state.tick_id, "休整", None)
                 }
             }
         })

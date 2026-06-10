@@ -316,13 +316,13 @@ mod tests {
             call_type: None,
             function: StreamToolCallFunctionDelta {
                 name: String::new(),
-                arguments: r#"{"action_type":"采集"}"#.to_string(),
+                arguments: r#"{"action_type":"取"}"#.to_string(),
             },
         });
         let calls = acc.into_tool_calls();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].id, "call_1");
         assert_eq!(calls[0].function.name, "get_action_detail");
-        assert_eq!(calls[0].function.arguments, r#"{"action_type":"采集"}"#);
+        assert_eq!(calls[0].function.arguments, r#"{"action_type":"取"}"#);
     }
 }
