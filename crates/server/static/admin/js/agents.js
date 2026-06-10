@@ -645,7 +645,7 @@ function renderTickCard(exp, metadata, time) {
 // LAYER_NAMES 已移至 utils.js（全局共享）
 
 // 渲染单魂/行动内联区块（server 版本，与 agent 端保持一致）
-// SPEAK_TYPES/WHISPER_TYPES/SHOUT_TYPES 已提取到 utils.js（全局共享）
+// 说话动作检测函数在 utils.js：isSpeakAtype / isWhisperAtype / isShoutAtype（纯 channel 字段判断）
 
 function renderServerActionHtml(actionType, actionData) {
   var at = actionType || "";
@@ -660,12 +660,12 @@ function renderServerActionHtml(actionType, actionData) {
   var content = ad.content || "";
   var targetId = ad.target_agent_id;
   var html = "";
-  if (SPEAK_TYPES[at] && content) {
+  if (isSpeakAtype(at, ad) && content) {
     var speakLabel = targetId ? ("对" + resolveTargetName(targetId) + "说话") : "向在场众人说话";
     html += '<div class="soul-text">' + escapeHtml(speakLabel) + '："' + escapeHtml(content) + '"</div>';
-  } else if (WHISPER_TYPES[at] && content) {
+  } else if (isWhisperAtype(at, ad) && content) {
     html += '<div class="soul-text">向' + escapeHtml(resolveTargetName(targetId)) + '密语："' + escapeHtml(content) + '"</div>';
-  } else if (SHOUT_TYPES[at] && content) {
+  } else if (isShoutAtype(at, ad) && content) {
     html += '<div class="soul-text">大喊："' + escapeHtml(content) + '"</div>';
   } else {
     html += '<div class="soul-text">' + escapeHtml(getActionTypeDisplay(at));
