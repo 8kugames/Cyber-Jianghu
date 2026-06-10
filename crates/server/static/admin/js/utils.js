@@ -20,10 +20,19 @@ var refreshInterval = null;
 var smoothTimeConfig = null;
 var smoothTimeAnimationId = null;
 
-// 地魂 action_type 分类常量（数据驱动：说话/私语/大喊类有 content 字段）
+// 地魂 action_type 分类常量（数据驱动：说话类有 content 字段）
 var SPEAK_TYPES = { "说话": true, speak: true };
-var WHISPER_TYPES = { "私语": true, whisper: true };
-var SHOUT_TYPES = { "大喊": true, shout: true };
+
+// 说话动作多因子判断：action_type + channel
+function isSpeakAtype(at, ad) {
+    return at === "说话" && (!ad || !ad.channel || ad.channel === "public");
+}
+function isWhisperAtype(at, ad) {
+    return at === "说话" && ad && ad.channel === "private";
+}
+function isShoutAtype(at, ad) {
+    return at === "说话" && ad && ad.channel === "broadcast";
+}
 
 // authVerified may be declared in auth.js (loaded after utils.js), so window guard needed
 var authVerified = typeof window.authVerified !== "undefined" ? window.authVerified : false;
