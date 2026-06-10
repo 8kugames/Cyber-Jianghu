@@ -18,10 +18,11 @@
   - **Saga 分布式事务模式**: DashMap (Write-Through) → StateProcessor 执行 → 持久化 PostgreSQL。持久化失败触发内存状态逆向回滚，保障绝对一致性。
   - **同地广播 (Co-located Broadcast)**: 动作执行后仅向处于同一 `node_id` 的 Agent 广播，避免全局网络风暴。
 - **Tick 调度引擎**
-  - 作为纯时钟推进时间，计算 HP、体力、饥饿、口渴衰减，并执行周期 WorldState 广播。
+  - 作为纯时钟推进时间，计算 HP、体力、各类属性衰减，并执行周期 WorldState 广播。
   - 寿终正寝判定。
-- **数据驱动动作系统 (Data-Driven Actions)**
-  - 彻底消灭代码层硬编码判断。`actions.yaml` 统一定义：`transmission`（决定是 Broadcast、Session 还是 Silent）、`display_name`、`validator_kind`、`highlight_kind` 等属性。
+- **10 原子数据驱动动作系统 (Data-Driven Actions)**
+  - 从 20 个语义化动作精简为 10 个原子原语：予/取/用/移动/说话/观察/攻击/休整/制造/教导。予/取/用以纯方向性替代给予/偷窃/进食/饮水/拾取/丢弃/采集等社会语义分类；说话通过 channel 参数（public/private/broadcast）统一三种形态；休整替代休息/打坐/修炼。
+  - `actions.yaml` 统一定义：`transmission`（Broadcast/Session/Silent）、`display_name`、`validator_kind`、`highlight_kind` 等属性。所有旧动作名彻底移除，不做向后兼容。
 
 ### P1 重要特性
 

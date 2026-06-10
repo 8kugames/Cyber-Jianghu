@@ -15,6 +15,12 @@
   - 归隐语义 (`retired`) 严格专属玩家主动操作，消除幽灵重生错误。
 - **数据驱动的动作体系 (Data-Driven ActionType)**
   - `ActionType` 彻底数据驱动化。`transmission` (Broadcast/Session/Silent)、`display_name`、`validator_kind` 剥离硬编码，由 `actions.yaml` 定义。
+- **动作系统 v2 原子化重构 — BREAKING**
+  - 从 20 个语义化动作精简为 10 个原子原语：予/取/用/移动/说话/观察/攻击/休整/制造/教导（原给予/偷窃/进食/饮水/拾取/丢弃/采集/私语/大喊/打坐/修炼 已移除）。
+  - 予/取/用 替代所有物品交互（出背包/入背包/消耗），纯方向性无社会语义。
+  - 说话 通过 channel 参数（public/private/broadcast）统一三种形态。
+  - 所有旧动作名从代码、配置、提示词、前端、测试中彻底移除，不做向后兼容。
+  - 遗留数据中旧 action_type 字符串（如 "eat", "give"）将触发"未知的动作类型"错误。
 - **关系图谱迁移 (RelationshipStore PRAGMA Migration)**
   - SQLite PRAGMA `user_version` 自动迁移落地，`relationships` 表从 5 列扩展为 7 列（新增 `self_description`, `description_tick`），代码量精简。
 
