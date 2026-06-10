@@ -267,7 +267,7 @@ impl super::Agent {
 
         // 热更新认知引擎的动作列表缓存
         if let Some(ref engine) = self.cognitive_engine {
-            engine.update_action_aliases(&game_rules.available_actions);
+            engine.update_action_index(&game_rules.available_actions);
             // 注入 available_actions 供地魂 get_action_detail 工具使用
             engine.set_available_actions(game_rules.available_actions.clone());
         }
@@ -883,14 +883,14 @@ impl super::Agent {
                                 }
                             }
 
-                            if final_intent.action_type.as_str() != "休息" {
+                            if final_intent.action_type.as_str() != "休整" {
                                 self.consecutive_idle_count = 0;
                                 if let Some(ref container) = self.actor_llm_container {
                                     let llm = container.read().await;
                                     llm.reset_idle_count();
                                 }
                             }
-                            if final_intent.action_type.as_str() == "休息" {
+                            if final_intent.action_type.as_str() == "休整" {
                                 self.maybe_rotate_model().await;
                             }
 

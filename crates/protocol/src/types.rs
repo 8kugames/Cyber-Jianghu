@@ -53,18 +53,18 @@ mod tests {
 
     #[test]
     fn test_action_type_serde() {
-        let idle = ActionType::new("休息");
-        assert_eq!(serde_json::to_string(&idle).unwrap(), "\"休息\"");
+        let idle = ActionType::new("休整");
+        assert_eq!(serde_json::to_string(&idle).unwrap(), "\"休整\"");
         let speak = ActionType::new("说话");
         assert_eq!(serde_json::to_string(&speak).unwrap(), "\"说话\"");
-        let custom = ActionType::new("打坐");
-        assert_eq!(serde_json::to_string(&custom).unwrap(), "\"打坐\"");
+        let custom = ActionType::new("攻击");
+        assert_eq!(serde_json::to_string(&custom).unwrap(), "\"攻击\"");
     }
 
     #[test]
     fn test_action_type_from_str() {
-        let action: ActionType = "休息".into();
-        assert_eq!(action.as_str(), "休息");
+        let action: ActionType = "休整".into();
+        assert_eq!(action.as_str(), "休整");
         let action: ActionType = "custom_action".into();
         assert_eq!(action.as_str(), "custom_action");
     }
@@ -72,8 +72,8 @@ mod tests {
     #[test]
     fn test_intent_creation() {
         let agent_id = Uuid::new_v4();
-        let intent = Intent::new(agent_id, 1, "休息", None);
-        assert_eq!(intent.action_type.as_str(), "休息");
+        let intent = Intent::new(agent_id, 1, "休整", None);
+        assert_eq!(intent.action_type.as_str(), "休整");
         assert_eq!(intent.tick_id, 1);
 
         let intent = Intent::new(
@@ -92,10 +92,10 @@ mod tests {
         let intent = Intent::new(
             agent_id,
             1,
-            "打坐",
-            Some(serde_json::json!({ "duration": 60 })),
+            "休整",
+            Some(serde_json::json!({ "intent": "recover" })),
         );
-        assert_eq!(intent.action_type.as_str(), "打坐");
+        assert_eq!(intent.action_type.as_str(), "休整");
         assert!(intent.action_data.is_some());
     }
 
@@ -103,8 +103,8 @@ mod tests {
     fn test_intent_with_thought() {
         let agent_id = Uuid::new_v4();
         let intent =
-            Intent::new(agent_id, 1, "休息", None).with_thought("我需要休息一下".to_string());
-        assert_eq!(intent.thought_log, Some("我需要休息一下".to_string()));
+            Intent::new(agent_id, 1, "休整", None).with_thought("我需要休整一下".to_string());
+        assert_eq!(intent.thought_log, Some("我需要休整一下".to_string()));
     }
 
     #[test]
@@ -171,7 +171,6 @@ mod tests {
             environmental_damage: None,
             gatherable_items: vec![],
             implicit_travel_cost: None,
-            aliases: vec!["longmen_lobby".to_string()],
         };
 
         let json = serde_json::to_string(&node).unwrap();
@@ -193,7 +192,6 @@ mod tests {
             environmental_damage: None,
             gatherable_items: vec![],
             implicit_travel_cost: None,
-            aliases: vec!["longmen_inn".to_string()],
         });
 
         graph.add_node(LocationNode {
@@ -204,7 +202,6 @@ mod tests {
             environmental_damage: None,
             gatherable_items: vec![],
             implicit_travel_cost: None,
-            aliases: vec!["longmen_lobby".to_string()],
         });
 
         graph.add_node(LocationNode {
@@ -215,7 +212,6 @@ mod tests {
             environmental_damage: None,
             gatherable_items: vec![],
             implicit_travel_cost: None,
-            aliases: vec!["longmen_backyard".to_string()],
         });
 
         graph.add_edge(LocationEdge {
