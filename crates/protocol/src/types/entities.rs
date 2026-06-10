@@ -132,10 +132,6 @@ pub struct InventoryItem {
     /// 物品类型（consumable/weapon/material 等）
     #[serde(default)]
     pub item_type: String,
-
-    /// 别名列表（供 LLM 别名映射使用）
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub aliases: Vec<String>,
 }
 
 /// 技能信息
@@ -244,10 +240,6 @@ pub struct SceneItem {
     /// 物品类型（食物、水、武器等）
     #[serde(default)]
     pub item_type: String,
-
-    /// 别名列表（供 LLM 别名映射使用）
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub aliases: Vec<String>,
 }
 
 /// 可用动作
@@ -280,14 +272,6 @@ pub struct AvailableAction {
     /// high → 强制 LLM 审核, medium → 抽审, low → 跳过 LLM
     #[serde(default = "default_ooc_risk")]
     pub ooc_risk: String,
-
-    /// 动作类型别名（中文变体 + 常见英文错误）
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub aliases: Vec<String>,
-
-    /// 字段别名映射 { canonical_field_name: [aliases...] }
-    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
-    pub field_aliases: std::collections::HashMap<String, Vec<String>>,
 
     /// 动作需求列表（消耗/前置条件，从 actions.yaml 直传）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

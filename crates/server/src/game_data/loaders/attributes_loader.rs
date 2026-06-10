@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_attributes_alias() {
+    fn test_load_attributes_basic() {
         let dir = TempDir::new().unwrap();
         create_test_unified_config(&dir);
 
