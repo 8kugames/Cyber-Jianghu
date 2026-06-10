@@ -1,28 +1,15 @@
 [
   {
-    "id": "valid_item_id_eat",
-    "name": "eat 的 item_id 必须在背包中",
+    "id": "valid_item_id_use",
+    "name": "用 的 item_id 必须在背包中",
     "rule_type": "ResourceConstraint",
     "condition": {
       "Or": [
-        {"NotEquals": ["intent.action_type", "进食"]},
+        {"NotEquals": ["intent.action_type", "用"]},
         {"In": ["intent.action_data.item_id", "available_item_ids"]}
       ]
     },
-    "error_message": "吃东西失败：物品ID无效，请使用背包中物品的精确ID",
-    "enabled": true
-  },
-  {
-    "id": "valid_item_id_drink",
-    "name": "drink 的 item_id 必须在背包中",
-    "rule_type": "ResourceConstraint",
-    "condition": {
-      "Or": [
-        {"NotEquals": ["intent.action_type", "饮水"]},
-        {"In": ["intent.action_data.item_id", "available_item_ids"]}
-      ]
-    },
-    "error_message": "喝水失败：物品ID无效，请使用背包中物品的精确ID",
+    "error_message": "使用物品失败：物品ID无效，请使用背包中物品的精确ID",
     "enabled": true
   },
   {
