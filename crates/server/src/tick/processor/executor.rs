@@ -1,7 +1,3 @@
-//! 状态变更执行器
-//!
-//! 处理 mutator 未覆盖的状态变更类型，提供回退执行逻辑。
-
 use tracing::{error, warn};
 
 use crate::actions::StateChange;
@@ -9,10 +5,6 @@ use crate::db::DbPool;
 use crate::models::{AgentState, WorldEvent, WorldEventType};
 
 /// 应用状态变更的回退逻辑
-///
-/// 用于处理 mutator 未覆盖的状态变更类型。
-/// `agent_states` 为当前 agent 的可变状态（单元素）。
-/// `all_states` 为全局所有 agent 的只读快照（用于跨 agent 查找如名字解析）。
 pub async fn apply_state_change(
     db_pool: &DbPool,
     tick_id: i64,
@@ -23,30 +15,6 @@ pub async fn apply_state_change(
     events: &mut Vec<(uuid::Uuid, WorldEvent)>,
 ) -> bool {
     match change {
-        StateChange::HungerChanged { agent_id, delta } => {
-            if let Some(state) = agent_states.iter_mut().find(|s| s.agent_id == *agent_id) {
-                let context = state.get_formula_context();
-                let _ = state.status.apply_change("hunger", *delta, &context);
-                if state.status.check_death_condition("hunger") {
-                    state.is_alive = false;
-                    let _ = state.status.set("hp", 0);
-                    tracing::warn!("Agent {} 因饥饿归零而死亡 (Tick: {})", agent_id, tick_id);
-                }
-            }
-            true
-        }
-        StateChange::ThirstChanged { agent_id, delta } => {
-            if let Some(state) = agent_states.iter_mut().find(|s| s.agent_id == *agent_id) {
-                let context = state.get_formula_context();
-                let _ = state.status.apply_change("thirst", *delta, &context);
-                if state.status.check_death_condition("thirst") {
-                    state.is_alive = false;
-                    let _ = state.status.set("hp", 0);
-                    tracing::warn!("Agent {} 因口渴归零而死亡 (Tick: {})", agent_id, tick_id);
-                }
-            }
-            true
-        }
         StateChange::StaminaChanged { agent_id, delta } => {
             if let Some(state) = agent_states.iter_mut().find(|s| s.agent_id == *agent_id) {
                 let context = state.get_formula_context();
@@ -101,7 +69,7 @@ pub async fn apply_state_change(
                     tick_id,
                     description: format!("你给 {} 转移了 {} 个 {}", to_name, quantity, item_id),
                     metadata: serde_json::json!({
-                        "action": "给予",
+                        "action": "转移",
                         "target": to.to_string(),
                         "item_id": item_id,
                         "quantity": quantity,
@@ -135,7 +103,7 @@ pub async fn apply_state_change(
 
             if let Err(e) = remove_result {
                 warn!(
-                    "移除物品失败（物品不存在或数量不足）: agent={}, item={}, error={}",
+                    "移除物品失败: agent={}, item={}, error={}",
                     agent_id, item_id, e
                 );
                 let event = WorldEvent {
@@ -225,96 +193,173 @@ pub async fn apply_state_change(
                 true
             }
         }
-        StateChange::ItemPickedUp {
+        StateChange::ItemAcquired {
             agent_id,
             item_id,
             quantity,
+            source,
         } => {
-            if let Some(state) = agent_states.iter().find(|s| s.agent_id == *agent_id) {
-                let node_id = state.node_id.clone();
-
-                match crate::db::remove_ground_item(db_pool, &node_id, item_id, *quantity).await {
-                    Ok(true) => {
-                        if let Err(e) = crate::inventory::InventoryManager::add_item(
-                            db_pool, *agent_id, item_id, *quantity,
-                        )
-                        .await
-                        {
-                            warn!("拾取物品添加到背包失败: {}，尝试放回地面", e);
-                            if let Err(rollback_e) = crate::db::add_ground_item(
-                                db_pool, &node_id, item_id, *quantity, None,
-                            )
+            let source_str = source.as_str();
+            match source_str {
+                "ground" => {
+                    if let Some(state) = agent_states.iter().find(|s| s.agent_id == *agent_id) {
+                        let node_id = state.node_id.clone();
+                        match crate::db::remove_ground_item(db_pool, &node_id, item_id, *quantity)
                             .await
-                            {
-                                warn!("严重错误: 物品放回地面失败，物品丢失: {}", rollback_e);
+                        {
+                            Ok(true) => {
+                                if let Err(e) = crate::inventory::InventoryManager::add_item(
+                                    db_pool, *agent_id, item_id, *quantity,
+                                )
+                                .await
+                                {
+                                    warn!("拾取物品添加到背包失败: {}，尝试放回地面", e);
+                                    if let Err(rollback_e) = crate::db::add_ground_item(
+                                        db_pool, &node_id, item_id, *quantity, None,
+                                    )
+                                    .await
+                                    {
+                                        warn!(
+                                            "严重错误: 物品放回地面失败，物品丢失: {}",
+                                            rollback_e
+                                        );
+                                    }
+                                    let event = WorldEvent {
+                                        event_type: WorldEventType::ActionResult,
+                                        tick_id,
+                                        description: "拾取失败，背包已满或发生错误".to_string(),
+                                        metadata: serde_json::json!({
+                                            "action": "acquire_failed",
+                                            "item_id": item_id,
+                                            "reason": e.to_string(),
+                                        }),
+                                    };
+                                    events.push((*agent_id, event));
+                                    false
+                                } else {
+                                    let event = WorldEvent {
+                                        event_type: WorldEventType::ActionResult,
+                                        tick_id,
+                                        description: format!(
+                                            "你拾取了 {} 个 {}",
+                                            quantity, item_id
+                                        ),
+                                        metadata: serde_json::json!({
+                                            "action": "取(ground)",
+                                            "item_id": item_id,
+                                            "quantity": quantity,
+                                        }),
+                                    };
+                                    events.push((*agent_id, event));
+                                    true
+                                }
                             }
-
-                            let event = WorldEvent {
-                                event_type: WorldEventType::ActionResult,
-                                tick_id,
-                                description: "拾取失败，背包已满或发生错误".to_string(),
-                                metadata: serde_json::json!({
-                                    "action": "pickup_failed",
-                                    "item_id": item_id,
-                                    "reason": e.to_string(),
-                                }),
-                            };
-                            events.push((*agent_id, event));
-                            false
-                        } else {
-                            let event = WorldEvent {
-                                event_type: WorldEventType::ActionResult,
-                                tick_id,
-                                description: format!("你拾取了 {} 个 {}", quantity, item_id),
-                                metadata: serde_json::json!({
-                                    "action": "拾取",
-                                    "item_id": item_id,
-                                    "quantity": quantity,
-                                }),
-                            };
-                            events.push((*agent_id, event));
-                            true
+                            Ok(false) | Err(_) => {
+                                warn!("地面没有足够的 {} 供拾取", item_id);
+                                let event = WorldEvent {
+                                    event_type: WorldEventType::ActionResult,
+                                    tick_id,
+                                    description: format!("拾取失败，地面没有 {}", item_id),
+                                    metadata: serde_json::json!({
+                                        "action": "acquire_failed",
+                                        "item_id": item_id,
+                                    }),
+                                };
+                                events.push((*agent_id, event));
+                                false
+                            }
                         }
-                    }
-                    Ok(false) | Err(_) => {
-                        warn!("地面没有足够的 {} 供拾取", item_id);
-                        let event = WorldEvent {
-                            event_type: WorldEventType::ActionResult,
-                            tick_id,
-                            description: format!("拾取失败，地面没有 {}", item_id),
-                            metadata: serde_json::json!({
-                                "action": "pickup_failed",
-                                "item_id": item_id,
-                            }),
-                        };
-                        events.push((*agent_id, event));
+                    } else {
                         false
                     }
                 }
-            } else {
-                false
+                "resource" => {
+                    if let Err(e) = crate::inventory::InventoryManager::add_item(
+                        db_pool, *agent_id, item_id, *quantity,
+                    )
+                    .await
+                    {
+                        warn!("采集物品失败: {}", e);
+                        false
+                    } else {
+                        let event = WorldEvent {
+                            event_type: WorldEventType::ActionResult,
+                            tick_id,
+                            description: format!("你采集了 {} 个 {}", quantity, item_id),
+                            metadata: serde_json::json!({
+                                "action": "取(resource)",
+                                "item_id": item_id,
+                                "quantity": quantity,
+                            }),
+                        };
+                        events.push((*agent_id, event));
+                        true
+                    }
+                }
+                "effect" => {
+                    if let Err(e) = crate::inventory::InventoryManager::add_item(
+                        db_pool, *agent_id, item_id, *quantity,
+                    )
+                    .await
+                    {
+                        warn!("效果添加物品失败: {}", e);
+                        false
+                    } else {
+                        true
+                    }
+                }
+                _ => {
+                    warn!("未知的物品来源: {}", source_str);
+                    false
+                }
             }
         }
-        StateChange::ItemGathered {
+        StateChange::ItemDisposed {
             agent_id,
             item_id,
             quantity,
+            location,
         } => {
-            if let Err(e) =
-                crate::inventory::InventoryManager::add_item(db_pool, *agent_id, item_id, *quantity)
-                    .await
+            if let Err(e) = crate::inventory::InventoryManager::remove_item(
+                db_pool, *agent_id, item_id, *quantity,
+            )
+            .await
             {
-                warn!("采集物品失败: {}", e);
+                warn!("丢弃物品失败（背包扣除失败）: {}", e);
                 false
             } else {
+                if let Err(e) = crate::db::add_ground_item(
+                    db_pool,
+                    location,
+                    item_id,
+                    *quantity,
+                    Some(*agent_id),
+                )
+                .await
+                {
+                    warn!("丢弃物品添加到地面失败，回滚背包: {}", e);
+                    if let Err(re) = crate::inventory::InventoryManager::add_item(
+                        db_pool, *agent_id, item_id, *quantity,
+                    )
+                    .await
+                    {
+                        error!(
+                            "丢弃回滚失败！物品丢失: agent={}, item={}, qty={}, err={}",
+                            agent_id, item_id, quantity, re
+                        );
+                    }
+                    return false;
+                }
+
                 let event = WorldEvent {
                     event_type: WorldEventType::ActionResult,
                     tick_id,
-                    description: format!("你采集了 {} 个 {}", quantity, item_id),
+                    description: format!("你丢弃了 {} 个 {}", quantity, item_id),
                     metadata: serde_json::json!({
-                        "action": "采集",
+                        "action": "予(ground)",
                         "item_id": item_id,
                         "quantity": quantity,
+                        "location": location,
                     }),
                 };
                 events.push((*agent_id, event));
@@ -454,7 +499,6 @@ pub async fn apply_state_change(
 
                 match craft_result {
                     Ok(()) => {
-                        // DB 事务成功（材料已扣减、成品已入库），按配方扣 stamina
                         let stamina_cost = recipe.stamina_cost;
                         if let Some(state) =
                             agent_states.iter_mut().find(|s| s.agent_id == *agent_id)
@@ -478,7 +522,6 @@ pub async fn apply_state_change(
                     }
                     Err(e) => {
                         warn!("制造失败: {}", e);
-                        // 材料不足时 DB 事务已回滚，stamina 未扣减
                         let event = WorldEvent {
                             event_type: WorldEventType::ActionResult,
                             tick_id,
@@ -519,39 +562,36 @@ pub async fn apply_state_change(
         StateChange::MessageSpoken {
             agent_id,
             content,
+            channel,
             target_agent_id,
             already_broadcast,
         } => {
-            tracing::info!("Agent {}: {}", agent_id, content);
+            tracing::info!("Agent {} (channel={}): {}", agent_id, channel, content);
 
             if *already_broadcast {
-                tracing::info!(
-                    "MessageSpoken already broadcast, skipping duplicate broadcast for agent {}",
-                    agent_id
-                );
-                true
-            } else {
-                let location = agent_states
-                    .iter()
-                    .find(|s| s.agent_id == *agent_id)
-                    .map(|s| s.node_id.clone());
+                return true;
+            }
 
-                if let Some(node_id) = location {
-                    // 构建 metadata，保留 target_agent_id
+            match channel.as_str() {
+                "private" => {
+                    // 私密通信：由 handler 的 Dialogue Session 处理
+                    // executor 仅确认格式有效
+                    true
+                }
+                "broadcast" => {
+                    // 大范围广播：发到所有 agent
                     let mut meta = serde_json::json!({
                         "from_agent_id": agent_id,
                         "content": content,
-                        "channel": "local",
-                        "location": node_id,
+                        "channel": "broadcast",
                     });
                     if let Some(target) = target_agent_id {
                         meta.as_object_mut()
                             .expect("meta is always a JSON object")
                             .insert("target_agent_id".to_string(), serde_json::json!(target));
                     }
-
                     for state in agent_states.iter() {
-                        if state.node_id == node_id && state.is_alive {
+                        if state.is_alive {
                             let event = WorldEvent {
                                 event_type: WorldEventType::PublicMessage,
                                 tick_id,
@@ -561,8 +601,41 @@ pub async fn apply_state_change(
                             events.push((state.agent_id, event));
                         }
                     }
+                    true
                 }
-                true
+                _ => {
+                    // public (默认) + fallback：广播到同位置
+                    let location = agent_states
+                        .iter()
+                        .find(|s| s.agent_id == *agent_id)
+                        .map(|s| s.node_id.clone());
+
+                    if let Some(node_id) = location {
+                        let mut meta = serde_json::json!({
+                            "from_agent_id": agent_id,
+                            "content": content,
+                            "channel": "local",
+                            "location": node_id,
+                        });
+                        if let Some(target) = target_agent_id {
+                            meta.as_object_mut()
+                                .expect("meta is always a JSON object")
+                                .insert("target_agent_id".to_string(), serde_json::json!(target));
+                        }
+                        for state in agent_states.iter() {
+                            if state.node_id == node_id && state.is_alive {
+                                let event = WorldEvent {
+                                    event_type: WorldEventType::PublicMessage,
+                                    tick_id,
+                                    description: content.clone(),
+                                    metadata: meta.clone(),
+                                };
+                                events.push((state.agent_id, event));
+                            }
+                        }
+                    }
+                    true
+                }
             }
         }
         StateChange::AgentDied { agent_id, cause } => {
@@ -609,68 +682,9 @@ pub async fn apply_state_change(
             }
             true
         }
-        StateChange::ItemDropped {
-            from_agent,
-            item_id,
-            quantity,
-            location,
-        } => {
-            if let Err(e) = crate::inventory::InventoryManager::remove_item(
-                db_pool,
-                *from_agent,
-                item_id,
-                *quantity,
-            )
-            .await
-            {
-                warn!("掉落物品失败（背包扣除失败）: {}", e);
-                false
-            } else {
-                if let Err(e) = crate::db::add_ground_item(
-                    db_pool,
-                    location,
-                    item_id,
-                    *quantity,
-                    Some(*from_agent),
-                )
-                .await
-                {
-                    warn!("掉落物品添加到地面失败，回滚背包: {}", e);
-                    // 回滚：把物品放回背包，避免物品凭空消失
-                    if let Err(re) = crate::inventory::InventoryManager::add_item(
-                        db_pool,
-                        *from_agent,
-                        item_id,
-                        *quantity,
-                    )
-                    .await
-                    {
-                        error!(
-                            "掉落回滚失败！物品丢失: agent={}, item={}, qty={}, err={}",
-                            from_agent, item_id, quantity, re
-                        );
-                    }
-                    return false;
-                }
-
-                let event = WorldEvent {
-                    event_type: WorldEventType::ActionResult,
-                    tick_id,
-                    description: format!("你掉落了 {} 个 {}", quantity, item_id),
-                    metadata: serde_json::json!({
-                        "action": "丢弃",
-                        "item_id": item_id,
-                        "quantity": quantity,
-                        "location": location,
-                    }),
-                };
-                events.push((*from_agent, event));
-                true
-            }
-        }
         StateChange::LocationChanged {
             agent_id,
-            old_location,
+            old_location: _,
             new_location,
         } => {
             if let Some(state) = agent_states.iter_mut().find(|s| s.agent_id == *agent_id) {
@@ -685,10 +699,9 @@ pub async fn apply_state_change(
                 let event = WorldEvent {
                     event_type: WorldEventType::ActionResult,
                     tick_id,
-                    description: format!("你从 {} 移动到了 {}", old_location, new_location),
+                    description: format!("你移动到了 {}", new_location),
                     metadata: serde_json::json!({
                         "action": "移动",
-                        "old_location": old_location,
                         "new_location": new_location,
                     }),
                 };
@@ -696,10 +709,7 @@ pub async fn apply_state_change(
                 true
             }
         }
-        // AttributeChanged, HpChanged 由 AttributeMutator 处理
-        // SkillLearned 由 SkillMutator 处理（LLM 行为指令注入）
         StateChange::SkillLearned { .. } => true,
-
         StateChange::RecipeLearned {
             agent_id,
             recipe_id,
@@ -719,93 +729,30 @@ pub async fn apply_state_change(
             .await
             .is_ok()
         }
-
-        _ => true,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn make_test_agent_state(agent_id: uuid::Uuid) -> AgentState {
-        use crate::game_data::types::StatusComponent;
-        use crate::game_data::types::attributes::{
-            Attribute, AttributeCollection, AttributeMetadata, AttributeType, AttributeValue,
-        };
-
-        let mut hunger_collection = AttributeCollection::new_collection();
-        hunger_collection.add(Attribute {
-            value: AttributeValue::Static { value: 50 },
-            metadata: AttributeMetadata {
-                name: "hunger".to_string(),
-                display_name: "饥饿".to_string(),
-                description: String::new(),
-                attr_type: AttributeType::Status,
-                birth_range: None,
-                initial_value: None,
-                growth_rate: None,
-                affects: vec![],
-                decay_per_tick: None,
-                death_condition: None,
-                formula: None,
-                default_value: None,
-                min_value: None,
-                max_value_formula: None,
-                recovery_formula: None,
-                primary_attribute_deps: vec![],
-            },
-        });
-
-        AgentState {
-            id: 0,
-            agent_id,
-            name: "测试角色".to_string(),
-            tick_id: 1,
-            primary_attributes: crate::game_data::types::AttributeComponent {
-                collection: AttributeCollection::new_collection(),
-            },
-            status: StatusComponent {
-                collection: hunger_collection,
-                max_modifiers: Default::default(),
-            },
-            node_id: "test".to_string(),
-            is_alive: true,
-            inventory_cleared_this_tick: false,
-            skills: vec![],
-            action_counts: std::collections::HashMap::new(),
-            birth_tick: None,
-            decay_accumulator: std::collections::HashMap::new(),
-            created_at: chrono::Utc::now(),
+        StateChange::Observation {
+            observer_id,
+            target_id: Some(target_id),
+            description,
+            detected: true,
+        } => {
+            if let Some(state) = agent_states.iter().find(|s| s.agent_id == *target_id) {
+                let meta = serde_json::json!({
+                    "from_agent_id": observer_id,
+                    "description": description,
+                    "channel": "observation",
+                    "location": state.node_id,
+                });
+                let event = WorldEvent {
+                    event_type: WorldEventType::Observation,
+                    tick_id,
+                    description: description.clone(),
+                    metadata: meta,
+                };
+                events.push((*target_id, event));
+            }
+            true
         }
-    }
-
-    #[tokio::test]
-    async fn test_hunger_changed() {
-        let db_pool = sqlx::postgres::PgPoolOptions::new()
-            .connect_lazy("postgres://postgres@localhost/postgres")
-            .unwrap();
-        let tick_id = 1i64;
-        let agent_id = uuid::Uuid::new_v4();
-        let agent_state = make_test_agent_state(agent_id);
-        let mut events = Vec::new();
-
-        let change = StateChange::HungerChanged {
-            agent_id,
-            delta: 10,
-        };
-
-        let result = apply_state_change(
-            &db_pool,
-            tick_id,
-            &change,
-            None,
-            &mut [agent_state],
-            &[],
-            &mut events,
-        )
-        .await;
-
-        assert!(result);
+        StateChange::Observation { .. } => true,
+        _ => true,
     }
 }

@@ -4,37 +4,57 @@
 **模块**: `crates/server`
 
 ## 1. 设计目标
-根据数据字典验证和执行具体的交互行为，支持解耦且可扩展的各类基础、战斗与交互动作。
 
-## 2. 核心机制
-### 2.1 动作分类
-系统预定义了标准化的动作分类处理管线（配置在 `actions.yaml` 中）：
-- **基础动作 (Basic)**：休息 (rest)、说话 (speak)、移动 (move)、大喊 (shout)、拾取 (pickup)、丢弃 (drop)、采集 (gather)、制造 (craft)、传授 (teach)。
-- **战斗动作 (Combat)**：攻击 (attack)、使用物品 (use)、进食 (eat)、饮水 (drink)、逃跑 (flee)。
-- **交互/生活动作 (Interaction)**：给予 (give)、偷窃 (steal)、打坐 (meditate)、修炼 (practice)、私语 (whisper)。
+根据数据字典验证和执行原子交互行为。动作系统遵循"天道无为"哲学——天道（服务端）只提供物理法则，不裁决社会/道德含义。
 
-> **设计决策: 为何没有 trade 动作**
-> 
-> `trade` (两方协商交易) 在早期 PRD 中列出，但经审视后**主动移除**。
-> 理由: 交易是社会行为而非物理动作。天道 (Server) 是物理引擎，不应裁决"公平交易"。
-> 交易的涌现路径: A `give` B 支付 → B `give` A 货物 (或反序)。两次 `give` 之间**不存在原子性保证**——
-> B 可以拿了钱不给货 (欺诈)。这正是设计意图: 信任、信誉、暴力讨债等社会机制应从这种脆弱性中涌现。
+## 2. 10 原子动作
 
-### 2.2 验证管线与执行分离
-动作执行被严格分为“意图解析验证”与“执行变异”两步：
-- **验证**：检查 `ActionType` 注册、前置条件（如死亡限制）、目标距离（同节点）及资源消耗（体力/内力）。
-- **执行转 StateChange**：`ActionExecutor` 并不直接修改 `AgentState`，而是输出代表变化的 `StateChange`（例如 `AttributeChanged`, `ItemAdded`）。
-- **变异应用**：由一系列 `StateMutator` 将 `StateChange` 应用到内存状态或数据库中。
+动作系统基于第一性原理从 20 个语义化动作精简为 10 个原子原语。每个动作对应唯一的物理操作，不重叠不遗漏。
 
-### 2.3 数据驱动的属性结算
-动作造成的伤害、消耗，均依赖 `formula_engine` 根据配置文件中的表达式（evalexpr）结合双方属性动态计算得出，而不写死在执行器代码中。
+| 动作 | 覆盖旧动作 | 物理语义 |
+|------|-----------|---------|
+| 予 | 给予、丢弃 | 物品从背包向外输出（目标/地面）。纯方向性操作，不假设慷慨或丢弃。 |
+| 取 | 偷窃、拾取、采集 | 物品向背包内输入（地面/资源点/其他角色）。纯方向性操作，不假设偷窃或正当获取。 |
+| 用 | 进食、饮水、使用 | 消耗或激活背包中的物品。效果由物品定义中的 effects 决定。 |
+| 移动 | 移动、逃跑 | 改变所在 node_id。纯位置变更。 |
+| 说话 | 说话、私语、大喊 | 发出信息。通过 channel 参数区分可见范围: public(同位置)/private(仅目标)/broadcast(附近位置)。 |
+| 观察 | 观察 | 纯信息收集，无副作用。 |
+| 攻击 | 攻击 | 对目标应用伤害。效果由 formula_engine 动态计算。 |
+| 休整 | 休息、打坐、修炼 | 等待时间流逝 + 按配置恢复属性。通过 intent 参数区分风格，执行器逻辑统一。 |
+| 制造 | 制造 | 将材料合成为新物品。由 recipe 系统驱动。 |
+| 教导 | 传授 | 将配方知识从一人转移到另一人。 |
 
-## 3. 架构约束
+### 设计原则
+
+- **予/取/用 是三种物品交互原语**：物品命运只有三种——出背包（予）、入背包（取）、消耗/转化（用）。三者平级，无顶层"转移"抽象。
+- **予 不假设慷慨，取 不假设偷窃**：道德与社会评判从 Agent 的自主反应中涌现，不由服务端动作名裁决。
+- **说话 通过 channel 统一三种形态**：不保留独立的私语/大喊动作类型，全部由 `channel` 字段（public/private/broadcast）区分。
+- **休整 是唯一的时间性动作**：通过 intent 参数区分风格（如"闭目养神""调息运气"），不保留独立的打坐/修炼动作类型。
+- **不做向后兼容**：旧动作名从所有代码、配置、提示词、前端、测试中彻底移除。
+
+## 3. 验证管线与执行分离
+
+动作执行被严格分为"意图解析验证"与"执行变异"两步：
+
+- **验证**: 检查 `ActionType` 注册、前置条件（如死亡限制）、目标距离（同节点）及资源消耗（体力/内力）。
+- **执行转 StateChange**: `ActionExecutor` 不直接修改 `AgentState`，而是输出代表变化的 `StateChange`（例如 `AttributeChanged`, `ItemAcquired`）。
+- **变异应用**: 由一系列 `StateMutator` 将 `StateChange` 应用到内存状态或数据库。
+
+## 4. 数据驱动的属性结算
+
+动作造成的伤害、消耗，均依赖 `formula_engine` 根据配置文件中的表达式（evalexpr）结合双方属性动态计算得出，不写死在执行器代码中。
+
+## 5. 架构约束
+
 - 每个 Action 的具体逻辑实现必须返回明确的 `StateChange`。
 - 新增动作只需在 YAML 中注册配置，并在 Executor 侧添加对应逻辑生成变异即可。
+- 严禁在代码中硬编码具体的动作处理逻辑，必须通过通用的 `Executor` 管线结合配置文件执行。
+- `ActionType` 是 `struct ActionType(String)`——不是枚举，任何字符串都合法。
 
-## 4. 代码入口
+## 6. 代码入口
+
 - 执行器总管: `crates/server/src/actions/executor/mod.rs`
-- 基础动作: `crates/server/src/actions/executor/basic.rs`
-- 战斗动作: `crates/server/src/actions/executor/combat.rs`
-- 交互动作: `crates/server/src/actions/executor/interaction.rs`
+- 动作执行器: `crates/server/src/actions/executor/basic.rs`
+- 战斗执行器: `crates/server/src/actions/executor/combat.rs`
+- 动作类型定义: `crates/server/src/actions/types.rs`
+- 动作校验: `crates/server/src/actions/validator.rs`
