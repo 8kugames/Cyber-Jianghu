@@ -378,9 +378,9 @@ async fn collect_highlights(
         INNER JOIN agents a ON l.agent_id = a.agent_id
         WHERE l.tick_id BETWEEN $1 AND $2
         AND (
-            (l.action_type = 'speak' AND l.narrative IS NOT NULL)
-            OR (l.action_type = 'attack' AND l.result = 'success')
-            OR (l.action_type = 'give' AND l.result = 'success')
+            (l.action_type = '说话' AND l.narrative IS NOT NULL)
+            OR (l.action_type = '攻击' AND l.result = 'success')
+            OR (l.action_type = '予' AND l.result = 'success')
         )
         ORDER BY l.tick_id
         "#,

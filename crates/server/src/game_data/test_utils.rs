@@ -192,13 +192,11 @@ pub fn init_test_registry() {
                         "requirements": [],
                         "effects": []
                     },
-                    "偷窃": {
-                        "description": "从目标身上偷取物品",
-                        "success_rate": 0.5,
+                    "取": {
+                        "description": "从目标或场景中获取物品",
                         "stamina_cost": 5,
                         "validation": {
-                            "requires_target": true,
-                            "required_fields": ["target_agent_id"]
+                            "required_fields": ["item_id"]
                         },
                         "requirements": [],
                         "effects": []
@@ -231,13 +229,11 @@ pub fn init_test_registry() {
                         "requirements": [],
                         "effects": []
                     },
-                    "给予": {
-                        "description": "将物品给予目标",
+                    "予": {
+                        "description": "将物品给予目标或丢弃到地上",
                         "stamina_cost": 2,
                         "validation": {
-                            "requires_target": true,
-                            "requires_target_alive": true,
-                            "required_fields": ["target_agent_id", "item_id", "quantity"],
+                            "required_fields": ["item_id", "quantity"],
                             "field_validations": [
                                 { "field": "quantity", "validation_type": "min_value", "min_value": 1 }
                             ]
@@ -245,8 +241,8 @@ pub fn init_test_registry() {
                         "requirements": [],
                         "effects": []
                     },
-                    "使用": {
-                        "description": "使用物品",
+                    "用": {
+                        "description": "消耗或激活物品",
                         "stamina_cost": 1,
                         "validation": {
                             "required_fields": ["item_id"]
@@ -254,11 +250,19 @@ pub fn init_test_registry() {
                         "requirements": [],
                         "effects": []
                     },
-                    "拾取": {
-                        "description": "从场景中拾取物品",
-                        "stamina_cost": 2,
+                    "观察": {
+                        "description": "观察环境或目标",
+                        "stamina_cost": 0,
+                        "validation": {},
+                        "requirements": [],
+                        "effects": []
+                    },
+                    "教导": {
+                        "description": "教导他人",
+                        "stamina_cost": 5,
                         "validation": {
-                            "required_fields": ["item_id"]
+                            "requires_target": true,
+                            "required_fields": ["target_agent_id"]
                         },
                         "requirements": [],
                         "effects": []
@@ -273,8 +277,8 @@ pub fn init_test_registry() {
                         "requirements": [],
                         "effects": []
                     },
-                    "休息": {
-                        "description": "休息",
+                    "休整": {
+                        "description": "休整恢复",
                         "display_name": "静修",
                         "stamina_cost": 0,
                         "validation": {},

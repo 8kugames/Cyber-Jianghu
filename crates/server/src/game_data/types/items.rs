@@ -44,10 +44,6 @@ pub struct ItemConfigEntry {
     /// 自然衰减速率（每Tick减少的耐久度，默认 0）
     #[serde(default = "default_decay_rate")]
     pub decay_rate: i32,
-
-    /// 别名列表（供 LLM 别名映射使用）
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub aliases: Vec<String>,
 }
 
 fn default_max_durability() -> i32 {
