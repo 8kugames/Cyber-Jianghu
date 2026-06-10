@@ -605,9 +605,6 @@ pub struct LocationNodeData {
     pub environmental_damage: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gatherable_items: Option<Vec<String>>,
-    /// 别名列表（供 LLM 别名映射使用）
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub aliases: Vec<String>,
 }
 
 /// 位置边数据

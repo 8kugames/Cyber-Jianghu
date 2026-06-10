@@ -30,7 +30,7 @@ pub struct AgentAction {
     /// 动作类型（原始值，如 idle, speak）
     pub action_type: ActionType,
 
-    /// 动作中文描述（如 "休息，不做任何操作"）
+    /// 动作中文描述（如 "静修"、"交谈"）
     /// 从 actions.yaml 配置获取
     pub action_type_display: Option<String>,
 
