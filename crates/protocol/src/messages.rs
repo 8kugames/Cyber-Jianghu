@@ -503,7 +503,7 @@ mod tests {
     #[test]
     fn test_client_message_serialization() {
         let agent_id = Uuid::nil();
-        let intent = Intent::new(agent_id, 1, "休息", None);
+        let intent = Intent::new(agent_id, 1, "休整", None);
         let msg = ClientMessage::from_intent(intent);
 
         let json = msg.to_json().unwrap();
@@ -513,7 +513,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["type"], "intent");
         assert_eq!(parsed["tick_id"], 1);
-        assert_eq!(parsed["action_type"], "休息");
+        assert_eq!(parsed["action_type"], "休整");
     }
 
     #[test]

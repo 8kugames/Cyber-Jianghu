@@ -28,25 +28,12 @@ impl ActionType {
         &self.0
     }
 
-    /// 常用动作类型常量（全程中文）
-    pub const IDLE: &'static str = "休息";
+    /// 常用动作类型常量（中文）
+    /// idel/休整 作为默认值；speak/说话、attack/攻击 在 rule_engine 和集成测试中使用。
+    /// 其余动作类型由 actions.yaml 数据驱动，不在此处硬编码。
+    pub const IDLE: &'static str = "休整";
     pub const SPEAK: &'static str = "说话";
-    pub const MOVE: &'static str = "移动";
-    pub const GIVE: &'static str = "给予";
-    pub const STEAL: &'static str = "偷窃";
-    pub const USE: &'static str = "使用";
-    pub const PICKUP: &'static str = "拾取";
     pub const ATTACK: &'static str = "攻击";
-    pub const DROP: &'static str = "丢弃";
-    pub const GATHER: &'static str = "采集";
-    pub const CRAFT: &'static str = "制造";
-    pub const EAT: &'static str = "进食";
-    pub const DRINK: &'static str = "饮水";
-    pub const WHISPER: &'static str = "私语";
-    pub const SHOUT: &'static str = "大喊";
-    pub const MEDITATE: &'static str = "打坐";
-    pub const PRACTICE: &'static str = "修炼";
-    pub const FLEE: &'static str = "逃跑";
 }
 
 impl Default for ActionType {
@@ -383,22 +370,22 @@ mod tests {
 
     #[test]
     fn test_action_type_serde() {
-        let action = ActionType::new("休息");
+        let action = ActionType::new("休整");
         let json = serde_json::to_string(&action).unwrap();
-        assert_eq!(json, "\"休息\"");
+        assert_eq!(json, "\"休整\"");
 
         let parsed: ActionType = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.as_str(), "休息");
+        assert_eq!(parsed.as_str(), "休整");
     }
 
     #[test]
     fn test_action_type_custom() {
-        let action = ActionType::new("打坐");
+        let action = ActionType::new("攻击");
         let json = serde_json::to_string(&action).unwrap();
-        assert_eq!(json, "\"打坐\"");
+        assert_eq!(json, "\"攻击\"");
 
         let parsed: ActionType = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.as_str(), "打坐");
+        assert_eq!(parsed.as_str(), "攻击");
     }
 
     #[test]
@@ -417,8 +404,8 @@ mod tests {
     #[test]
     fn test_intent_idle() {
         let agent_id = Uuid::new_v4();
-        let intent = Intent::new(agent_id, 1, "休息", None);
-        assert_eq!(intent.action_type.as_str(), "休息");
+        let intent = Intent::new(agent_id, 1, "休整", None);
+        assert_eq!(intent.action_type.as_str(), "休整");
         assert_eq!(intent.tick_id, 1);
     }
 
@@ -438,7 +425,7 @@ mod tests {
     #[test]
     fn test_intent_with_thought() {
         let agent_id = Uuid::new_v4();
-        let intent = Intent::new(agent_id, 1, "休息", None).with_thought("Thinking...".to_string());
+        let intent = Intent::new(agent_id, 1, "休整", None).with_thought("Thinking...".to_string());
         assert_eq!(intent.thought_log, Some("Thinking...".to_string()));
     }
 }

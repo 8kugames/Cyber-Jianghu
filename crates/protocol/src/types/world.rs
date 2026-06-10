@@ -197,6 +197,8 @@ pub enum WorldEventType {
     DeathNotification,
     /// 社交互动
     SocialInteraction,
+    /// 观察行为
+    Observation,
 }
 
 #[derive(Debug, Clone, Error)]
@@ -220,6 +222,7 @@ impl fmt::Display for WorldEventType {
             WorldEventType::SystemNotification => write!(f, "system_notification"),
             WorldEventType::DeathNotification => write!(f, "death_notification"),
             WorldEventType::SocialInteraction => write!(f, "social_interaction"),
+            WorldEventType::Observation => write!(f, "observation"),
         }
     }
 }
@@ -238,6 +241,7 @@ impl FromStr for WorldEventType {
             "system_notification" => Ok(WorldEventType::SystemNotification),
             "death_notification" => Ok(WorldEventType::DeathNotification),
             "social_interaction" => Ok(WorldEventType::SocialInteraction),
+            "observation" => Ok(WorldEventType::Observation),
             _ => Err(ParseWorldEventTypeError(s.to_string())),
         }
     }
@@ -255,6 +259,7 @@ impl WorldEventType {
             WorldEventType::SystemNotification => "system_notification",
             WorldEventType::DeathNotification => "death_notification",
             WorldEventType::SocialInteraction => "social_interaction",
+            WorldEventType::Observation => "observation",
         }
     }
 }
