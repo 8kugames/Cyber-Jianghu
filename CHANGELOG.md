@@ -26,6 +26,11 @@
 
 ### 智能体认知 (Agent Cognitive)
 
+- **Embedding 服务独立化 (Embedding Service Extraction)**
+  - 提取独立 `crates/embedding/` crate，支持双模式部署：Docker 环境使用远程 HTTP 服务（端口 23350），进程部署使用本地内嵌推理。
+  - `EmbedderService` 自动检测 `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` 环境变量选择 Local/Remote/Unavailable 三种 provider。
+  - 模型下载使用 reqwest + SHA256 校验（无 hf-hub 依赖），Dockerfile 构建时预下载模型。
+  - Remote 模式 fast fail，不静默降级；OnceLock + async `ensure_initialized()` 消除 TOCTOU 竞态与 `block_in_place` 反模式。
 - **Token 与注意力优化 (Attention & Token Optimization)**
   - 引入 `WorldStateStore` 与 `DeltaEngine` 记录状态增量，基于 `AttentionController` 输出 `FocusSummary`，替代全量 WorldState 注入 Prompt。
   - DeepSeek 前缀缓存调优：基于 system_hash 监控指标、D8 Reasoning 剥离、D9 JSON Schema 递归排序标准化，提高缓存命中率。
