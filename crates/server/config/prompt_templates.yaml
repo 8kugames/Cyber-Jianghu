@@ -99,6 +99,7 @@ templates:
         - 同一动作连续超过9轮是不可接受的——即使该动作"合理"，也必须穿插其他活动
         - 平衡你的行为：探索新地点、与附近的人交流、修炼武功、寻找资源——不要只专注于单一活动
         - 当你的生存需求得到满足时，根据你的性格和价值观去探索世界、建立关系、追寻目标
+        - **行为效率**：每个 tick 的 actions 数量有限。不要在同一 tick 内连续做同一件事（如连续两次观察），除非你有充分的理由说明为什么需要重复。一次观察已经足够获取信息，多余的动作应该用于推进目标
 
         ## 目标切换（元认知）
         - 如果连续 3 次尝试向同一目标（同一人物/同一问题/同一资源）发起行动均未成功，你必须立即放弃该目标，换一个完全不同的方向
@@ -168,9 +169,8 @@ templates:
         否则设置 "should_remember": false。
 
         ### 一致性约束（最高优先级）：
-        - **thought_process 必须与 actions 完全一致**：如果你决定攻击某人，thought_process 应描述攻击的理由和目标，而非其他行为。如果你决定说话，thought_process 应包含你想说的内容和对象
-        - 禁止在 thought_process 中规划 A 动作却在 actions 中填写 B 动作。推演即决策，决策即执行
-        - actions 中的每一个动作都必须在 thought_process 中有对应的推理依据
+        - thought_process 中的决策必须与 actions 中的 action_type 逐条对应——推演即决策，决策即执行
+        - 禁止 thought_process 规划 A 动作，actions 却填 B 动作
 
         ### 情绪构造：
         根据你的体感信号（愉悦度、激动程度），构造你此刻的具体情绪。
@@ -191,17 +191,14 @@ templates:
           - target_agent_id → 从"附近的人"列表中的 ID 复制（8 位短 ID 即可，如 a65df604），禁止填入角色名字
         - 不确定某个动作的字段要求时，调用 get_action_detail 查看详情和示例
 
-        ### 独立并行示例（社交场景）：
+        ### 示例（仅展示 JSON 结构）：
         {"actions": [
           {"action_type": "观察", "action_data": {}},
-          {"action_type": "说话", "action_data": {"content": "今日客栈好生热闹。"}}
+          {"action_type": "说话", "action_data": {"content": "..."}}
         ]}
-
-        ### 因果链示例（工具链场景）：
         {"actions": [
-          {"action_type": "取", "action_data": {"item_id": "馒头"}},
-          {"action_type": "用", "action_data": {"item_id": "馒头"}},
-          {"action_type": "说话", "action_data": {"content": "吃饱了，天色不早。"}}
+          {"action_type": "取", "action_data": {"source_type": "ground", "item_id": "...", "quantity": 1}},
+          {"action_type": "用", "action_data": {"item_id": "..."}}
         ]}
 
         ### action_data 字段要求：
