@@ -45,8 +45,6 @@ pub struct QuData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct YongData {
     pub item_id: String,
-    #[serde(default)]
-    pub target_agent_id: Option<String>,
 }
 
 /// 说话（统一通信）
@@ -76,13 +74,6 @@ pub struct ObserveData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttackData {
     pub target_agent_id: String,
-}
-
-/// 休整
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HaltData {
-    #[serde(default)]
-    pub intent: Option<String>,
 }
 
 /// 制造

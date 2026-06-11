@@ -168,6 +168,10 @@ pub struct ActionValidation {
     /// 必需的数据字段
     pub required_fields: Vec<String>,
 
+    /// 可选的数据字段
+    #[serde(default)]
+    pub optional_fields: Vec<String>,
+
     /// 字段验证规则
     pub field_validations: Vec<FieldValidation>,
 }

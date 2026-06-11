@@ -1,6 +1,6 @@
 [package]
 name = "cyber-jianghu-protocol"
-version = "0.1.62"
+version = "0.1.63"
 edition = "2024"
 authors = ["Cyber-Jianghu Community"]
 license = "MIT OR Apache-2.0"
