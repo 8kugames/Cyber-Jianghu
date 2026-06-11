@@ -150,8 +150,8 @@ fn test_item_usability() {
     assert!(food.is_usable());
     assert!(!food.is_equippable());
 
-    // 武器可以装备
+    // 武器可以使用（会有负向效果）且可装备
     let weapon = get_item_definition("weapon").unwrap();
-    assert!(!weapon.is_usable());
+    assert!(weapon.is_usable());
     assert!(weapon.is_equippable());
 }
