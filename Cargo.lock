@@ -677,18 +677,16 @@ dependencies = [
 
 [[package]]
 name = "cyber-jianghu-agent"
-version = "0.1.297"
+version = "0.1.298"
 dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
  "axum",
  "bytes",
- "candle-core",
- "candle-nn",
- "candle-transformers",
  "chrono",
  "clap",
+ "cyber-jianghu-embedding",
  "cyber-jianghu-protocol",
  "dirs",
  "dotenv",
@@ -713,7 +711,6 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror 1.0.69",
- "tokenizers",
  "tokio",
  "tokio-test",
  "tokio-tungstenite 0.28.0",
@@ -725,6 +722,30 @@ dependencies = [
  "url",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "cyber-jianghu-embedding"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "candle-core",
+ "candle-nn",
+ "candle-transformers",
+ "clap",
+ "dirs",
+ "hex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokenizers",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber 0.3.23",
 ]
 
 [[package]]
