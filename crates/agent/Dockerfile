@@ -46,13 +46,16 @@ registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"' > ./.cargo/conf
 COPY Cargo.toml Cargo.lock* ./
 COPY crates/protocol/Cargo.toml ./crates/protocol/
 COPY crates/agent/Cargo.toml ./crates/agent/
+COPY crates/embedding/Cargo.toml ./crates/embedding/
 COPY crates/server/Cargo.toml ./crates/server/
 
 # workspace 需要各成员至少存在有效 targets
-RUN mkdir -p crates/server/src && echo "fn main() {}" > crates/server/src/main.rs
+RUN mkdir -p crates/server/src && echo "fn main() {}" > crates/server/src/main.rs && \
+    mkdir -p crates/embedding/src && echo "" > crates/embedding/src/lib.rs
 
 # 复制真实源码
 COPY crates/protocol/src ./crates/protocol/src
+COPY crates/embedding/src ./crates/embedding/src
 COPY crates/agent/src ./crates/agent/src
 
 # 构建（使用 BuildKit 缓存挂载加速依赖）
@@ -98,18 +101,6 @@ COPY crates/agent/static /app/static
 # 创建数据和配置目录并设置权限
 RUN mkdir -p /app/data /app/config && \
     chown -R cyberjianghu:cyberjianghu /app
-
-# 下载 bge-small-zh-v1.5 嵌入模型（~100MB，Semantic Memory 向量搜索）
-ARG HF_MIRROR=https://hf-mirror.com
-RUN MODEL_DIR=/home/cyberjianghu/.cyber-jianghu/models/bge-small-zh-v1.5 && \
-    mkdir -p ${MODEL_DIR} && \
-    curl -fsSL "${HF_MIRROR}/BAAI/bge-small-zh-v1.5/resolve/main/config.json" \
-        -o ${MODEL_DIR}/config.json && \
-    curl -fsSL "${HF_MIRROR}/BAAI/bge-small-zh-v1.5/resolve/main/tokenizer.json" \
-        -o ${MODEL_DIR}/tokenizer.json && \
-    curl -fsSL "${HF_MIRROR}/BAAI/bge-small-zh-v1.5/resolve/main/model.safetensors" \
-        -o ${MODEL_DIR}/model.safetensors && \
-    chown -R cyberjianghu:cyberjianghu /home/cyberjianghu/.cyber-jianghu
 
 # 暴露 HTTP API 端口（23340-23349）
 # 默认使用 23340，可在运行时通过 PORT 环境变量覆盖
