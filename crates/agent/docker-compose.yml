@@ -28,6 +28,30 @@
 
 services:
   # ============================================================================
+  # Embedding 服务（向量嵌入 HTTP API）
+  # Docker 多 Agent 部署时共享，避免每个 Agent 加载模型
+  # ============================================================================
+  embedding:
+    build:
+      context: ../..
+      dockerfile: ./crates/embedding/Dockerfile
+    container_name: cyber-jianghu-embedding
+    restart: unless-stopped
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      EMBEDDING_PORT: "23350"
+    volumes:
+      - embedding_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "--max-time", "10", "http://localhost:23350/api/health"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 30s
+    networks:
+      - cyber-jianghu-network
+
+  # ============================================================================
   # Agent（WebSocket 主通道 + HTTP API 辅助）
   # ============================================================================
   agent:
@@ -57,6 +81,9 @@ services:
       # 游戏服务器 HTTP URL
       CYBER_JIANGHU_SERVER_HTTP_URL: ${SERVER_HTTP_URL:-http://cyber-jianghu-server:23333}
 
+      # Embedding 服务 URL（Docker 部署默认使用远程 embedding 服务）
+      CYBER_JIANGHU_EMBEDDER_REMOTE_URL: ${EMBEDDER_REMOTE_URL:-http://cyber-jianghu-embedding:23350}
+
       # 数据持久化目录（token 统计、SQLite、记忆等）
       CYBER_JIANGHU_DATA_DIR: /app/data
     ports:
@@ -83,6 +110,9 @@ services:
       timeout: 30s
       retries: 3
       start_period: 40s
+    depends_on:
+      embedding:
+        condition: service_healthy
     networks:
       - cyber-jianghu-network
 
@@ -101,3 +131,5 @@ volumes:
     name: cyber-jianghu-agent-config
   agent_data:
     name: cyber-jianghu-agent-data
+  embedding_data:
+    name: cyber-jianghu-embedding-data
