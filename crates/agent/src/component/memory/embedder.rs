@@ -1,80 +1,178 @@
 // ============================================================================
-// 嵌入服务（本地模型）
+// 嵌入服务（本地 / 远程 / 降级）
 // ============================================================================
-// 设计文档: (项目根)/docs/superpowers/specs/2025-03-15-semantic-memory-and-forgetting-design.md
-//
-// 使用 bge-small-zh-v1.5 本地模型生成向量嵌入，支持 CPU/CUDA/Metal。
-// 不可用时降级到 SQLite FTS5 全文搜索。
+// 支持三种 provider:
+// - Local: 进程内 candle-transformers（单 agent 进程部署）
+// - Remote: HTTP 调用独立 embedding 服务（Docker 多 agent 部署）
+// - None: FTS5 降级
 // ============================================================================
 
 use crate::component::memory::local_embedder::LocalEmbedder;
 use crate::component::memory::types::EmbedderStatus;
-use anyhow::Result;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use anyhow::{Context, Result};
+use std::sync::{Arc, Mutex, OnceLock};
+
+/// bge-small-zh-v1.5 模型固定输出维度
+const BGE_SMALL_ZH_DIM: usize = 512;
+
+/// 嵌入服务配置
+#[derive(Debug, Clone, Default)]
+pub struct EmbedderServiceConfig {
+    /// 远程 embedding 服务 URL
+    /// 设定后优先使用远程服务，连接失败时 fast fail（不静默降级到本地）
+    pub remote_url: Option<String>,
+}
 
 /// 嵌入服务
-///
-/// 使用本地 bge-small-zh-v1.5 模型生成向量嵌入。
 pub struct EmbedderService {
-    /// 本地嵌入器
     local_embedder: Arc<Mutex<Option<LocalEmbedder>>>,
-    /// 当前状态
-    status: Arc<Mutex<EmbedderStatus>>,
-    /// 是否已初始化
-    initialized: AtomicBool,
+    status: OnceLock<EmbedderStatus>,
+    config: EmbedderServiceConfig,
+    http_client: Option<reqwest::Client>,
+    embed_base_url: Option<String>,
 }
 
 impl EmbedderService {
-    /// 创建新的嵌入服务
     pub fn new() -> Self {
+        let remote_url = std::env::var("CYBER_JIANGHU_EMBEDDER_REMOTE_URL").ok();
+        let config = EmbedderServiceConfig { remote_url };
+        Self::with_config(config)
+    }
+
+    pub fn with_config(config: EmbedderServiceConfig) -> Self {
+        let http_client = config.remote_url.as_ref().map(|url| {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "embedding HTTP 客户端构建失败 (target: {}): {} — 请检查 TLS 后端配置",
+                        url, e
+                    )
+                })
+        });
+
+        let embed_base_url = config
+            .remote_url
+            .as_ref()
+            .map(|url| url.trim_end_matches('/').to_string());
+
         Self {
             local_embedder: Arc::new(Mutex::new(None)),
-            status: Arc::new(Mutex::new(EmbedderStatus::Unavailable)),
-            initialized: AtomicBool::new(false),
+            status: OnceLock::new(),
+            config,
+            http_client,
+            embed_base_url,
         }
     }
 
-    /// 初始化服务（加载本地模型）
-    fn initialize(&self) -> Result<()> {
-        if self.initialized.load(Ordering::SeqCst) {
-            return Ok(());
+    /// 异步初始化（OnceLock 保证只执行一次，无 TOCTOU 竞态）
+    async fn ensure_initialized(&self) -> Result<EmbedderStatus> {
+        if let Some(&status) = self.status.get() {
+            return Ok(status);
         }
 
-        // 尝试加载本地模型
-        if LocalEmbedder::is_model_available() {
-            match LocalEmbedder::load() {
-                Ok(embedder) => {
-                    *self.local_embedder.lock().expect("lock poisoned") = Some(embedder);
-                    *self.status.lock().expect("lock poisoned") = EmbedderStatus::Local;
-                    tracing::info!("Local embedder loaded successfully");
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to load local embedder: {}", e);
-                    *self.status.lock().expect("lock poisoned") = EmbedderStatus::Unavailable;
-                }
-            }
+        let status = if self.config.remote_url.is_some() {
+            self.init_remote().await?
         } else {
-            tracing::warn!("Local embedder model not available, vector search disabled");
-            *self.status.lock().expect("lock poisoned") = EmbedderStatus::Unavailable;
-        }
+            self.init_local()?
+        };
 
-        self.initialized.store(true, Ordering::SeqCst);
-        Ok(())
+        // OnceLock::set 只会成功一次，多线程安全
+        let _ = self.status.set(status);
+        Ok(status)
     }
 
-    /// 生成单个文本的嵌入向量
-    ///
-    /// CPU 密集型 BERT 推理通过 spawn_blocking 卸载到阻塞线程池，
-    /// 避免阻塞 tokio worker 线程。
-    pub async fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        self.initialize()?;
+    /// 远程初始化：显式配置了 remote_url 时使用
+    /// 连接失败 → fast fail，不静默降级
+    async fn init_remote(&self) -> Result<EmbedderStatus> {
+        let client = self
+            .http_client
+            .as_ref()
+            .context("HTTP 客户端未初始化（remote_url 已配置）")?;
 
-        let status = *self.status.lock().expect("lock poisoned");
-        if status != EmbedderStatus::Local {
-            return Err(anyhow::anyhow!("Embedder service unavailable"));
+        let base_url = self
+            .embed_base_url
+            .as_ref()
+            .context("embed_base_url 未设置")?;
+
+        let health_url = format!("{}/api/health", base_url);
+
+        let resp = client
+            .get(&health_url)
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+            .with_context(|| {
+                format!(
+                    "远程 embedding 服务连接失败: {} (请检查服务是否启动)",
+                    base_url
+                )
+            })?;
+
+        if resp.status().is_success() {
+            tracing::info!("远程 embedding 服务已连接: {}", base_url);
+            Ok(EmbedderStatus::Remote)
+        } else {
+            anyhow::bail!(
+                "远程 embedding 服务健康检查失败: HTTP {} (url: {})",
+                resp.status(),
+                base_url
+            )
+        }
+    }
+
+    /// 本地初始化：无 remote_url 时使用
+    fn init_local(&self) -> Result<EmbedderStatus> {
+        let config = cyber_jianghu_embedding::LocalEmbedderConfig::default_path();
+
+        if !config.is_model_available() {
+            tracing::warn!("本地嵌入模型不存在: {:?}", config.model_dir);
+            return Ok(EmbedderStatus::Unavailable);
         }
 
+        match LocalEmbedder::load_with_config(config) {
+            Ok(embedder) => {
+                *self.local_embedder.lock().expect("lock poisoned") = Some(embedder);
+                tracing::info!("本地嵌入模型加载成功");
+                Ok(EmbedderStatus::Local)
+            }
+            Err(e) => {
+                tracing::error!("本地嵌入模型加载失败: {} (路径可能损坏)", e);
+                Ok(EmbedderStatus::Unavailable)
+            }
+        }
+    }
+
+    pub async fn embed(&self, text: &str) -> Result<Vec<f32>> {
+        let status = self.ensure_initialized().await?;
+
+        match status {
+            EmbedderStatus::Local => self.embed_local(text).await,
+            EmbedderStatus::Remote => self.embed_remote(text).await,
+            EmbedderStatus::Unavailable => {
+                Err(anyhow::anyhow!("Embedder service unavailable"))
+            }
+        }
+    }
+
+    pub async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        let status = self.ensure_initialized().await?;
+
+        match status {
+            EmbedderStatus::Local => self.embed_batch_local(texts).await,
+            EmbedderStatus::Remote => self.embed_batch_remote(texts).await,
+            EmbedderStatus::Unavailable => {
+                Err(anyhow::anyhow!("Embedder service unavailable"))
+            }
+        }
+    }
+
+    // ========================================================================
+    // Local provider
+    // ========================================================================
+
+    async fn embed_local(&self, text: &str) -> Result<Vec<f32>> {
         let embedder = self.local_embedder.clone();
         let text = text.to_owned();
         tokio::task::spawn_blocking(move || {
@@ -88,15 +186,7 @@ impl EmbedderService {
         .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {}", e))?
     }
 
-    /// 批量生成嵌入向量
-    pub async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        self.initialize()?;
-
-        let status = *self.status.lock().expect("lock poisoned");
-        if status != EmbedderStatus::Local {
-            return Err(anyhow::anyhow!("Embedder service unavailable"));
-        }
-
+    async fn embed_batch_local(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         let embedder = self.local_embedder.clone();
         let texts: Vec<String> = texts.iter().map(|s| (*s).to_owned()).collect();
         tokio::task::spawn_blocking(move || {
@@ -111,19 +201,92 @@ impl EmbedderService {
         .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {}", e))?
     }
 
-    /// 获取当前状态
+    // ========================================================================
+    // Remote provider
+    // ========================================================================
+
+    async fn embed_remote(&self, text: &str) -> Result<Vec<f32>> {
+        let client = self
+            .http_client
+            .as_ref()
+            .context("HTTP 客户端未初始化")?;
+        let base_url = self
+            .embed_base_url
+            .as_ref()
+            .context("embed_base_url 未设置")?;
+        let url = format!("{}/api/embed", base_url);
+
+        let resp = client
+            .post(&url)
+            .json(&serde_json::json!({ "text": text }))
+            .send()
+            .await
+            .with_context(|| format!("远程 embedding 请求失败: {}", url))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("远程 embedding 返回错误 {}: {}", status, body);
+        }
+
+        let result: serde_json::Value = resp
+            .json()
+            .await
+            .context("解析远程 embedding 响应失败")?;
+
+        parse_embedding_response(&result, "embedding")
+    }
+
+    async fn embed_batch_remote(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        let client = self
+            .http_client
+            .as_ref()
+            .context("HTTP 客户端未初始化")?;
+        let base_url = self
+            .embed_base_url
+            .as_ref()
+            .context("embed_base_url 未设置")?;
+        let url = format!("{}/api/embed-batch", base_url);
+
+        let resp = client
+            .post(&url)
+            .json(&serde_json::json!({ "texts": texts }))
+            .send()
+            .await
+            .with_context(|| format!("远程 batch embedding 请求失败: {}", url))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("远程 batch embedding 返回错误 {}: {}", status, body);
+        }
+
+        let result: serde_json::Value = resp
+            .json()
+            .await
+            .context("解析远程 batch embedding 响应失败")?;
+
+        parse_batch_response(&result)
+    }
+
+    // ========================================================================
+    // 状态查询
+    // ========================================================================
+
     pub fn status(&self) -> EmbedderStatus {
-        *self.status.lock().expect("lock poisoned")
+        self.status
+            .get()
+            .copied()
+            .unwrap_or(EmbedderStatus::Unavailable)
     }
 
-    /// 检查服务是否可用
     pub fn is_available(&self) -> bool {
-        *self.status.lock().expect("lock poisoned") == EmbedderStatus::Local
+        self.status() != EmbedderStatus::Unavailable
     }
 
-    /// 获取嵌入向量维度
+    /// 维度来自模型规格（bge-small-zh-v1.5 = 512 维）
     pub fn embedding_dim(&self) -> usize {
-        512 // bge-small-zh-v1.5 固定 512 维
+        BGE_SMALL_ZH_DIM
     }
 }
 
@@ -131,6 +294,42 @@ impl Default for EmbedderService {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ============================================================================
+// JSON 响应解析
+// ============================================================================
+
+fn parse_embedding_response(value: &serde_json::Value, field: &str) -> Result<Vec<f32>> {
+    value
+        .get(field)
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_f64().map(|f| f as f32))
+                .collect::<Vec<f32>>()
+        })
+        .filter(|v| !v.is_empty())
+        .with_context(|| format!("远程 embedding 响应格式错误 (缺少 {} 字段)", field))
+}
+
+fn parse_batch_response(value: &serde_json::Value) -> Result<Vec<Vec<f32>>> {
+    value
+        .get("embeddings")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|vec_val| {
+                    vec_val.as_array().map(|vec| {
+                        vec.iter()
+                            .filter_map(|v| v.as_f64().map(|f| f as f32))
+                            .collect::<Vec<f32>>()
+                    })
+                })
+                .collect::<Vec<Vec<f32>>>()
+        })
+        .filter(|v| !v.is_empty())
+        .context("远程 batch embedding 响应格式错误 (缺少 embeddings 字段)")
 }
 
 // ============================================================================
@@ -150,15 +349,8 @@ mod tests {
     #[tokio::test]
     async fn test_status_unavailable_without_model() {
         let service = EmbedderService::new();
-        let _ = service.initialize();
+        let _ = service.ensure_initialized().await;
         assert_eq!(service.status(), EmbedderStatus::Unavailable);
-    }
-
-    #[tokio::test]
-    async fn test_initialize_idempotent() {
-        let service = EmbedderService::new();
-        let _ = service.initialize();
-        let _ = service.initialize();
     }
 
     #[tokio::test]
@@ -168,9 +360,65 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_embedding_dim() {
+    #[test]
+    fn test_embedding_dim() {
         let service = EmbedderService::new();
         assert_eq!(service.embedding_dim(), 512);
+    }
+
+    #[test]
+    fn test_config_default_no_remote() {
+        let config = EmbedderServiceConfig::default();
+        assert!(config.remote_url.is_none());
+    }
+
+    #[test]
+    fn test_config_with_remote_url() {
+        let config = EmbedderServiceConfig {
+            remote_url: Some("http://localhost:23350".to_string()),
+        };
+        assert_eq!(config.remote_url.unwrap(), "http://localhost:23350");
+    }
+
+    #[test]
+    fn test_remote_status_exists() {
+        let status = EmbedderStatus::Remote;
+        assert_eq!(format!("{:?}", status), "Remote");
+    }
+
+    #[test]
+    fn test_parse_embedding_response_valid() {
+        let json = serde_json::json!({"embedding": [0.1, 0.2, 0.3], "dimension": 3});
+        let result = parse_embedding_response(&json, "embedding").unwrap();
+        assert_eq!(result, vec![0.1, 0.2, 0.3]);
+    }
+
+    #[test]
+    fn test_parse_embedding_response_missing_field() {
+        let json = serde_json::json!({"other": []});
+        let result = parse_embedding_response(&json, "embedding");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_batch_response_valid() {
+        let json =
+            serde_json::json!({"embeddings": [[0.1, 0.2], [0.3, 0.4]], "count": 2});
+        let result = parse_batch_response(&json).unwrap();
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_base_url_trimmed() {
+        let config = EmbedderServiceConfig {
+            remote_url: Some("http://localhost:23350/".to_string()),
+        };
+        let service = EmbedderService::with_config(config);
+        assert_eq!(service.embed_base_url.unwrap(), "http://localhost:23350");
+    }
+
+    #[test]
+    fn test_bge_dim_constant() {
+        assert_eq!(BGE_SMALL_ZH_DIM, 512);
     }
 }
