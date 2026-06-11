@@ -96,13 +96,32 @@ pub struct NarrativeConfig {
 
 impl NarrativeConfig {
     /// 根据属性值获取叙事描述
+    ///
+    /// 越界回退: 值超出所有阈值范围时，取最近的边界阈值描述。
+    /// 例如 thirst=104 但阈值只到 100 → 使用 80-100 的 "完全不渴"。
     pub fn get_description(&self, attr_name: &str, value: i32) -> Option<&str> {
         self.attributes.get(attr_name).and_then(|config| {
-            config
+            // 精确匹配
+            if let Some(t) = config
                 .thresholds
                 .iter()
                 .find(|t| value >= t.min && value <= t.max)
-                .map(|t| t.description.as_str())
+            {
+                return Some(t.description.as_str());
+            }
+            // 越界回退: 值超过最高阈值 → 用最高阈值的描述
+            if let Some(highest) = config.thresholds.iter().max_by_key(|t| t.max)
+                && value > highest.max
+            {
+                return Some(highest.description.as_str());
+            }
+            // 越界回退: 值低于最低阈值 → 用最低阈值的描述
+            if let Some(lowest) = config.thresholds.iter().min_by_key(|t| t.min)
+                && value < lowest.min
+            {
+                return Some(lowest.description.as_str());
+            }
+            None
         })
     }
 
@@ -202,7 +221,13 @@ impl NarrativeConfig {
                 .get_description(name, value)
                 .or_else(|| self.get_display_name(name));
             if let Some(d) = desc {
-                result.insert(name.clone(), d.to_string());
+                let note_suffix = self
+                    .attributes
+                    .get(name)
+                    .and_then(|c| c.note.as_ref())
+                    .map(|n| format!("（{n}）"))
+                    .unwrap_or_default();
+                result.insert(name.clone(), format!("{d}{note_suffix}"));
             }
         }
 
@@ -467,6 +492,32 @@ mod tests {
         let desc = config.get_description("hp", 50);
         assert!(desc.is_some());
         assert!(desc.unwrap().contains("一般"));
+    }
+
+    #[test]
+    fn test_get_description_out_of_range_fallback() {
+        let config = make_test_narrative_config();
+        // 值超过最高阈值 → 回退到最高阈值的描述
+        let desc = config.get_description("hp", 999);
+        assert!(desc.is_some());
+        assert!(desc.unwrap().contains("极佳"));
+
+        // 值低于最低阈值 → 回退到最低阈值的描述
+        let desc = config.get_description("hp", -1);
+        assert!(desc.is_some());
+        // 最低阈值描述应包含危重信息
+    }
+
+    #[test]
+    fn test_build_attribute_descriptions_includes_note() {
+        let config = make_test_narrative_config();
+        let mut base = HashMap::new();
+        base.insert("hp".to_string(), 95);
+        let derived = HashMap::new();
+        let descs = config.build_attribute_descriptions(&base, &derived);
+        // hp 没有 note 字段，描述应只含阈值文本
+        let hp_desc = descs.get("hp").unwrap();
+        assert!(hp_desc.contains("极佳"));
     }
 
     #[test]
