@@ -110,7 +110,8 @@ Docker images published to `ghcr.io/8kugames/cyber-jianghu-server`.
 ```
 crates/
 ├── protocol/        # Communication protocol (ServerMessage, ClientMessage, WorldState)
-├── server/          # Game server ("天道" - physics engine)
+├── embedding/       # Embedding service (local BERT inference + HTTP API, bge-small-zh-v1.5)
+├ server/          # Game server ("天道" - physics engine)
 └── agent/           # Agent SDK (unified cognitive architecture, two runtime modes)
 
 docs/WHITEPAPER/     # Whitepapers
@@ -284,6 +285,7 @@ use super::builder::AgentBuilder;
 | `tokio-tungstenite` | WebSocket client (agent) |
 | `rusqlite` | Local SQLite storage (agent memory) |
 | `instant-distance` | HNSW vector index (agent semantic memory) |
+| `candle-core/transformers` | Local BERT inference (embedding crate) |
 
 ## Key Configuration Files
 
@@ -350,6 +352,17 @@ use super::builder::AgentBuilder;
 - `GET /api/admin/session` - Check admin session
 - `POST /api/admin/reload-config` - Reload game config
 - `GET /health` - Health check
+
+### Embedding Service (port 23350, Docker standalone)
+
+- `GET /api/health` - Health check (model loaded status)
+- `POST /api/embed` - Single text embedding (`{"text": "..."}` -> `{"embedding": [...], "dimension": 512}`)
+- `POST /api/embed-batch` - Batch text embedding (`{"texts": [...]}` -> `{"embeddings": [[...], ...]}`)
+
+Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env var):
+- Set → Remote mode (HTTP to embedding service, fast fail on connection error)
+- Unset → Local mode (in-process candle-transformers)
+- Both fail → Unavailable (FTS5 fallback)
 
 ### Agent HTTP API (port 23340-23999, auxiliary to WebSocket)
 
