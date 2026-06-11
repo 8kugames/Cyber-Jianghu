@@ -78,18 +78,6 @@ services:
       - ./agent-5/data:/app/data
       - ../crates/agent/static/panel:/app/static/panel:ro
 
-  agent-6:
-    <<: *agent-common
-    container_name: agent-6-deepseek
-    environment:
-      <<: *agent-env-common
-    ports:
-      - "23346:23340"
-    volumes:
-      - ./agent-6/config:/app/config
-      - ./agent-6/data:/app/data
-      - ../crates/agent/static/panel:/app/static/panel:ro
-
   agent-7:
     <<: *agent-common
     container_name: agent-7-siliconflow
