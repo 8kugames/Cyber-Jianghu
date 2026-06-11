@@ -56,9 +56,12 @@ impl ItemDefinition {
 
     /// 检查物品是否可使用
     ///
-    /// 只有 Consumable 类型的物品可以使用
+    /// 所有物品均可使用（用/吃/喝），效果由 effects 定义：
+    /// - consumable: 正向增益
+    /// - material: 轻微正向 + 轻微负向
+    /// - currency/weapon/tool/armor: 负向减益（或不允许无效果）
     pub fn is_usable(&self) -> bool {
-        self.item_type == ItemType::Consumable
+        true
     }
 
     /// 检查物品是否可装备（预留：装备系统）
