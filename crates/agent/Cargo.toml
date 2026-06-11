@@ -58,13 +58,8 @@ tower-http = { version = "0.6", features = ["cors", "fs"] }
 # SQLite 数据库（用于本地记忆存储）
 rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
 
-# 向量计算（用于语义记忆）
-candle-core = "0.10"
-candle-transformers = "0.10"
-candle-nn = "0.10"
-
-# Tokenizer（用于分词）
-tokenizers = "0.22.2"
+# Embedding 服务（本地嵌入 + 远程调用）
+cyber-jianghu-embedding = { workspace = true }
 
 # HNSW 向量索引（用于向量检索）
 instant-distance = "0.6"

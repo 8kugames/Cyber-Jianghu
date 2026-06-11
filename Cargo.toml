@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/protocol",
+    "crates/embedding",
     "crates/server",
     "crates/agent",
 ]
@@ -34,6 +35,9 @@ tracing-appender = "0.1"
 
 # 协议 crate
 cyber-jianghu-protocol = { path = "crates/protocol" }
+
+# Embedding crate
+cyber-jianghu-embedding = { path = "crates/embedding" }
 
 [profile.release]
 opt-level = 3
