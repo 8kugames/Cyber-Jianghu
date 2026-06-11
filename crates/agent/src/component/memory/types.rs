@@ -140,6 +140,8 @@ impl Default for MemoryEntry {
 pub enum EmbedderStatus {
     /// 使用本地模型（bge-small-zh-v1.5）
     Local,
+    /// 使用远程 HTTP embedding 服务
+    Remote,
     /// 不可用（向量记忆关闭，降级到 FTS5）
     Unavailable,
 }

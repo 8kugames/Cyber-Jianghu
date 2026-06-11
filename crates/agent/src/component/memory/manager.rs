@@ -79,7 +79,7 @@ pub struct MemoryManager {
     working: WorkingMemoryBackend,
     /// 情景记忆后端
     episodic: EpisodicMemoryBackend,
-    /// 语义记忆后端（可选，使用本地 embedder）
+    /// 语义记忆后端（可选，EmbedderService 自动选择 Local/Remote/Unavailable）
     semantic: Option<Arc<tokio::sync::Mutex<SemanticMemoryBackend>>>,
     /// 遗忘调度器
     forgetting_scheduler: ForgettingScheduler,
@@ -98,7 +98,7 @@ impl MemoryManager {
         let episodic = EpisodicMemoryBackend::new(config.agent_id, &config.db_dir)
             .context("Failed to create episodic memory backend")?;
 
-        // 初始化语义记忆（使用本地 embedder）
+        // 初始化语义记忆（EmbedderService: Local/Remote/Unavailable）
         let embedder = Arc::new(EmbedderService::new());
         let episodic_db_path = config.db_dir.join(format!("agent_{}.db", config.agent_id));
         let semantic_config =
