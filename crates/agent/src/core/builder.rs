@@ -380,7 +380,7 @@ impl AgentBuilder {
                 narrative_min_events: 1,
             });
 
-            // 初始化记忆管理器（使用本地 embedder）
+            // 初始化记忆管理器（EmbedderService: Local/Remote/Unavailable）
             let result = MemoryManager::new(config);
 
             match result {
