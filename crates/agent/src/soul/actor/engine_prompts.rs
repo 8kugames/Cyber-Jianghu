@@ -351,9 +351,18 @@ impl super::CognitiveEngine {
         if !world_state.self_state.inventory.is_empty() {
             ws_parts.push("\n## 背包物品".to_string());
             for item in &world_state.self_state.inventory {
+                let type_hint = match item.item_type.as_str() {
+                    "consumable" => "可食用",
+                    "currency" => "货币，吞食有害",
+                    "weapon" => "武器，吞食有害",
+                    "material" => "原材料，可生吃但效果差",
+                    "tool" => "工具，不可食用",
+                    "armor" => "护甲，不可食用",
+                    _ => "",
+                };
                 ws_parts.push(format!(
-                    "- {} ({}) x{}",
-                    item.item_id, item.name, item.quantity
+                    "- {} ({}) x{} [{}]",
+                    item.item_id, item.name, item.quantity, type_hint
                 ));
             }
         }

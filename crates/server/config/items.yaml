@@ -91,8 +91,14 @@ data:
   - item_id: "银子"
     name: "银子"
     item_type: "currency"
-    effects: []
-    description: "流通货币，可以用来购买物品。"
+    effects:
+      - attribute: "hp"
+        operation: "add"
+        value: -15
+      - attribute: "sanity"
+        operation: "add"
+        value: -10
+    description: "流通货币，可以用来购买物品。吞食银子会导致重金属中毒。扣除15点生命和10点精神。"
     stack_size: 9999
 
   # ============================================================================
@@ -103,20 +109,26 @@ data:
     name: "刀"
     item_type: "weapon"
     effects:
-      - attribute: "attack_bonus"
+      - attribute: "hp"
         operation: "add"
-        value: 5
-    description: "一把锋利的刀，增加5点攻击力。"
+        value: -30
+      - attribute: "sanity"
+        operation: "add"
+        value: -15
+    description: "一把锋利的刀。吞刀会严重割伤口腔和食道。扣除30点生命和15点精神。"
     stack_size: 1
 
   - item_id: "木剑"
     name: "木剑"
     item_type: "weapon"
     effects:
-      - attribute: "attack_bonus"
+      - attribute: "hp"
         operation: "add"
-        value: 3
-    description: "简单削制的木剑，适合防身。增加3点攻击力。"
+        value: -20
+      - attribute: "sanity"
+        operation: "add"
+        value: -10
+    description: "简单削制的木剑。啃木头会崩裂牙齿并损伤口腔。扣除20点生命和10点精神。"
     stack_size: 1
 
   # ============================================================================
@@ -126,27 +138,51 @@ data:
   - item_id: "面粉"
     name: "面粉"
     item_type: "material"
-    effects: []
-    description: "精细的小麦面粉，是制作面食的基础材料。"
+    effects:
+      - attribute: "hunger"
+        operation: "add"
+        value: 5
+      - attribute: "thirst"
+        operation: "add"
+        value: -10
+    description: "精细的小麦面粉。生吃勉强充饥但极其口干。恢复5点饥饿，扣除10点水分。"
     stack_size: 20
 
   - item_id: "小麦"
     name: "小麦"
     item_type: "material"
-    effects: []
-    description: "金黄的小麦，可以磨成面粉。"
+    effects:
+      - attribute: "hunger"
+        operation: "add"
+        value: 3
+      - attribute: "hp"
+        operation: "add"
+        value: -2
+    description: "金黄的小麦。生嚼能略微充饥但难以消化，会损伤肠胃。恢复3点饥饿，扣除2点生命。"
     stack_size: 50
 
   - item_id: "生面团"
     name: "生面团"
     item_type: "material"
-    effects: []
-    description: "未加工的生面团，可以用来制作馒头。"
+    effects:
+      - attribute: "hunger"
+        operation: "add"
+        value: 8
+      - attribute: "thirst"
+        operation: "add"
+        value: -8
+    description: "未加工的生面团。勉强能吃但口干难咽。恢复8点饥饿，扣除8点水分。"
     stack_size: 20
 
   - item_id: "木材"
     name: "木材"
     item_type: "material"
-    effects: []
-    description: "普通的木材，用于制作工具或武器。"
+    effects:
+      - attribute: "hp"
+        operation: "add"
+        value: -10
+      - attribute: "sanity"
+        operation: "add"
+        value: -5
+    description: "普通的木材，用于制作工具或武器。啃木头会崩裂牙齿。扣除10点生命和5点精神。"
     stack_size: 50
