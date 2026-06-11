@@ -94,7 +94,7 @@ pub fn execute_get_action_detail(
 
     match action {
         Some(a) => {
-            let example = build_action_example(&a.action, &a.required_fields);
+            let example = build_action_example(&a.action, &a.required_fields, &a.optional_fields);
             serde_json::json!({
                 "success": true,
                 "action": a.action,
@@ -102,6 +102,7 @@ pub fn execute_get_action_detail(
                 "description": a.description,
                 "category": a.category,
                 "required_fields": a.required_fields,
+                "optional_fields": a.optional_fields,
                 "valid_targets": a.valid_targets,
                 "requirements": a.requirements,
                 "effects": a.effects,
@@ -115,24 +116,62 @@ pub fn execute_get_action_detail(
     }
 }
 
-/// 根据 required_fields 动态生成 action 示例
+/// 根据 required_fields + optional_fields 动态生成 action 示例
 ///
 /// 按字段组合模式匹配，生成带注释的 JSON 示例。
 /// target_agent_id 字段额外标注 UUID 规则。
-fn build_action_example(action_type: &str, required_fields: &[String]) -> String {
-    let has_target_agent_id = required_fields.iter().any(|f| f == "target_agent_id");
-    let has_item_id = required_fields.iter().any(|f| f == "item_id");
-    let has_content = required_fields.iter().any(|f| f == "content");
-    let has_target_location = required_fields.iter().any(|f| f == "target_location");
-    let has_quantity = required_fields.iter().any(|f| f == "quantity");
+fn build_action_example(
+    action_type: &str,
+    required_fields: &[String],
+    optional_fields: &[String],
+) -> String {
+    let all_fields: Vec<&String> = required_fields.iter().chain(optional_fields.iter()).collect();
+    let has_item_id = all_fields.iter().any(|f| f.as_str() == "item_id");
+    let has_content = all_fields.iter().any(|f| f.as_str() == "content");
+    let has_target_location = all_fields.iter().any(|f| f.as_str() == "target_location");
+    let has_quantity = all_fields.iter().any(|f| f.as_str() == "quantity");
+    let has_channel = all_fields.iter().any(|f| f.as_str() == "channel");
+    let has_recipient_type = all_fields.iter().any(|f| f.as_str() == "recipient_type");
+    let has_source_type = all_fields.iter().any(|f| f.as_str() == "source_type");
+    let has_recipe_id = all_fields.iter().any(|f| f.as_str() == "recipe_id");
+
+    let req_target_agent_id = required_fields.iter().any(|f| f == "target_agent_id");
+    let opt_target_agent_id = optional_fields.iter().any(|f| f == "target_agent_id");
+    let opt_recipient_id = optional_fields.iter().any(|f| f == "recipient_id");
+    let opt_source_id = optional_fields.iter().any(|f| f == "source_id");
 
     let mut fields = Vec::new();
-    if has_target_agent_id {
-        fields
-            .push("\"target_agent_id\": \"(先用 lookup_character 查角色的 UUID 再填入，不要直接填角色名字)\"".to_string());
+    if has_recipient_type {
+        fields.push("\"recipient_type\": \"agent 或 ground\"".to_string());
+    }
+    if opt_recipient_id {
+        fields.push("\"recipient_id\": \"(recipient_type=agent 时必填: 目标 UUID)\"".to_string());
+    }
+    if has_source_type {
+        fields.push("\"source_type\": \"ground/agent/resource\"".to_string());
+    }
+    if opt_source_id {
+        fields.push("\"source_id\": \"(source_type=agent 时必填: 来源 UUID)\"".to_string());
+    }
+    if req_target_agent_id {
+        fields.push(
+            "\"target_agent_id\": \"(必填: 先用 lookup_character 查角色的 UUID 再填入，不要直接填角色名字)\""
+                .to_string(),
+        );
+    } else if opt_target_agent_id {
+        fields.push(
+            "\"target_agent_id\": \"(可选: 向特定人物说话/观察特定角色时填入其 UUID)\""
+                .to_string(),
+        );
+    }
+    if has_channel {
+        fields.push("\"channel\": \"(可选: public/private/broadcast)\"".to_string());
     }
     if has_target_location {
         fields.push("\"target_location\": \"(从可前往的地点列表复制)\"".to_string());
+    }
+    if has_recipe_id {
+        fields.push("\"recipe_id\": \"(配方 ID)\"".to_string());
     }
     if has_item_id {
         fields.push("\"item_id\": \"(从背包或附近物品列表复制)\"".to_string());
@@ -350,6 +389,7 @@ mod tests {
             category: "test".to_string(),
             valid_targets: None,
             required_fields: vec![],
+            optional_fields: vec![],
             ooc_risk: "low".to_string(),
             requirements: vec![],
             effects: vec![],
@@ -379,6 +419,99 @@ mod tests {
         let result = execute_get_action_detail("nonexistent", &actions);
         assert!(!result["success"].as_bool().unwrap());
         assert!(result["message"].as_str().unwrap().contains("nonexistent"));
+    }
+
+    #[test]
+    fn test_get_action_detail_returns_optional_fields() {
+        let speak = AvailableAction {
+            action: "说话".to_string(),
+            name: "交谈".to_string(),
+            description: "发出信息".to_string(),
+            category: "social".to_string(),
+            valid_targets: None,
+            required_fields: vec!["content".to_string()],
+            optional_fields: vec!["channel".to_string(), "target_agent_id".to_string()],
+            ooc_risk: "high".to_string(),
+            requirements: vec![],
+            effects: vec![],
+        };
+        let result = execute_get_action_detail("说话", &[speak]);
+        assert!(result["success"].as_bool().unwrap());
+        let opt = result["optional_fields"].as_array().unwrap();
+        assert_eq!(opt.len(), 2);
+        assert_eq!(opt[0], "channel");
+        assert_eq!(opt[1], "target_agent_id");
+        let example = result["example"].as_str().unwrap();
+        assert!(example.contains("target_agent_id"));
+        assert!(example.contains("channel"));
+    }
+
+    #[test]
+    fn test_get_action_detail_yu_with_recipient_id() {
+        let yu = AvailableAction {
+            action: "予".to_string(),
+            name: "予".to_string(),
+            description: "给予".to_string(),
+            category: "survival".to_string(),
+            valid_targets: None,
+            required_fields: vec![
+                "recipient_type".to_string(),
+                "item_id".to_string(),
+                "quantity".to_string(),
+            ],
+            optional_fields: vec!["recipient_id".to_string()],
+            ooc_risk: "low".to_string(),
+            requirements: vec![],
+            effects: vec![],
+        };
+        let result = execute_get_action_detail("予", &[yu]);
+        let example = result["example"].as_str().unwrap();
+        assert!(example.contains("recipient_type"));
+        assert!(example.contains("recipient_id"));
+        assert!(example.contains("item_id"));
+    }
+
+    #[test]
+    fn test_get_action_detail_qu_with_source_id() {
+        let qu = AvailableAction {
+            action: "取".to_string(),
+            name: "取".to_string(),
+            description: "获取".to_string(),
+            category: "survival".to_string(),
+            valid_targets: None,
+            required_fields: vec![
+                "source_type".to_string(),
+                "item_id".to_string(),
+                "quantity".to_string(),
+            ],
+            optional_fields: vec!["source_id".to_string()],
+            ooc_risk: "medium".to_string(),
+            requirements: vec![],
+            effects: vec![],
+        };
+        let result = execute_get_action_detail("取", &[qu]);
+        let example = result["example"].as_str().unwrap();
+        assert!(example.contains("source_type"));
+        assert!(example.contains("source_id"));
+    }
+
+    #[test]
+    fn test_get_action_detail_craft_with_recipe_id() {
+        let craft = AvailableAction {
+            action: "制造".to_string(),
+            name: "锻造".to_string(),
+            description: "制造物品".to_string(),
+            category: "economic".to_string(),
+            valid_targets: None,
+            required_fields: vec!["recipe_id".to_string()],
+            optional_fields: vec![],
+            ooc_risk: "low".to_string(),
+            requirements: vec![],
+            effects: vec![],
+        };
+        let result = execute_get_action_detail("制造", &[craft]);
+        let example = result["example"].as_str().unwrap();
+        assert!(example.contains("recipe_id"));
     }
 
     // ---- list_skills ----

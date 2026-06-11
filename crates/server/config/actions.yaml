@@ -10,7 +10,7 @@
 
 meta:
   created_at: "2026-03-16"
-  updated_at: "2026-06-10"
+  updated_at: "2026-06-11"
   tags:
     - actions
     - config
@@ -21,7 +21,7 @@ data:
   # ==========================================================================
   予:
     name: "予"
-    description: "将背包中的物品给予他人或丢弃到地面。指定 recipient_type（agent/ground）和 item_id。予 target=agent 时单向转移所有权；予 target=ground 时物品变为可拾取状态。予是物理上的单向输出操作，不带赠予/丢弃的社会含义。"
+    description: "将背包中的物品给予他人或丢弃到地面。recipient_type=agent 时需同时指定 recipient_id（目标 UUID），物品单向转移至对方背包；recipient_type=ground 时物品变为可拾取状态。"
     category: survival
     ooc_risk: low
     transmission: silent
@@ -30,6 +30,8 @@ data:
         - recipient_type
         - item_id
         - quantity
+      optional_fields:
+        - recipient_id
       field_validations:
         - field: quantity
           validation_type: min_value
@@ -42,7 +44,7 @@ data:
 
   取:
     name: "取"
-    description: "从地点或他人获取物品到背包。指定 source_type（ground/agent/resource）决定来源：ground 从地面拾取，agent 从目标背包获取（需授权判定），resource 从资源点采集。取是物理上的单向输入操作，不携带拥有权或道德判断。"
+    description: "从地点或他人获取物品到背包。source_type=ground 从地面拾取；source_type=agent 时需同时指定 source_id（来源 UUID），从对方背包获取（需授权判定）；source_type=resource 从当前地点资源点采集。"
     category: survival
     ooc_risk: medium
     transmission: silent
@@ -51,6 +53,8 @@ data:
         - source_type
         - item_id
         - quantity
+      optional_fields:
+        - source_id
       field_validations:
         - field: quantity
           validation_type: min_value
@@ -130,7 +134,7 @@ data:
   说话:
     name: "说话"
     display_name: "交谈"
-    description: "发出信息。channel=public（默认）对当前位置所有人可见；channel=private 仅 target_agent_id 可见；channel=broadcast 附近位置均可闻。必须指定 content。消耗体力并增加口渴感。"
+    description: "发出信息。必须指定 content。channel=public（默认）对当前位置所有人可见；channel=private 仅 target_agent_id 可见（此时 target_agent_id 必填）；channel=broadcast 附近位置均可闻。target_agent_id 可与任何 channel 搭配，用于标明对话对象——即使 public 也可指定对象以明确说话意图。"
     category: social
     ooc_risk: high
     transmission: broadcast
@@ -196,13 +200,11 @@ data:
   休整:
     name: "休整"
     display_name: "静修"
-    description: "不执行主动操作，静待时间流逝并恢复状态。intent 参数可选（如 recover_stamina/cultivate_qi/meditate），不同 intent 触发不同恢复效果。此动作不产生物品、战斗或社交效果，纯粹等待+恢复。"
+    description: "不执行主动操作，静待时间流逝并恢复体力、精神和少量生命值。固定恢复效果，不产生物品、战斗或社交效果。"
     category: survival
     ooc_risk: low
     transmission: silent
-    validation:
-      optional_fields:
-        - intent
+    validation: {}
     requirements:
       - requirement_type: attribute
         attribute: stamina
@@ -240,6 +242,7 @@ data:
       - requirement_type: attribute
         attribute: stamina
         min: 10
+        cost: 10
 
   教导:
     name: "教导"
