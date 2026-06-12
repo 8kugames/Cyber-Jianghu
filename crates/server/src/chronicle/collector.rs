@@ -373,12 +373,12 @@ async fn collect_highlights(
     // 批量查询：其他事件（speak, attack, give）
     let event_rows = sqlx::query(
         r#"
-        SELECT l.tick_id, l.agent_id, l.action_type, l.narrative, l.result_message, a.name
+        SELECT l.tick_id, l.agent_id, l.action_type, l.action_data, l.result_message, a.name
         FROM agent_action_logs l
         INNER JOIN agents a ON l.agent_id = a.agent_id
         WHERE l.tick_id BETWEEN $1 AND $2
         AND (
-            (l.action_type = '说话' AND l.narrative IS NOT NULL)
+            (l.action_type = '说话' AND l.action_data->>'content' IS NOT NULL AND l.result = 'success')
             OR (l.action_type = '攻击' AND l.result = 'success')
             OR (l.action_type = '予' AND l.result = 'success')
         )
@@ -404,11 +404,19 @@ async fn collect_highlights(
 
         let highlight = match ActionRegistry::get(&action_type).and_then(|c| c.highlight_kind) {
             Some(HighlightKind::Dialogue) => {
-                let narrative: String = row.get("narrative");
+                let action_data: Option<serde_json::Value> = row.get("action_data");
+                let content = action_data
+                    .as_ref()
+                    .and_then(|d| d.get("content"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("...");
                 Highlight {
                     tick_id,
                     event_type: "dialogue".to_string(),
-                    description: super::truncate_text(&narrative, 100),
+                    description: super::truncate_text(
+                        &format!("{}\u{ff1a}\u{201c}{}\u{201d}", agent_name, content),
+                        100,
+                    ),
                     agent_id: Some(agent_id),
                     agent_name: Some(agent_name),
                 }

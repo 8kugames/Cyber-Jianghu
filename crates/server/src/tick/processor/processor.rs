@@ -224,7 +224,7 @@ impl StateProcessor {
             result_message: Some(result.message.clone()),
             thought_log: intent.thought_log.clone(),
             reflector_thought: intent.reflector_thought.clone(),
-            narrative: intent.narrative.clone(),
+            narrative: None,
             soul_cycle_metadata: None,
             chaos_marker: intent
                 .chaos_marker
