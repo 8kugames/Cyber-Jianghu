@@ -10,11 +10,7 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 
 /// bge-small-zh-v1.5 需要下载的文件列表
-const MODEL_FILES: &[&str] = &[
-    "config.json",
-    "tokenizer.json",
-    "model.safetensors",
-];
+const MODEL_FILES: &[&str] = &["config.json", "tokenizer.json", "model.safetensors"];
 
 /// HuggingFace 仓库 ID
 const REPO_ID: &str = "BAAI/bge-small-zh-v1.5";
@@ -70,8 +66,7 @@ async fn download_file(
     }
 
     // 写入文件
-    std::fs::write(dest, &bytes)
-        .with_context(|| format!("写入文件失败: {}", dest.display()))?;
+    std::fs::write(dest, &bytes).with_context(|| format!("写入文件失败: {}", dest.display()))?;
 
     Ok(())
 }
@@ -87,9 +82,7 @@ async fn fetch_sha256(client: &reqwest::Client, url: &str) -> Option<String> {
     }
     let text = resp.text().await.ok()?;
     // 格式: "<hash>  <filename>" 或纯 hash
-    text.split_whitespace()
-        .next()
-        .map(|h| h.to_lowercase())
+    text.split_whitespace().next().map(|h| h.to_lowercase())
 }
 
 /// 下载 bge-small-zh-v1.5 模型到指定目录
@@ -122,7 +115,10 @@ pub async fn download_model(model_dir: &Path, mirror: &str) -> Result<()> {
             tracing::info!("获取到 SHA256 校验值: {}", file);
         } else {
             // 部分 HF 镜像不提供 .sha256 文件，此处为已知降级路径
-            tracing::warn!("未获取到 SHA256 校验值，跳过校验（已知：部分镜像不提供 .sha256）: {}", file);
+            tracing::warn!(
+                "未获取到 SHA256 校验值，跳过校验（已知：部分镜像不提供 .sha256）: {}",
+                file
+            );
         }
 
         download_file(&client, &url, &dest, expected_sha256.as_deref()).await?;

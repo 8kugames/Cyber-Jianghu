@@ -23,9 +23,9 @@ impl TopicClassifier {
 
         // If agent provides topics and all are confident enough, trust them
         if !agent_topics.is_empty() {
-            let all_confident = agent_topics.iter().all(|t| {
-                agent_confidence.get(t).copied().unwrap_or(0.0) >= threshold
-            });
+            let all_confident = agent_topics
+                .iter()
+                .all(|t| agent_confidence.get(t).copied().unwrap_or(0.0) >= threshold);
             if all_confident {
                 return ClassificationResult {
                     topics: agent_topics.to_vec(),

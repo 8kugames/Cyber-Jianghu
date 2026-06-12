@@ -176,13 +176,19 @@ pub async fn get_agent_details(
                 .and_then(|v| v.as_i64())
                 .map(|v| v as i32)
                 .unwrap_or_else(|| get_max("hp")),
-            attrs.get("satiation").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
+            attrs
+                .get("satiation")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(100) as i32,
             attrs
                 .get("satiation_max")
                 .and_then(|v| v.as_i64())
                 .map(|v| v as i32)
                 .unwrap_or_else(|| get_max("satiation")),
-            attrs.get("hydration").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
+            attrs
+                .get("hydration")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(100) as i32,
             attrs
                 .get("hydration_max")
                 .and_then(|v| v.as_i64())

@@ -16,8 +16,8 @@
 //   首次运行新代码时旧 .tmp 文件会被忽略（无外部 reader，影响为零）。
 // ============================================================================
 
-use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, TimeZone, Utc};
 use chrono::LocalResult;
+use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -528,21 +528,42 @@ mod tests {
     #[test]
     fn test_hour_key_format() {
         let tz = local_tz();
-        let t = "2026-06-01T02:35:00Z".parse::<DateTime<Utc>>().unwrap().with_timezone(&tz);
-        assert_eq!(hour_key(t), format!("{}-{}", t.format("%Y-%m-%d"), t.format("%H")));
+        let t = "2026-06-01T02:35:00Z"
+            .parse::<DateTime<Utc>>()
+            .unwrap()
+            .with_timezone(&tz);
+        assert_eq!(
+            hour_key(t),
+            format!("{}-{}", t.format("%Y-%m-%d"), t.format("%H"))
+        );
 
-        let t2 = "2026-12-31T23:59:59Z".parse::<DateTime<Utc>>().unwrap().with_timezone(&tz);
-        assert_eq!(hour_key(t2), format!("{}-{}", t2.format("%Y-%m-%d"), t2.format("%H")));
+        let t2 = "2026-12-31T23:59:59Z"
+            .parse::<DateTime<Utc>>()
+            .unwrap()
+            .with_timezone(&tz);
+        assert_eq!(
+            hour_key(t2),
+            format!("{}-{}", t2.format("%Y-%m-%d"), t2.format("%H"))
+        );
 
-        let t3 = "2026-01-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap().with_timezone(&tz);
-        assert_eq!(hour_key(t3), format!("{}-{}", t3.format("%Y-%m-%d"), t3.format("%H")));
+        let t3 = "2026-01-01T00:00:00Z"
+            .parse::<DateTime<Utc>>()
+            .unwrap()
+            .with_timezone(&tz);
+        assert_eq!(
+            hour_key(t3),
+            format!("{}-{}", t3.format("%Y-%m-%d"), t3.format("%H"))
+        );
     }
 
     // ---- 2. parse_hour_key 反解 ----
     #[test]
     fn test_parse_hour_key_roundtrip() {
         let tz = local_tz();
-        let t = "2026-06-01T02:35:00Z".parse::<DateTime<Utc>>().unwrap().with_timezone(&tz);
+        let t = "2026-06-01T02:35:00Z"
+            .parse::<DateTime<Utc>>()
+            .unwrap()
+            .with_timezone(&tz);
         let hk = hour_key(t);
         let parsed = parse_hour_key(&hk);
         // parsed 是 UTC，转回本地时区验证格式一致

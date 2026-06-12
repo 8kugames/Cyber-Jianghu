@@ -94,10 +94,7 @@ mod tests {
 
     fn make_prompt_template() -> PromptTemplateConfig {
         let mut sections = HashMap::new();
-        sections.insert(
-            "survival_rules".into(),
-            "饱食度低于40时需尽快进食。".into(),
-        );
+        sections.insert("survival_rules".into(), "饱食度低于40时需尽快进食。".into());
         sections.insert("narrative_limits".into(), "叙事应使用第二人称。".into());
 
         let mut templates = HashMap::new();

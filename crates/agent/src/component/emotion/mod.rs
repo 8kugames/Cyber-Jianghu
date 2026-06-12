@@ -174,7 +174,11 @@ mod tests {
     fn test_physiological_below_lower_bound() {
         let attrs = HashMap::from([("satiation".into(), 20), ("hp".into(), 80)]);
         let (v, a) = CoreAffect::compute_physiological_affect(&attrs, &make_attribute_rules(), 0.5);
-        assert!(v < 0.0, "satiation 低于舒适区应产生负效价，got valence={}", v);
+        assert!(
+            v < 0.0,
+            "satiation 低于舒适区应产生负效价，got valence={}",
+            v
+        );
         assert!(
             a > 0.0,
             "satiation 低于舒适区应产生正唤醒度，got arousal={}",
@@ -220,8 +224,11 @@ mod tests {
     fn test_physiological_deviation_scale_consistency() {
         let attrs_satiation = HashMap::from([("satiation".into(), 20), ("hp".into(), 80)]);
         let attrs_hp = HashMap::from([("satiation".into(), 60), ("hp".into(), 15)]);
-        let (v1, _) =
-            CoreAffect::compute_physiological_affect(&attrs_satiation, &make_attribute_rules(), 0.5);
+        let (v1, _) = CoreAffect::compute_physiological_affect(
+            &attrs_satiation,
+            &make_attribute_rules(),
+            0.5,
+        );
         let (v2, _) =
             CoreAffect::compute_physiological_affect(&attrs_hp, &make_attribute_rules(), 0.5);
         assert!(

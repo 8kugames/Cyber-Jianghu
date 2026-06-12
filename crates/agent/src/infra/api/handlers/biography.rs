@@ -196,8 +196,7 @@ async fn collect_soul_cycle_timeline(
                             .and_then(|d| d.get("content"))
                             .and_then(|c| c.as_str())
                             .unwrap_or("");
-                        if at == "说话" && !content.is_empty()
-                        {
+                        if at == "说话" && !content.is_empty() {
                             format!("{}：{}", at, content)
                         } else {
                             at.to_string()

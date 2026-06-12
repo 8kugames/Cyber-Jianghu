@@ -7,10 +7,10 @@
 
 use anyhow::{Context, Result};
 use axum::{
+    Json, Router,
     extract::State,
     http::StatusCode,
     routing::{get, post},
-    Json, Router,
 };
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -33,7 +33,11 @@ struct Args {
     model_dir: Option<String>,
 
     /// 模型镜像 URL
-    #[arg(long, default_value = "https://hf-mirror.com", env = "EMBEDDING_MIRROR")]
+    #[arg(
+        long,
+        default_value = "https://hf-mirror.com",
+        env = "EMBEDDING_MIRROR"
+    )]
     mirror: String,
 
     /// 自动下载模型（模型不存在时）
@@ -208,20 +212,14 @@ async fn main() -> Result<()> {
             tracing::info!("模型不存在，开始下载: {:?}", config.model_dir);
             cyber_jianghu_embedding::download_model(&config.model_dir, &args.mirror).await?;
         } else {
-            anyhow::bail!(
-                "模型不存在且未启用自动下载: {:?}",
-                config.model_dir
-            );
+            anyhow::bail!("模型不存在且未启用自动下载: {:?}", config.model_dir);
         }
     }
 
     // 加载模型
     let embedder = cyber_jianghu_embedding::LocalEmbedder::load_with_config(config.clone())
         .context("加载嵌入模型失败")?;
-    tracing::info!(
-        "模型加载完成，维度: {}",
-        embedder.embedding_dim()
-    );
+    tracing::info!("模型加载完成，维度: {}", embedder.embedding_dim());
 
     let state = Arc::new(AppState {
         embedder: Arc::new(Mutex::new(Some(embedder))),

@@ -8,7 +8,9 @@ use tracing::info;
 use crate::db::DbPool;
 use crate::dialogue;
 use crate::game_data;
-use crate::governance::{CapabilityManifest, ProposalStore, SoulReviewEngine, TopicClassifier, SoulsReviewConfig};
+use crate::governance::{
+    CapabilityManifest, ProposalStore, SoulReviewEngine, SoulsReviewConfig, TopicClassifier,
+};
 use crate::models::AgentState;
 use crate::tick::WorkerMessage;
 use crate::websocket;
