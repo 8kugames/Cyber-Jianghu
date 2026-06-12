@@ -2,7 +2,7 @@ use axum::{
     Json,
     extract::{Path, State},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -214,4 +214,36 @@ pub async fn get_proposal_group_detail(
         }))),
         None => Err(axum::http::StatusCode::NOT_FOUND),
     }
+}
+
+#[derive(Deserialize)]
+pub struct AdminActionRequest {
+    pub action: String,
+    pub reason: String,
+}
+
+pub async fn admin_action_on_group(
+    Path(group_id): Path<uuid::Uuid>,
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<AdminActionRequest>,
+) -> Result<Json<serde_json::Value>, axum::http::StatusCode> {
+    let pool = &state.db_pool;
+    let new_status = match req.action.as_str() {
+        "approve" => "approved",
+        "reject" => "rejected",
+        _ => return Err(axum::http::StatusCode::BAD_REQUEST),
+    };
+
+    sqlx::query(
+        "UPDATE action_evolution_proposal_groups
+         SET status = $1, final_decision = $2, updated_at = NOW()
+         WHERE id = $3"
+    )
+    .bind(new_status)
+    .bind(&req.reason)
+    .bind(group_id)
+    .execute(pool).await
+    .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(serde_json::json!({"status": "ok", "new_status": new_status})))
 }
