@@ -50,12 +50,11 @@ pub async fn get_action_evolution_stats(
         .get(0);
 
     // Total groups
-    let total_groups: i64 =
-        sqlx::query("SELECT COUNT(*) FROM action_evolution_proposal_groups")
-            .fetch_one(pool)
-            .await
-            .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?
-            .get(0);
+    let total_groups: i64 = sqlx::query("SELECT COUNT(*) FROM action_evolution_proposal_groups")
+        .fetch_one(pool)
+        .await
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?
+        .get(0);
 
     // Groups by status
     let status_rows = sqlx::query(
@@ -113,7 +112,9 @@ pub async fn get_action_evolution_stats(
             proposed_action_type: r.get(1),
             rationale: r.get(2),
             primary_soul: r.get(3),
-            group_status: r.get::<Option<String>, _>(4).unwrap_or_else(|| "ungrouped".to_string()),
+            group_status: r
+                .get::<Option<String>, _>(4)
+                .unwrap_or_else(|| "ungrouped".to_string()),
             created_at: r.get(5),
         })
         .collect();

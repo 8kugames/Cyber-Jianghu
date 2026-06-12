@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use cyber_jianghu_protocol::{types::governance::ProposedActionIR, GovernanceTopic};
+use cyber_jianghu_protocol::{GovernanceTopic, types::governance::ProposedActionIR};
 use sqlx::{PgPool, Postgres, Row};
 use uuid::Uuid;
 
@@ -302,10 +302,14 @@ impl ProposalStore {
         .await?;
 
         Ok(row.map(|r| {
-            let effect_refs: Vec<String> = serde_json::from_value(r.get::<serde_json::Value, _>(10)).unwrap_or_default();
-            let requirement_refs: Vec<String> = serde_json::from_value(r.get::<serde_json::Value, _>(11)).unwrap_or_default();
-            let governance_topics: Vec<GovernanceTopic> = serde_json::from_value(r.get::<serde_json::Value, _>(12)).unwrap_or_default();
-            let topic_confidence: HashMap<GovernanceTopic, f64> = serde_json::from_value(r.get::<serde_json::Value, _>(13)).unwrap_or_default();
+            let effect_refs: Vec<String> =
+                serde_json::from_value(r.get::<serde_json::Value, _>(10)).unwrap_or_default();
+            let requirement_refs: Vec<String> =
+                serde_json::from_value(r.get::<serde_json::Value, _>(11)).unwrap_or_default();
+            let governance_topics: Vec<GovernanceTopic> =
+                serde_json::from_value(r.get::<serde_json::Value, _>(12)).unwrap_or_default();
+            let topic_confidence: HashMap<GovernanceTopic, f64> =
+                serde_json::from_value(r.get::<serde_json::Value, _>(13)).unwrap_or_default();
 
             ProposalEvidence {
                 agent_id: r.get(0),
