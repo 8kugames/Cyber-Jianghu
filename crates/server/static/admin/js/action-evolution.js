@@ -1,17 +1,22 @@
 // Action Evolution Tab
 function loadActionEvolution() {
+    const container = document.getElementById('evolution-content');
+    if (!container) return;
     fetch('/api/dashboard/action-evolution/stats', {
         headers: getAuthHeaders()
     })
-    .then(r => r.json())
+    .then(r => {
+        if (!r.ok) {
+            container.innerHTML = '<p class="error">加载失败: HTTP ' + r.status + ' ' + r.statusText + '</p>';
+            throw new Error('HTTP ' + r.status);
+        }
+        return r.json();
+    })
     .then(data => {
-        const container = document.getElementById('evolution-content');
-        if (!container) return;
-        
         let html = '<div class="stats-grid">';
         html += '<div class="stat-card"><div class="stat-value">' + (data.total_proposals || 0) + '</div><div class="stat-label">总提案数</div></div>';
         html += '</div>';
-        
+
         if (data.by_soul && data.by_soul.length > 0) {
             html += '<h3>按 Soul 分组</h3>';
             html += '<table class="data-table"><thead><tr><th>Soul</th><th>数量</th><th>状态</th></tr></thead><tbody>';
@@ -20,8 +25,10 @@ function loadActionEvolution() {
             });
             html += '</tbody></table>';
         }
-        
+
         container.innerHTML = html;
     })
-    .catch(err => console.error('Failed to load action evolution stats:', err));
+    .catch(err => {
+        container.innerHTML = '<p class="error">加载失败: ' + (err && err.message ? err.message : err) + '</p>';
+    });
 }

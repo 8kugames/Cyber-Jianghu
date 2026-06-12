@@ -123,14 +123,23 @@ fn start_tick_engine(
     })
 }
 
+/// 治理轮询任务的优雅关闭句柄
+struct GovernanceShutdown {
+    /// 关闭信号发送端：调用 `send(true)` 通知任务退出
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
+    /// 任务 JoinHandle：在 shutdown 时 await，等待任务收尾
+    handle: JoinHandle<()>,
+}
+
 /// 初始化治理系统
 ///
 /// 加载 action_evolution.yaml 配置，创建 TopicClassifier、ProposalStore、SoulReviewEngine，
-/// 并启动周期审议后台任务。
+/// 并启动周期审议后台任务。返回 `(GovernanceState, GovernanceShutdown)`，
+/// 调用方负责在关闭时通过 `GovernanceShutdown` 优雅停掉轮询任务。
 async fn init_governance(
     db_pool: &DbPool,
     connection_manager: websocket::ConnectionManager,
-) -> Result<GovernanceState> {
+) -> Result<(GovernanceState, GovernanceShutdown)> {
     let config_dir = crate::paths::get_config_dir();
 
     // 加载 action_evolution.yaml
@@ -161,59 +170,96 @@ async fn init_governance(
 
     let review_config = engine.config().review.clone();
 
-    // 启动周期审议任务
+    // 创建治理轮询任务的关闭信号通道
+    let (poll_shutdown_tx, poll_shutdown_rx) = tokio::sync::watch::channel(false);
+
+    // 启动周期审议任务（持有 JoinHandle 以便优雅关闭）
     let engine_clone = engine.clone();
     let store_clone = proposal_store.clone();
     let cm_clone = connection_manager.clone();
     let poll_interval = review_config.poll_interval_secs;
-    tokio::spawn(async move {
+    let governance_poll_handle = tokio::spawn(async move {
+        let mut shutdown_rx = poll_shutdown_rx;
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(poll_interval));
         loop {
-            interval.tick().await;
-            match store_clone.get_pending_groups().await {
-                Ok(groups) if !groups.is_empty() => {
-                    let results = engine_clone.review_pending(&store_clone, &groups).await;
-                    for (group_id, status) in &results {
-                        info!("Group {} 审议完成: {}", group_id, status);
-                        if *status == crate::governance::ProposalStatus::Approved {
-                            let config_update =
-                                cyber_jianghu_protocol::messages::ServerMessage::ConfigUpdate {
-                                    config_type: "action_evolution".to_string(),
-                                    update_type: "full".to_string(),
-                                    version: chrono::Utc::now().to_rfc3339(),
-                                    content: serde_json::json!({
-                                        "event": "proposal_group_approved",
-                                        "group_id": group_id.to_string(),
-                                    }),
-                                    content_hash: None,
-                                    updated_items: vec![group_id.to_string()],
-                                    removed_items: vec![],
-                                };
-                            if let Err(e) =
-                                crate::websocket::broadcast_config_update(config_update, &cm_clone)
-                                    .await
-                            {
-                                warn!("Approved group {} broadcast 失败: {}", group_id, e);
+            tokio::select! {
+                _ = shutdown_rx.changed() => {
+                    if *shutdown_rx.borrow() {
+                        info!("治理轮询任务收到关闭信号，退出循环");
+                        break;
+                    }
+                }
+                _ = interval.tick() => {
+                    let review_timeout = std::time::Duration::from_secs(30);
+                    let pending_result =
+                        tokio::time::timeout(review_timeout, store_clone.get_pending_groups()).await;
+                    match pending_result {
+                        Ok(Ok(groups)) if !groups.is_empty() => {
+                            let review_future =
+                                engine_clone.review_pending(&store_clone, &groups);
+                            match tokio::time::timeout(review_timeout, review_future).await {
+                                Ok(results) => {
+                                    for (group_id, status) in &results {
+                                        info!("Group {} 审议完成: {}", group_id, status);
+                                        if *status == crate::governance::ProposalStatus::Approved {
+                                            let config_update = cyber_jianghu_protocol::messages::ServerMessage::ConfigUpdate {
+                                                config_type: "action_evolution".to_string(),
+                                                update_type: "full".to_string(),
+                                                version: chrono::Utc::now().to_rfc3339(),
+                                                content: serde_json::json!({
+                                                    "event": "proposal_group_approved",
+                                                    "group_id": group_id.to_string(),
+                                                }),
+                                                content_hash: None,
+                                                updated_items: vec![group_id.to_string()],
+                                                removed_items: vec![],
+                                            };
+                                            if let Err(e) = crate::websocket::broadcast_config_update(config_update, &cm_clone).await {
+                                                warn!("Approved group {} broadcast 失败: {}", group_id, e);
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "Group 批次审议超时（>{}s），跳过本轮",
+                                        review_timeout.as_secs()
+                                    );
+                                }
                             }
+                        }
+                        Ok(Ok(_)) => {}
+                        Ok(Err(e)) => {
+                            warn!("获取待审议 groups 失败: {}", e);
+                        }
+                        Err(_) => {
+                            warn!(
+                                "获取待审议 groups 超时（>{}s），跳过本轮",
+                                review_timeout.as_secs()
+                            );
                         }
                     }
                 }
-                Ok(_) => {}
-                Err(e) => {
-                    warn!("获取待审议 groups 失败: {}", e);
-                }
             }
         }
+        info!("治理轮询任务已停止");
     });
 
-    Ok(GovernanceState {
+    let state = GovernanceState {
         manifest: Arc::new(tokio::sync::RwLock::new(manifest)),
         classifier,
         proposal_store,
         engine,
         connection_manager,
         review_config,
-    })
+    };
+
+    let shutdown = GovernanceShutdown {
+        shutdown_tx: poll_shutdown_tx,
+        handle: governance_poll_handle,
+    };
+
+    Ok((state, shutdown))
 }
 
 // ============================================================================
@@ -388,16 +434,17 @@ async fn main() -> Result<()> {
     );
 
     // 9.2 初始化治理系统
-    let governance = match init_governance(&db_pool, connection_manager.clone()).await {
-        Ok(g) => {
-            info!("治理系统初始化成功");
-            Some(g)
-        }
-        Err(e) => {
-            warn!("治理系统初始化失败（将继续运行，治理功能不可用）: {}", e);
-            None
-        }
-    };
+    let (governance, mut governance_shutdown) =
+        match init_governance(&db_pool, connection_manager.clone()).await {
+            Ok((g, s)) => {
+                info!("治理系统初始化成功");
+                (Some(g), Some(s))
+            }
+            Err(e) => {
+                warn!("治理系统初始化失败（将继续运行，治理功能不可用）: {}", e);
+                (None, None)
+            }
+        };
 
     // 9.3 创建应用状态
     let state = Arc::new(AppState::new(
@@ -785,10 +832,15 @@ async fn main() -> Result<()> {
                 ),
             ),
         )
-        // Action Evolution — 治理提案提交
+        // Action Evolution — 治理提案提交（agent 内部端点，需 R/RW Token 防外部滥用）
         .route(
             "/api/v1/action-evolution/propose",
-            post(crate::governance::handlers::submit_proposal),
+            post(crate::governance::handlers::submit_proposal).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
         )
         .with_state(state);
 
@@ -843,7 +895,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    // 14. 等待服务器结束、Tick引擎失败或关闭信号
+    // 14. 等待服务器结束、Tick引擎失败、治理轮询失败或关闭信号
     tokio::select! {
         // 关闭信号
         _ = shutdown_signal => {
@@ -863,6 +915,29 @@ async fn main() -> Result<()> {
             if let Err(e) = result {
                 error!("Tick引擎任务失败: {}", e);
             }
+        }
+
+        // 治理轮询任务（意外退出也算失败路径）
+        result = async {
+            match governance_shutdown.as_mut() {
+                Some(s) => (&mut s.handle).await,
+                None => std::future::pending::<Result<(), tokio::task::JoinError>>().await,
+            }
+        } => {
+            match result {
+                Ok(()) => warn!("治理轮询任务已退出（正常）"),
+                Err(e) => error!("治理轮询任务失败: {}", e),
+            }
+        }
+    }
+
+    // 15. 触发治理轮询关闭信号并等待任务收尾（带超时）
+    if let Some(shutdown) = governance_shutdown {
+        let _ = shutdown.shutdown_tx.send(true);
+        match tokio::time::timeout(std::time::Duration::from_secs(5), shutdown.handle).await {
+            Ok(Ok(())) => info!("治理轮询任务已优雅退出"),
+            Ok(Err(e)) => error!("治理轮询任务 join 失败: {}", e),
+            Err(_) => warn!("治理轮询任务未在 5s 内退出，继续主流程"),
         }
     }
 
