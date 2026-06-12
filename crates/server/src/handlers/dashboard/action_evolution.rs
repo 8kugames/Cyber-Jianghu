@@ -1,4 +1,7 @@
-use axum::{Json, extract::{Path, State}};
+use axum::{
+    Json,
+    extract::{Path, State},
+};
 use serde::Serialize;
 use sqlx::Row;
 use std::collections::HashMap;
@@ -195,22 +198,20 @@ pub async fn get_proposal_group_detail(
     .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
 
     match row {
-        Some(r) => {
-            Ok(Json(serde_json::json!({
-                "id": r.try_get::<uuid::Uuid, _>(0).ok(),
-                "similarity_key": r.try_get::<String, _>(1).ok(),
-                "primary_soul": r.try_get::<Option<String>, _>(2).ok(),
-                "co_reviewers": r.try_get::<serde_json::Value, _>(3).ok(),
-                "governance_topics": r.try_get::<serde_json::Value, _>(4).ok(),
-                "status": r.try_get::<String, _>(5).ok(),
-                "votes": r.try_get::<serde_json::Value, _>(6).ok(),
-                "final_decision": r.try_get::<Option<String>, _>(7).ok(),
-                "dissent_log": r.try_get::<serde_json::Value, _>(8).ok(),
-                "proposal_ids": r.try_get::<serde_json::Value, _>(9).ok(),
-                "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>(10).ok(),
-                "updated_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>(11).ok(),
-            })))
-        }
+        Some(r) => Ok(Json(serde_json::json!({
+            "id": r.try_get::<uuid::Uuid, _>(0).ok(),
+            "similarity_key": r.try_get::<String, _>(1).ok(),
+            "primary_soul": r.try_get::<Option<String>, _>(2).ok(),
+            "co_reviewers": r.try_get::<serde_json::Value, _>(3).ok(),
+            "governance_topics": r.try_get::<serde_json::Value, _>(4).ok(),
+            "status": r.try_get::<String, _>(5).ok(),
+            "votes": r.try_get::<serde_json::Value, _>(6).ok(),
+            "final_decision": r.try_get::<Option<String>, _>(7).ok(),
+            "dissent_log": r.try_get::<serde_json::Value, _>(8).ok(),
+            "proposal_ids": r.try_get::<serde_json::Value, _>(9).ok(),
+            "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>(10).ok(),
+            "updated_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>(11).ok(),
+        }))),
         None => Err(axum::http::StatusCode::NOT_FOUND),
     }
 }

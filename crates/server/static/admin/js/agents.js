@@ -570,7 +570,7 @@ function renderExperiences(data) {
   return '<div class="experience-list">' + expHtml + "</div>";
 }
 
-// 渲染 Tick 卡片（三魂完整链路，与 agent 端保持一致）
+// 渲染 Tick 卡片（三魂完整链路，按实际职能排列：人魂→地魂→天魂）
 function renderTickCard(exp, metadata, time) {
   var attempts = metadata.cycles || [];
   var immediate = metadata.immediate_intents || [];
@@ -600,11 +600,14 @@ function renderTickCard(exp, metadata, time) {
       html +=
         '<div class="tick-attempt-label">行动 ' + (idx + 1) + "</div>";
     }
+    // 1. 人魂（叙事 + 推理）
     html += renderServerSoulInline("人魂", attempt.renhun, "renhun");
-    html += renderServerSoulInline("天魂", attempt.tianhun, "tianhun");
+    // 2. 地魂（工具调用 / action 执行）
     if (attempt.final_intent) {
       html += renderServerSoulInline("地魂", attempt.final_intent, "action");
     }
+    // 3. 天魂（审查）
+    html += renderServerSoulInline("天魂", attempt.tianhun, "tianhun");
     html += "</div>";
   });
   html += "</div></div>";
@@ -721,9 +724,6 @@ function renderServerSoulInline(label, data, type) {
     }
     if (data.reason)
       html += '<div class="soul-reason">' + escapeHtml(data.reason) + "</div>";
-    if (data.narrative)
-      html +=
-        '<div class="soul-narrative"><span style="color:var(--text-subtle);font-size:11px;">[上轮回顾]</span> ' + escapeHtml(data.narrative) + "</div>";
   } else if (type === "action") {
     var pipelineActions = data.pipeline_actions;
     if (pipelineActions && pipelineActions.length > 0) {
