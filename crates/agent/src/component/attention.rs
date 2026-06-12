@@ -215,7 +215,7 @@ mod tests {
             make_change(
                 ChangeCategory::Survival,
                 Urgency::Important,
-                "hunger: 50 -> 30",
+                "satiation: 50 -> 30",
                 Some("query_world(section=inventory, filter=food)"),
             ),
             make_change(ChangeCategory::Environment, Urgency::Info, "无足轻重", None),

@@ -447,17 +447,17 @@ pub(crate) async fn rebirth_character_handler(
 
     if status.is_success() {
         info!(
-            "[rebirth] Server 响应: 路径={}, status={}, body={}",
+            "[rebirth] Server 响应: 路径={}, status={}, body_len={}",
             log_tag,
             status,
-            &body[..body.len().min(2000)]
+            body.len()
         );
     } else {
         // 非 401 错误：仍继续本地清理（server 可能暂时不可达，但本地状态需清理）
         warn!(
-            "[rebirth] Server 归隐非预期状态: status={}, body={}，继续本地清理",
+            "[rebirth] Server 归隐非预期状态: status={}, body_len={}，继续本地清理",
             status,
-            &body[..body.len().min(2000)]
+            body.len()
         );
     }
 

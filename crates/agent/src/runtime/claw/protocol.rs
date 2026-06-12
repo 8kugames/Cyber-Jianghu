@@ -165,7 +165,7 @@ pub enum DownstreamMessage {
     AgentDied {
         /// 死亡的 Agent ID
         agent_id: Uuid,
-        /// 死亡原因代码（来自配置：hunger, thirst, environmental, combat, etc.）
+        /// 死亡原因代码（来自配置：satiation, hydration, environmental, combat, etc.）
         cause: String,
         /// 死亡描述（来自配置，叙事化文本）
         description: String,

@@ -49,7 +49,7 @@ pub struct DeltaConfig {
     /// 变化百分比阈值（|diff| / 100 >= threshold => Important）
     pub change_percentage_threshold: f32,
     /// 生存驱动 Critical 阈值：只有 survival_drive.urgency >= 此值时才标 Critical
-    /// 默认值 5 对应 narratives.yaml 中 hunger/thirst urgency=3(轻微), 7(重度), 10(致命)
+    /// 默认值 5 对应 narratives.yaml 中 satiation/hydration urgency=3(轻微), 7(重度), 10(致命)
     /// 低于此值的生存属性变化标 Important 而非 Critical，减少信号噪声
     pub survival_critical_urgency_threshold: u8,
 }
@@ -196,7 +196,7 @@ impl DeltaEngine {
     ///
     /// Critical 判定规则：survival_drive.urgency >= config.survival_critical_urgency_threshold
     /// 而不是简单地检查属性是否在 survival_drives 中，以避免低紧迫度的生存属性变化
-    /// （如 hunger=59→58, urgency=3）产生 Critical 信号噪声。
+    /// （如 hydration=59→58, urgency=3）产生 Critical 信号噪声。
     fn detect_survival_changes(
         &self,
         curr_attrs: &HashMap<String, i32>,
@@ -514,7 +514,7 @@ mod tests {
         let engine = test_engine();
         let mut attrs = HashMap::new();
         attrs.insert("hp".to_string(), 80);
-        attrs.insert("hunger".to_string(), 30);
+        attrs.insert("satiation".to_string(), 30);
         let entity = make_entity("张三");
         let loc = default_location();
         let event = make_event("有人打架");
@@ -552,8 +552,8 @@ mod tests {
     #[test]
     fn test_survival_critical_threshold() {
         let engine = test_engine();
-        let prev_attrs = HashMap::from([("hp".to_string(), 50), ("hunger".to_string(), 50)]);
-        let curr_attrs = HashMap::from([("hp".to_string(), 20), ("hunger".to_string(), 50)]);
+        let prev_attrs = HashMap::from([("hp".to_string(), 50), ("satiation".to_string(), 50)]);
+        let curr_attrs = HashMap::from([("hp".to_string(), 20), ("satiation".to_string(), 50)]);
 
         let prev = build_world_state(prev_attrs, vec![], vec![], vec![], default_location());
         // server 预计算：hp=20 触发生存驱动 → Critical
@@ -585,11 +585,11 @@ mod tests {
     #[test]
     fn test_survival_low_urgency_not_critical() {
         let engine = test_engine();
-        let prev_attrs = HashMap::from([("hunger".to_string(), 42)]);
-        let curr_attrs = HashMap::from([("hunger".to_string(), 30)]);
+        let prev_attrs = HashMap::from([("satiation".to_string(), 42)]);
+        let curr_attrs = HashMap::from([("satiation".to_string(), 30)]);
 
         let drives = vec![cyber_jianghu_protocol::SurvivalDrive {
-            attribute: "hunger".to_string(),
+            attribute: "satiation".to_string(),
             drive: "寻找食物".to_string(),
             reason: "肚子饿了".to_string(),
             urgency: 3,
@@ -607,13 +607,13 @@ mod tests {
         );
 
         let delta = engine.compute(Some(&prev), &curr);
-        let hunger_change = delta
+        let satiation_change = delta
             .changes
             .iter()
-            .find(|c| c.field == "attributes.hunger")
-            .expect("应有 hunger 变化");
+            .find(|c| c.field == "attributes.satiation")
+            .expect("应有 satiation 变化");
         assert_eq!(
-            hunger_change.urgency,
+            satiation_change.urgency,
             Urgency::Important,
             "urgency=3 应标 Important 而非 Critical"
         );
@@ -642,7 +642,7 @@ mod tests {
     #[test]
     fn test_survival_no_change() {
         let engine = test_engine();
-        let attrs = HashMap::from([("hp".to_string(), 80), ("hunger".to_string(), 50)]);
+        let attrs = HashMap::from([("hp".to_string(), 80), ("satiation".to_string(), 50)]);
 
         let prev = build_world_state(attrs.clone(), vec![], vec![], vec![], default_location());
         let curr = build_world_state(attrs, vec![], vec![], vec![], default_location());

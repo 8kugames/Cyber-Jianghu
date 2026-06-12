@@ -24,7 +24,7 @@ pub struct ChaosConfig {
     /// 最大混沌 intent 数
     #[serde(default = "default_max")]
     pub max_chaos_intents: usize,
-    /// 生存优先阈值（hunger/thirst 低于此值时优先选 survival category action）
+    /// 生存优先阈值（satiation/hydration 低于此值时优先选 survival category action）
     #[serde(default = "default_survival_threshold")]
     pub survival_threshold: i32,
 }
@@ -187,23 +187,23 @@ impl ChaosGenerator {
         let count: usize = rng.random_range(1..=max_chaos);
         let mut intents = Vec::with_capacity(count);
 
-        // 生存优先：hunger/thirst 低于阈值时，先从 survival category 中选取
+        // 生存优先：satiation/hydration 低于阈值时，先从 survival category 中选取
         // survival 都不可用时 fallback 到全部 actions（数据驱动，category 来自 actions.yaml）
-        let hunger = world_state
+        let satiation = world_state
             .self_state
             .attributes
-            .get("hunger")
+            .get("satiation")
             .copied()
             .unwrap_or(100);
-        let thirst = world_state
+        let hydration = world_state
             .self_state
             .attributes
-            .get("thirst")
+            .get("hydration")
             .copied()
             .unwrap_or(100);
 
         let survival_actions: Vec<&AvailableAction> =
-            if hunger < survival_threshold || thirst < survival_threshold {
+            if satiation < survival_threshold || hydration < survival_threshold {
                 available_actions
                     .iter()
                     .filter(|a| a.category == "survival")
@@ -373,8 +373,8 @@ mod tests {
     fn mock_world_state(sanity: i32) -> WorldState {
         let mut attrs = HashMap::new();
         attrs.insert("sanity".into(), sanity);
-        attrs.insert("hunger".into(), 50);
-        attrs.insert("thirst".into(), 50);
+        attrs.insert("satiation".into(), 50);
+        attrs.insert("hydration".into(), 50);
 
         let inv = vec![cyber_jianghu_protocol::InventoryItem {
             item_id: "test_item".into(),

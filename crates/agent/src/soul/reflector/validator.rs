@@ -430,7 +430,7 @@ impl ReflectorSoul {
                         .self_state
                         .survival_drives
                         .iter()
-                        .any(|sd| sd.attribute == "hunger" || sd.attribute == "thirst");
+                        .any(|sd| sd.attribute == "satiation" || sd.attribute == "hydration");
                     if has_survival_drive {
                         layers.push(LayerResult {
                             layer: "layer3",
@@ -699,8 +699,8 @@ mod tests {
 
     fn test_world_state() -> WorldState {
         let mut attributes = HashMap::new();
-        attributes.insert("hunger".to_string(), 80);
-        attributes.insert("thirst".to_string(), 80);
+        attributes.insert("satiation".to_string(), 80);
+        attributes.insert("hydration".to_string(), 80);
 
         WorldState {
             event_type: "world_state".to_string(),

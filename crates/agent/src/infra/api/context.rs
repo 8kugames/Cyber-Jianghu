@@ -221,7 +221,7 @@ fn generate_impl(
     sections.push("## 自身状态".to_string());
 
     let descriptions = &state.self_state.attribute_descriptions;
-    let vital_attrs = ["hp", "hunger", "thirst", "stamina"];
+    let vital_attrs = ["hp", "satiation", "hydration", "stamina"];
 
     // 核心状态属性优先展示（选择哪些属性优先是展示层决策，不做数据驱动）
     for attr in &vital_attrs {

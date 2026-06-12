@@ -340,7 +340,7 @@ mod tests {
         let value = serde_json::json!({
             "success": true,
             "rules": [
-                {"category": "survival", "name": "生存规则", "content": "饥饿值超过80将严重损害健康。"},
+                {"category": "survival", "name": "生存规则", "content": "饱食度低于40时需尽快进食。"},
             ],
         });
 
