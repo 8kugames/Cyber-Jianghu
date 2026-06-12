@@ -1,6 +1,7 @@
-use axum::{Json, extract::State};
+use axum::{Json, extract::{Path, State}};
 use serde::Serialize;
 use sqlx::Row;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::state::AppState;
@@ -126,4 +127,90 @@ pub async fn get_action_evolution_stats(
         by_soul,
         recent_proposals,
     }))
+}
+
+#[derive(Serialize)]
+pub struct ProposalGroupSummary {
+    pub id: uuid::Uuid,
+    pub similarity_key: String,
+    pub primary_soul: Option<String>,
+    pub status: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn get_proposal_groups(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, axum::http::StatusCode> {
+    let pool = &state.db_pool;
+    let status_filter = params.get("status").map(|s| s.as_str()).unwrap_or("all");
+
+    let rows = if status_filter == "all" {
+        sqlx::query(
+            "SELECT id, similarity_key, primary_soul, status, created_at, updated_at
+             FROM action_evolution_proposal_groups ORDER BY updated_at DESC LIMIT 50",
+        )
+        .fetch_all(pool)
+        .await
+    } else {
+        sqlx::query(
+            "SELECT id, similarity_key, primary_soul, status, created_at, updated_at
+             FROM action_evolution_proposal_groups WHERE status = $1 ORDER BY updated_at DESC LIMIT 50",
+        )
+        .bind(status_filter)
+        .fetch_all(pool)
+        .await
+    }
+    .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let groups: Vec<ProposalGroupSummary> = rows
+        .iter()
+        .map(|r| ProposalGroupSummary {
+            id: r.get(0),
+            similarity_key: r.get(1),
+            primary_soul: r.get(2),
+            status: r.get(3),
+            created_at: r.get(4),
+            updated_at: r.get(5),
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({ "groups": groups })))
+}
+
+pub async fn get_proposal_group_detail(
+    Path(group_id): Path<uuid::Uuid>,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, axum::http::StatusCode> {
+    let pool = &state.db_pool;
+    let row = sqlx::query(
+        "SELECT id, similarity_key, primary_soul, co_reviewers, governance_topics,
+                status, votes, final_decision, dissent_log, proposal_ids, created_at, updated_at
+         FROM action_evolution_proposal_groups WHERE id = $1",
+    )
+    .bind(group_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    match row {
+        Some(r) => {
+            Ok(Json(serde_json::json!({
+                "id": r.try_get::<uuid::Uuid, _>(0).ok(),
+                "similarity_key": r.try_get::<String, _>(1).ok(),
+                "primary_soul": r.try_get::<Option<String>, _>(2).ok(),
+                "co_reviewers": r.try_get::<serde_json::Value, _>(3).ok(),
+                "governance_topics": r.try_get::<serde_json::Value, _>(4).ok(),
+                "status": r.try_get::<String, _>(5).ok(),
+                "votes": r.try_get::<serde_json::Value, _>(6).ok(),
+                "final_decision": r.try_get::<Option<String>, _>(7).ok(),
+                "dissent_log": r.try_get::<serde_json::Value, _>(8).ok(),
+                "proposal_ids": r.try_get::<serde_json::Value, _>(9).ok(),
+                "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>(10).ok(),
+                "updated_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>(11).ok(),
+            })))
+        }
+        None => Err(axum::http::StatusCode::NOT_FOUND),
+    }
 }

@@ -832,6 +832,26 @@ async fn main() -> Result<()> {
                 ),
             ),
         )
+        // Action Evolution — 提案组列表（支持 status 过滤）
+        .route(
+            "/api/dashboard/action-evolution/groups",
+            get(handlers::dashboard::get_proposal_groups).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        // Action Evolution — 提案组详情
+        .route(
+            "/api/dashboard/action-evolution/groups/:id",
+            get(handlers::dashboard::get_proposal_group_detail).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
         // Action Evolution — 治理提案提交（agent 内部端点，需 R/RW Token 防外部滥用）
         .route(
             "/api/v1/action-evolution/propose",
