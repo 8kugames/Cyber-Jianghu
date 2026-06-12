@@ -289,12 +289,12 @@ data:
     threshold: 3
     max_broadcast: 5
     cause_advice_map:
-      hunger:
+      satiation:
         label: "饥饿"
         advice: "请留意饱食度，及时进食"
-      thirst:
+      hydration:
         label: "口渴"
-        advice: "请留意水分，及时饮水"
+        advice: "请留意饱饮度，及时饮水"
       hp:
         label: "外伤"
         advice: "请避免危险区域，注意安全"

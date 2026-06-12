@@ -30,8 +30,8 @@ attribute_categories:
   status:
     - hp
     - stamina
-    - hunger
-    - thirst
+    - satiation
+    - hydration
     - qi
     - sanity
     - reputation
@@ -80,10 +80,9 @@ attributes:
           description: "生命垂危，意识在消散，死亡的阴影笼罩着你"
           urgency: 10
 
-    hunger:
-      name: hunger
-      display_name: 饥饿值
-      note: "值越高表示越饱，越低表示越饿"
+    satiation:
+      name: satiation
+      display_name: 饱食度
       drive:
         name: "寻找食物"
         reason: "肚子饿了，需要进食"
@@ -108,10 +107,9 @@ attributes:
           description: "极度饥饿，生命正在消逝，不择手段也要找到食物"
           urgency: 10
 
-    thirst:
-      name: thirst
-      display_name: 口渴值
-      note: "值越高表示越不渴，越低表示越渴"
+    hydration:
+      name: hydration
+      display_name: 饱饮度
       drive:
         name: "寻找水源"
         reason: "口渴了，需要饮水"

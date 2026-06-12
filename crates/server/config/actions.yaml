@@ -6,7 +6,7 @@
 # 予/取/用 覆盖所有物品交互，不重叠不遗漏。
 # ============================================================================
 #
-# version: "2.0"
+version: "2.0"
 
 meta:
   created_at: "2026-03-16"
@@ -156,7 +156,7 @@ data:
         cost: 1
     effects:
       - effect_type: attribute_change
-        attribute: thirst
+        attribute: hydration
         operation: add
         value: 2
 

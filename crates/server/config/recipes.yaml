@@ -63,7 +63,7 @@ data:
 
   蒸馒头:
     name: 蒸馒头
-    description: "用生面团蒸制而成的热馒头，能大幅恢复饥饿"
+    description: "用生面团蒸制而成的热馒头，能大幅恢复饱食度"
     result_item: 馒头
     result_quantity: 1
     materials:

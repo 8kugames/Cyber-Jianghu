@@ -28,7 +28,7 @@ meta:
   notes:
     - "attribute_modifiers: 键为属性名，值为修饰系数"
     - "1.0 = 无修饰，>1.0 = 消耗/恢复增加，<1.0 = 消耗/恢复减少"
-    - "对于 decaying 属性（如 hunger）: 修饰系数应用于消耗量"
+    - "对于 decaying 属性（如 satiation）: 修饰系数应用于消耗量"
     - "对于 recovering 属性（如 stamina）: 修饰系数应用于恢复量"
 
 data:
@@ -55,8 +55,8 @@ data:
       resource_growth_rate: 1.5
       weather_pool: ["sunny", "cloudy", "rainy"]
       attribute_modifiers:
-        hunger: 1.0
-        thirst: 1.0
+        satiation: 1.0
+        hydration: 1.0
         stamina: 0.8
 
     - id: "summer"
@@ -66,8 +66,8 @@ data:
       resource_growth_rate: 1.2
       weather_pool: ["sunny", "sunny", "stormy"]
       attribute_modifiers:
-        hunger: 1.2
-        thirst: 1.3
+        satiation: 1.2
+        hydration: 1.3
         stamina: 1.0
 
     - id: "autumn"
@@ -77,8 +77,8 @@ data:
       resource_growth_rate: 1.0
       weather_pool: ["sunny", "cloudy"]
       attribute_modifiers:
-        hunger: 1.0
-        thirst: 1.0
+        satiation: 1.0
+        hydration: 1.0
         stamina: 1.0
 
     - id: "winter"
@@ -88,6 +88,6 @@ data:
       resource_growth_rate: 0.2
       weather_pool: ["cloudy", "cloudy", "rainy"]
       attribute_modifiers:
-        hunger: 1.5
-        thirst: 1.5
+        satiation: 1.5
+        hydration: 1.5
         stamina: 1.3

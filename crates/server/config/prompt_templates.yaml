@@ -61,7 +61,7 @@ templates:
 
       survival_rules_compact: |
         ## 生存核心
-        饥饿值超过80将严重损害健康。健康归零即死亡。
+        饱食度低于40时需尽快进食，降至0将死亡。饱饮度同理。
         体力耗尽将无法执行体力消耗动作。精神值过低会导致行为异常。
         详细的生存阈值和后果请使用 query_rules(["survival"]) 查询。
 
@@ -213,8 +213,6 @@ templates:
       planning_description: 100
       tool_calling_history_turns: 8
 
-
-
   # RuleEngine reject 反馈模板
   # 规则验证失败时，向 LLM 提供可用选项的上下文，帮助其自纠正
   reject_feedback:
@@ -223,9 +221,9 @@ templates:
       - move
     sections:
       use: |
-        使用物品失败：item_id 无效。背包可用物品：[{available_items}]。请使用 用，item_id 必须是上述之一（从世界状态数据直接复制）。
+        使用物品失败：item_id 无效。背包可用物品：[{available_items}]。请使用 `用`，item_id 必须是上述之一（从世界状态数据直接复制）。
       move: |
-        移动失败：target_location 无效。可前往的地点：[{reachable_nodes}]。请使用 移动，target_location 必须是上述之一（从世界状态数据直接复制）。
+        移动失败：target_location 无效。可前往的地点：[{reachable_nodes}]。请使用 `移动`，target_location 必须是上述之一（从世界状态数据直接复制）。
     truncation:
       max_items: 5
 
