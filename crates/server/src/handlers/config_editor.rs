@@ -73,6 +73,12 @@ fn is_known_config(filename: &str) -> bool {
             | "narrative.json"
             | "narrative.yaml"
             | "narrative.yml"
+            | "souls.json"
+            | "souls.yaml"
+            | "souls.yml"
+            | "action_evolution.json"
+            | "action_evolution.yaml"
+            | "action_evolution.yml"
     )
 }
 
