@@ -25,7 +25,7 @@ pub const ITEM_TYPE_CURRENCY: &str = "currency";
 /// agent 端直接使用，无需本地推导或硬编码。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SurvivalDrive {
-    /// 触发驱动的属性名（如"hunger"）
+    /// 触发驱动的属性名（如"satiation"）
     pub attribute: String,
     /// 驱动名称（如"寻找食物"）
     pub drive: String,
@@ -102,14 +102,14 @@ impl AgentSelfState {
         self.get_i32("stamina").unwrap_or(100)
     }
 
-    /// 便捷访问器：获取饥饿值
-    pub fn hunger(&self) -> i32 {
-        self.get_i32("hunger").unwrap_or(0)
+    /// 便捷访问器：获取饱食度
+    pub fn satiation(&self) -> i32 {
+        self.get_i32("satiation").unwrap_or(0)
     }
 
-    /// 便捷访问器：获取口渴值
-    pub fn thirst(&self) -> i32 {
-        self.get_i32("thirst").unwrap_or(0)
+    /// 便捷访问器：获取饱饮度
+    pub fn hydration(&self) -> i32 {
+        self.get_i32("hydration").unwrap_or(0)
     }
 }
 

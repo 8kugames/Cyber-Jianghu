@@ -354,7 +354,7 @@ pub struct WorldState {
 /// 跨 Agent 传承教训条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicLesson {
-    /// 死因分类（hunger/thirst/hp/old_age/environmental）
+    /// 死因分类（satiation/hydration/hp/old_age/environmental）
     pub cause: String,
     /// 教训文本（供 LLM 参考的自然语言描述）
     pub lesson: String,

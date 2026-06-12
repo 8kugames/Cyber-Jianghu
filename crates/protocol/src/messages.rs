@@ -206,7 +206,7 @@ pub enum ServerMessage {
     AgentDied {
         /// 死亡的 Agent ID
         agent_id: Uuid,
-        /// 死亡原因代码（来自配置：hunger, thirst, environmental, combat, etc.）
+        /// 死亡原因代码（来自配置：satiation, hydration, environmental, combat, etc.）
         cause: String,
         /// 死亡描述（来自配置，叙事化文本）
         description: String,
@@ -604,8 +604,8 @@ mod tests {
                     let mut attrs = std::collections::HashMap::new();
                     attrs.insert("hp".to_string(), 100);
                     attrs.insert("stamina".to_string(), 100);
-                    attrs.insert("hunger".to_string(), 50);
-                    attrs.insert("thirst".to_string(), 50);
+                    attrs.insert("satiation".to_string(), 50);
+                    attrs.insert("hydration".to_string(), 50);
                     attrs
                 },
                 derived_attributes: std::collections::HashMap::new(),
@@ -791,7 +791,7 @@ mod tests {
     fn test_server_message_agent_died() {
         let msg = ServerMessage::AgentDied {
             agent_id: Uuid::nil(),
-            cause: "hunger".to_string(),
+            cause: "satiation".to_string(),
             description: "因饥饿而死".to_string(),
             location: "tavern".to_string(),
             tick_id: 42,
@@ -806,7 +806,7 @@ mod tests {
         // Verify type is serialized as "agent_died" (snake_case)
         assert_eq!(parsed["type"], "agent_died");
         assert_eq!(parsed["agent_id"], "00000000-0000-0000-0000-000000000000");
-        assert_eq!(parsed["cause"], "hunger");
+        assert_eq!(parsed["cause"], "satiation");
         assert_eq!(parsed["description"], "因饥饿而死");
         assert_eq!(parsed["location"], "tavern");
         assert_eq!(parsed["tick_id"], 42);
@@ -827,7 +827,7 @@ mod tests {
                 metadata: _,
             } => {
                 assert_eq!(agent_id, Uuid::nil());
-                assert_eq!(cause, "hunger");
+                assert_eq!(cause, "satiation");
                 assert_eq!(description, "因饥饿而死");
                 assert_eq!(location, "tavern");
                 assert_eq!(tick_id, 42);
