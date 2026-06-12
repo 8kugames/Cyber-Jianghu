@@ -10,13 +10,14 @@
 //   - summary：每个 model_key 一项聚合（含 avg_*_per_hour 字段）
 //   - detail：每条 hour_key 一个 bucket，bucket 内按 model_key 分组
 //
-// 时区：UTC（与 workspace 约定一致，避免本地时区 / 夏令时 / 跨日边界坑）
+// 时区：本地时区（未采集到时区则默认 UTC+8），hour_key 按本地时间分桶，便于运维按日查看
 //
 // 历史格式兼容性：旧 flat HashMap<model_key, ModelTokenStats> 结构不再支持，
 //   首次运行新代码时旧 .tmp 文件会被忽略（无外部 reader，影响为零）。
 // ============================================================================
 
-use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, TimeZone, Utc};
+use chrono::LocalResult;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -127,17 +128,41 @@ fn split_model_key(key: &str) -> (String, String) {
     }
 }
 
-/// 生成 hour key（UTC，"yyyy-mm-dd-hh"）
-fn hour_key(now: DateTime<Utc>) -> String {
+/// 获取本地时区偏移，未采集到时区时默认 UTC+8
+fn local_tz() -> FixedOffset {
+    let offset = *Local::now().offset();
+    if offset.local_minus_utc() == 0 {
+        // chrono::Local 无法检测时区时回退 UTC(0)
+        // 按需求：未采集到时区默认 UTC+8
+        FixedOffset::east_opt(8 * 3600).unwrap_or(offset)
+    } else {
+        offset
+    }
+}
+
+/// 获取当前本地时间（时区获取失败则用 UTC+8）
+fn local_now() -> DateTime<FixedOffset> {
+    let tz = local_tz();
+    Utc::now().with_timezone(&tz)
+}
+
+/// 生成 hour key（本地时区，"yyyy-mm-dd-hh"）
+fn hour_key(now: DateTime<FixedOffset>) -> String {
     now.format("%Y-%m-%d-%H").to_string()
 }
 
 /// 从 "yyyy-mm-dd-hh" 反解为该小时整点的 DateTime<Utc>
+/// 注意：hour_key 基于本地时区，解析时将 naive 视为本地时间再转 UTC
 /// 解析失败时回退到 Utc::now()（避免聚合崩溃）
 fn parse_hour_key(s: &str) -> DateTime<Utc> {
-    NaiveDateTime::parse_from_str(&format!("{}:00:00", s), "%Y-%m-%d-%H:%M:%S")
-        .map(|n| Utc.from_utc_datetime(&n))
-        .unwrap_or_else(|_| Utc::now())
+    let tz = local_tz();
+    match NaiveDateTime::parse_from_str(&format!("{}:00:00", s), "%Y-%m-%d-%H:%M:%S") {
+        Ok(n) => match tz.from_local_datetime(&n) {
+            LocalResult::Single(dt) | LocalResult::Ambiguous(dt, _) => dt.to_utc(),
+            LocalResult::None => Utc::now(),
+        },
+        Err(_) => Utc::now(),
+    }
 }
 
 const TOKEN_LOG_FILE: &str = "token_cost_count.tmp";
@@ -150,7 +175,7 @@ fn log_file_path() -> Option<PathBuf> {
     )
 }
 
-/// Record token usage for a specific provider-model, bucketed by current UTC hour
+/// Record token usage for a specific provider-model, bucketed by current local hour
 pub fn record_token_usage(
     provider: &LlmProvider,
     model: &str,
@@ -160,7 +185,7 @@ pub fn record_token_usage(
     system_hash: [u8; 32],
 ) {
     let key = model_key(provider, model);
-    let now = Utc::now();
+    let now = local_now();
     let hk = hour_key(now);
     let now_iso = now.to_rfc3339();
     if let Ok(mut stats) = token_stats().lock() {
@@ -182,10 +207,10 @@ pub fn record_token_usage(
     }
 }
 
-/// Record a failed LLM call for a specific provider-model, bucketed by current UTC hour
+/// Record a failed LLM call for a specific provider-model, bucketed by current local hour
 pub fn record_failure(provider: &LlmProvider, model: &str) {
     let key = model_key(provider, model);
-    let now = Utc::now();
+    let now = local_now();
     let hk = hour_key(now);
     let now_iso = now.to_rfc3339();
     if let Ok(mut stats) = token_stats().lock() {
@@ -502,23 +527,27 @@ mod tests {
     // ---- 1. hour_key 格式 ----
     #[test]
     fn test_hour_key_format() {
-        let t = "2026-06-01T02:35:00Z".parse::<DateTime<Utc>>().unwrap();
-        assert_eq!(hour_key(t), "2026-06-01-02");
+        let tz = local_tz();
+        let t = "2026-06-01T02:35:00Z".parse::<DateTime<Utc>>().unwrap().with_timezone(&tz);
+        assert_eq!(hour_key(t), format!("{}-{}", t.format("%Y-%m-%d"), t.format("%H")));
 
-        let t2 = "2026-12-31T23:59:59Z".parse::<DateTime<Utc>>().unwrap();
-        assert_eq!(hour_key(t2), "2026-12-31-23");
+        let t2 = "2026-12-31T23:59:59Z".parse::<DateTime<Utc>>().unwrap().with_timezone(&tz);
+        assert_eq!(hour_key(t2), format!("{}-{}", t2.format("%Y-%m-%d"), t2.format("%H")));
 
-        let t3 = "2026-01-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
-        assert_eq!(hour_key(t3), "2026-01-01-00");
+        let t3 = "2026-01-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap().with_timezone(&tz);
+        assert_eq!(hour_key(t3), format!("{}-{}", t3.format("%Y-%m-%d"), t3.format("%H")));
     }
 
     // ---- 2. parse_hour_key 反解 ----
     #[test]
     fn test_parse_hour_key_roundtrip() {
-        let t = "2026-06-01T02:35:00Z".parse::<DateTime<Utc>>().unwrap();
+        let tz = local_tz();
+        let t = "2026-06-01T02:35:00Z".parse::<DateTime<Utc>>().unwrap().with_timezone(&tz);
         let hk = hour_key(t);
         let parsed = parse_hour_key(&hk);
-        assert_eq!(parsed.format("%Y-%m-%d-%H").to_string(), hk);
+        // parsed 是 UTC，转回本地时区验证格式一致
+        let parsed_local = parsed.with_timezone(&tz);
+        assert_eq!(parsed_local.format("%Y-%m-%d-%H").to_string(), hk);
         // 解析结果应是整点（分秒=0）
         assert_eq!(parsed.timestamp() % 3600, 0);
     }
