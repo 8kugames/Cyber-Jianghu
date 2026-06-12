@@ -150,9 +150,7 @@ impl EmbedderService {
         match status {
             EmbedderStatus::Local => self.embed_local(text).await,
             EmbedderStatus::Remote => self.embed_remote(text).await,
-            EmbedderStatus::Unavailable => {
-                Err(anyhow::anyhow!("Embedder service unavailable"))
-            }
+            EmbedderStatus::Unavailable => Err(anyhow::anyhow!("Embedder service unavailable")),
         }
     }
 
@@ -162,9 +160,7 @@ impl EmbedderService {
         match status {
             EmbedderStatus::Local => self.embed_batch_local(texts).await,
             EmbedderStatus::Remote => self.embed_batch_remote(texts).await,
-            EmbedderStatus::Unavailable => {
-                Err(anyhow::anyhow!("Embedder service unavailable"))
-            }
+            EmbedderStatus::Unavailable => Err(anyhow::anyhow!("Embedder service unavailable")),
         }
     }
 
@@ -206,10 +202,7 @@ impl EmbedderService {
     // ========================================================================
 
     async fn embed_remote(&self, text: &str) -> Result<Vec<f32>> {
-        let client = self
-            .http_client
-            .as_ref()
-            .context("HTTP 客户端未初始化")?;
+        let client = self.http_client.as_ref().context("HTTP 客户端未初始化")?;
         let base_url = self
             .embed_base_url
             .as_ref()
@@ -229,19 +222,13 @@ impl EmbedderService {
             anyhow::bail!("远程 embedding 返回错误 {}: {}", status, body);
         }
 
-        let result: serde_json::Value = resp
-            .json()
-            .await
-            .context("解析远程 embedding 响应失败")?;
+        let result: serde_json::Value = resp.json().await.context("解析远程 embedding 响应失败")?;
 
         parse_embedding_response(&result, "embedding")
     }
 
     async fn embed_batch_remote(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        let client = self
-            .http_client
-            .as_ref()
-            .context("HTTP 客户端未初始化")?;
+        let client = self.http_client.as_ref().context("HTTP 客户端未初始化")?;
         let base_url = self
             .embed_base_url
             .as_ref()
@@ -402,8 +389,7 @@ mod tests {
 
     #[test]
     fn test_parse_batch_response_valid() {
-        let json =
-            serde_json::json!({"embeddings": [[0.1, 0.2], [0.3, 0.4]], "count": 2});
+        let json = serde_json::json!({"embeddings": [[0.1, 0.2], [0.3, 0.4]], "count": 2});
         let result = parse_batch_response(&json).unwrap();
         assert_eq!(result.len(), 2);
     }

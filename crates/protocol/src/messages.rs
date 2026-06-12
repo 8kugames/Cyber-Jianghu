@@ -18,7 +18,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::types::{GameRules, GovernanceCode, NarrativeConfig, WorldBuildingRules, WorldEvent, WorldState};
+use crate::types::{
+    GameRules, GovernanceCode, NarrativeConfig, WorldBuildingRules, WorldEvent, WorldState,
+};
 
 // ============================================================================
 // 对话消息类型

@@ -25,19 +25,37 @@ mod tests {
 
     #[test]
     fn test_map_unknown_action() {
-        assert_eq!(ServerGovernanceMapper::map_from_error("未知的动作类型: mining"), GovernanceCode::UnknownAction);
-        assert_eq!(ServerGovernanceMapper::map_from_error("unknown action type"), GovernanceCode::UnknownAction);
+        assert_eq!(
+            ServerGovernanceMapper::map_from_error("未知的动作类型: mining"),
+            GovernanceCode::UnknownAction
+        );
+        assert_eq!(
+            ServerGovernanceMapper::map_from_error("unknown action type"),
+            GovernanceCode::UnknownAction
+        );
     }
 
     #[test]
     fn test_map_expression_gap() {
-        assert_eq!(ServerGovernanceMapper::map_from_error("动作表达力不足"), GovernanceCode::ExpressionGap);
-        assert_eq!(ServerGovernanceMapper::map_from_error("能力缺失: 该动作需要更多参数"), GovernanceCode::ExpressionGap);
+        assert_eq!(
+            ServerGovernanceMapper::map_from_error("动作表达力不足"),
+            GovernanceCode::ExpressionGap
+        );
+        assert_eq!(
+            ServerGovernanceMapper::map_from_error("能力缺失: 该动作需要更多参数"),
+            GovernanceCode::ExpressionGap
+        );
     }
 
     #[test]
     fn test_map_non_governance() {
-        assert_eq!(ServerGovernanceMapper::map_from_error("缺少必需字段: target_agent_id"), GovernanceCode::NonGovernanceReject);
-        assert_eq!(ServerGovernanceMapper::map_from_error("属性 stamina 不足"), GovernanceCode::NonGovernanceReject);
+        assert_eq!(
+            ServerGovernanceMapper::map_from_error("缺少必需字段: target_agent_id"),
+            GovernanceCode::NonGovernanceReject
+        );
+        assert_eq!(
+            ServerGovernanceMapper::map_from_error("属性 stamina 不足"),
+            GovernanceCode::NonGovernanceReject
+        );
     }
 }

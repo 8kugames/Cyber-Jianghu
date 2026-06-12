@@ -125,7 +125,10 @@ fn build_action_example(
     required_fields: &[String],
     optional_fields: &[String],
 ) -> String {
-    let all_fields: Vec<&String> = required_fields.iter().chain(optional_fields.iter()).collect();
+    let all_fields: Vec<&String> = required_fields
+        .iter()
+        .chain(optional_fields.iter())
+        .collect();
     let has_item_id = all_fields.iter().any(|f| f.as_str() == "item_id");
     let has_content = all_fields.iter().any(|f| f.as_str() == "content");
     let has_target_location = all_fields.iter().any(|f| f.as_str() == "target_location");
@@ -160,8 +163,7 @@ fn build_action_example(
         );
     } else if opt_target_agent_id {
         fields.push(
-            "\"target_agent_id\": \"(可选: 向特定人物说话/观察特定角色时填入其 UUID)\""
-                .to_string(),
+            "\"target_agent_id\": \"(可选: 向特定人物说话/观察特定角色时填入其 UUID)\"".to_string(),
         );
     }
     if has_channel {

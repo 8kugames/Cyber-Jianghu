@@ -1,8 +1,11 @@
-use std::collections::HashMap;
 use cyber_jianghu_protocol::{GovernanceCode, GovernanceTopic, ProposedActionIR};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EvaluatorDecision { Drop, Propose }
+pub enum EvaluatorDecision {
+    Drop,
+    Propose,
+}
 
 #[derive(Debug, Clone)]
 pub struct SelfEvaluatorOutput {
@@ -20,41 +23,53 @@ impl SelfEvaluator {
         match governance_code {
             GovernanceCode::UnknownAction => {
                 let ir = ProposedActionIR {
-                    actor_arity: 1, target_arity: "zero_to_many".into(),
-                    tick_span: 0, phase_count: 1, protocol_kind: "none".into(),
+                    actor_arity: 1,
+                    target_arity: "zero_to_many".into(),
+                    tick_span: 0,
+                    phase_count: 1,
+                    protocol_kind: "none".into(),
                     state_transition_count: 1,
                     effect_refs: vec![action_type.to_string()],
                     requirement_refs: vec![],
                 };
                 let topics = infer_topics(action_type);
-                let confidence: HashMap<GovernanceTopic, f64> = topics.iter().map(|t| (*t, 0.7)).collect();
+                let confidence: HashMap<GovernanceTopic, f64> =
+                    topics.iter().map(|t| (*t, 0.7)).collect();
                 SelfEvaluatorOutput {
                     decision: EvaluatorDecision::Propose,
-                    ir: Some(ir), governance_topics: topics,
+                    ir: Some(ir),
+                    governance_topics: topics,
                     topic_confidence: confidence,
                     rationale: format!("Agent 请求未知动作 '{}'", action_type),
                 }
             }
             GovernanceCode::ExpressionGap => {
                 let ir = ProposedActionIR {
-                    actor_arity: 1, target_arity: "zero_to_many".into(),
-                    tick_span: 0, phase_count: 1, protocol_kind: "none".into(),
+                    actor_arity: 1,
+                    target_arity: "zero_to_many".into(),
+                    tick_span: 0,
+                    phase_count: 1,
+                    protocol_kind: "none".into(),
                     state_transition_count: 1,
                     effect_refs: vec![action_type.to_string()],
                     requirement_refs: vec![],
                 };
                 let topics = infer_topics(action_type);
-                let confidence: HashMap<GovernanceTopic, f64> = topics.iter().map(|t| (*t, 0.7)).collect();
+                let confidence: HashMap<GovernanceTopic, f64> =
+                    topics.iter().map(|t| (*t, 0.7)).collect();
                 SelfEvaluatorOutput {
                     decision: EvaluatorDecision::Propose,
-                    ir: Some(ir), governance_topics: topics,
+                    ir: Some(ir),
+                    governance_topics: topics,
                     topic_confidence: confidence,
                     rationale: format!("Agent 请求动作 '{}'，当前动作表达力不足", action_type),
                 }
             }
             GovernanceCode::NonGovernanceReject => SelfEvaluatorOutput {
-                decision: EvaluatorDecision::Drop, ir: None,
-                governance_topics: vec![], topic_confidence: HashMap::new(),
+                decision: EvaluatorDecision::Drop,
+                ir: None,
+                governance_topics: vec![],
+                topic_confidence: HashMap::new(),
                 rationale: "普通拒绝，非演化需求".to_string(),
             },
         }

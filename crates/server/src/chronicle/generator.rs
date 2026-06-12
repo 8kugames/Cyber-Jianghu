@@ -492,8 +492,8 @@ mod tests {
                 total: 100,
                 by_type: HashMap::from([
                     ("移动".to_string(), 40),
-                ("休整".to_string(), 30),
-                ("取".to_string(), 30),
+                    ("休整".to_string(), 30),
+                    ("取".to_string(), 30),
                 ]),
                 success_rate: 0.85,
             },

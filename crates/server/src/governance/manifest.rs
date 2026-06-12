@@ -1,5 +1,5 @@
-use crate::game_data::registry::ActionRegistry;
 use super::types::CapabilityEntry;
+use crate::game_data::registry::ActionRegistry;
 
 /// 能力注册表 — 从 ActionRegistry 投影
 #[derive(Debug, Clone, Default)]
@@ -29,7 +29,10 @@ impl CapabilityManifest {
     }
 
     pub fn all_ids(&self) -> Vec<String> {
-        self.entries.iter().map(|e| e.capability_id.clone()).collect()
+        self.entries
+            .iter()
+            .map(|e| e.capability_id.clone())
+            .collect()
     }
 
     pub fn entries(&self) -> &[CapabilityEntry] {

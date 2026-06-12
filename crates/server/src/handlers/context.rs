@@ -122,8 +122,14 @@ pub async fn get_agent_context(
 
     // Generate narrative self-status
     let hp = agent_state.status.get_attr_value("hp").unwrap_or(100);
-    let satiation = agent_state.status.get_attr_value("satiation").unwrap_or(100);
-    let hydration = agent_state.status.get_attr_value("hydration").unwrap_or(100);
+    let satiation = agent_state
+        .status
+        .get_attr_value("satiation")
+        .unwrap_or(100);
+    let hydration = agent_state
+        .status
+        .get_attr_value("hydration")
+        .unwrap_or(100);
     let stamina = agent_state.status.get_attr_value("stamina").unwrap_or(100);
 
     let hp_status = if hp > 80 {
