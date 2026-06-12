@@ -336,6 +336,13 @@ impl SoulReviewEngine {
             .await
             .context("更新 group 状态失败")?;
 
+        if status == ProposalStatus::Approved {
+            info!(
+                "Proposal group {} approved — broadcast TODO (Phase 1+)",
+                group.id
+            );
+        }
+
         Ok(status)
     }
 
