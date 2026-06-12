@@ -447,6 +447,7 @@ mod tests {
         ReviewPolicy, SoulConfig, SoulsClassifierConfig, SoulsReviewConfig,
     };
 
+    /// Phase 0 测试配置：仅伏羲
     fn test_souls_config() -> SoulsConfig {
         let mut souls = HashMap::new();
         souls.insert(
@@ -459,28 +460,13 @@ mod tests {
                 system_prompt_template: "fuxi_review_prompt".to_string(),
             },
         );
-        souls.insert(
-            "shennong".to_string(),
-            SoulConfig {
-                display_name: "神农".to_string(),
-                governance_role: "resource".to_string(),
-                review_policy: ReviewPolicy::default(),
-                source_bindings: HashMap::new(),
-                system_prompt_template: "shennong_review_prompt".to_string(),
-            },
-        );
 
         SoulsConfig {
             souls,
-            topic_to_soul: [
-                ("evolution".to_string(), "fuxi".to_string()),
-                ("resource".to_string(), "shennong".to_string()),
-            ]
-            .into_iter()
-            .collect(),
-            topic_priority: [("evolution".to_string(), 0), ("resource".to_string(), 1)]
+            topic_to_soul: [("evolution".to_string(), "fuxi".to_string())]
                 .into_iter()
                 .collect(),
+            topic_priority: [("evolution".to_string(), 0)].into_iter().collect(),
             classifier: SoulsClassifierConfig {
                 confidence_threshold: 0.6,
                 default_fallback_topic: "evolution".to_string(),
@@ -514,17 +500,15 @@ mod tests {
             engine.route_primary_soul(&GovernanceTopic::Evolution),
             Some("fuxi".to_string())
         );
-        assert_eq!(
-            engine.route_primary_soul(&GovernanceTopic::Resource),
-            Some("shennong".to_string())
-        );
+        // Phase 0: 仅伏羲注册，其他 topic 返回 None
+        assert_eq!(engine.route_primary_soul(&GovernanceTopic::Resource), None);
     }
 
     #[test]
     fn test_route_for_topics() {
         let engine = test_engine();
-        let result =
-            engine.route_for_topics(&[GovernanceTopic::Resource, GovernanceTopic::Evolution]);
+        // Phase 0: 仅 evolution → fuxi
+        let result = engine.route_for_topics(&[GovernanceTopic::Evolution]);
         assert_eq!(result, Some("fuxi".to_string()));
     }
 
@@ -539,7 +523,7 @@ mod tests {
                 evidence_refs: vec![],
             },
             ReviewVerdict {
-                soul: "shennong".to_string(),
+                soul: "fuxi".to_string(),
                 vote: VoteChoice::Approve,
                 rationale: String::new(),
                 evidence_refs: vec![],
@@ -559,7 +543,7 @@ mod tests {
                 evidence_refs: vec![],
             },
             ReviewVerdict {
-                soul: "shennong".to_string(),
+                soul: "fuxi".to_string(),
                 vote: VoteChoice::Reject,
                 rationale: String::new(),
                 evidence_refs: vec![],
