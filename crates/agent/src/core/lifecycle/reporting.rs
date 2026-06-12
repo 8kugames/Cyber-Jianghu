@@ -44,7 +44,6 @@ impl super::super::Agent {
                             result: r.tianhun_result,
                             layers,
                             reason: r.tianhun_reason,
-                            narrative: r.previous_round_narrative,
                         },
                         final_intent: r.final_intent_id.map(|id| {
                             let pipeline_actions: Option<
@@ -162,7 +161,6 @@ impl super::super::Agent {
                                     },
                                 ],
                                 reason: None,
-                                narrative: Some(format!("后续动作: {}", subsequent.action_type)),
                             },
                             final_intent: Some(cyber_jianghu_protocol::FinalIntentReport {
                                 intent_id: Some(subsequent.intent_id.to_string()),

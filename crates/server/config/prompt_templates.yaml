@@ -48,6 +48,7 @@ templates:
 
       world_state: |
         ## 当前世界状态
+        {last_action_result_section}
         {world_state_section}
         {memory_section}
         {summary_context}

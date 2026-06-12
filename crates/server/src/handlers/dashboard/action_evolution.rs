@@ -237,13 +237,16 @@ pub async fn admin_action_on_group(
     sqlx::query(
         "UPDATE action_evolution_proposal_groups
          SET status = $1, final_decision = $2, updated_at = NOW()
-         WHERE id = $3"
+         WHERE id = $3",
     )
     .bind(new_status)
     .bind(&req.reason)
     .bind(group_id)
-    .execute(pool).await
+    .execute(pool)
+    .await
     .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(Json(serde_json::json!({"status": "ok", "new_status": new_status})))
+    Ok(Json(
+        serde_json::json!({"status": "ok", "new_status": new_status}),
+    ))
 }

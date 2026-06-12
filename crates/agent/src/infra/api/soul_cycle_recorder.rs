@@ -30,7 +30,6 @@ pub struct SoulCycleRecord {
     pub tianhun_layer2_result: Option<String>,
     pub tianhun_layer3_result: Option<String>,
     pub tianhun_reason: Option<String>,
-    pub previous_round_narrative: Option<String>,
     pub final_intent_id: Option<String>,
     pub final_action_type: Option<String>,
     pub final_action_data: Option<String>,
@@ -100,7 +99,6 @@ impl SoulCycleRecorder {
                 tianhun_layer2_result TEXT,
                 tianhun_layer3_result TEXT,
                 tianhun_reason TEXT,
-                previous_round_narrative TEXT,
                 final_intent_id TEXT,
                 final_action_type TEXT,
                 final_action_data TEXT,
@@ -231,37 +229,6 @@ impl SoulCycleRecorder {
             ),
             Err(e) => tracing::warn!(
                 "[soul_cycle] Failed to record tianhun for tick {}: {}",
-                tick_id,
-                e
-            ),
-        }
-    }
-
-    /// 更新 previous_round_narrative（在感知阶段生成后回填）
-    ///
-    /// 用于将天魂生成的执行叙事回填到上一轮的 soul_cycle_record。
-    pub async fn update_previous_round_narrative(&self, tick_id: i64, narrative: &str) {
-        let conn = self
-            .conn
-            .lock()
-            .expect("soul_cycle_recorder lock not poisoned");
-
-        let result = conn.execute(
-            "UPDATE soul_cycle_record SET previous_round_narrative = ?1 WHERE tick_id = ?2",
-            params![narrative, tick_id],
-        );
-
-        match result {
-            Ok(n) if n > 0 => tracing::debug!(
-                "[soul_cycle] Updated previous_round_narrative for tick {}",
-                tick_id
-            ),
-            Ok(_) => tracing::warn!(
-                "[soul_cycle] No record found for tick {} when updating previous_round_narrative",
-                tick_id
-            ),
-            Err(e) => tracing::warn!(
-                "[soul_cycle] Failed to update previous_round_narrative for tick {}: {}",
                 tick_id,
                 e
             ),
@@ -439,7 +406,7 @@ impl SoulCycleRecorder {
         let mut stmt = match conn.prepare(
             "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
                     tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
-                    tianhun_layer3_result, tianhun_reason, previous_round_narrative,
+                    tianhun_layer3_result, tianhun_reason,
                     final_intent_id, final_action_type, final_action_data, final_pipeline_json,
                     route_type, world_time, created_at
              FROM soul_cycle_record WHERE tick_id = ?1 ORDER BY attempt ASC",
@@ -498,7 +465,7 @@ impl SoulCycleRecorder {
         let sql = format!(
             "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
                     tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
-                    tianhun_layer3_result, tianhun_reason, previous_round_narrative,
+                    tianhun_layer3_result, tianhun_reason,
                     final_intent_id, final_action_type, final_action_data, final_pipeline_json,
                     route_type, world_time, created_at
              FROM soul_cycle_record WHERE tick_id IN ({}) ORDER BY tick_id DESC, attempt ASC",
@@ -577,7 +544,7 @@ impl SoulCycleRecorder {
     }
 
     fn row_to_record(row: &rusqlite::Row<'_>) -> SoulCycleRecord {
-        let created_at_str: String = row.get(17).unwrap_or_default();
+        let created_at_str: String = row.get(16).unwrap_or_default();
         let created_at = DateTime::parse_from_rfc3339(&created_at_str)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
@@ -593,13 +560,12 @@ impl SoulCycleRecorder {
             tianhun_layer2_result: row.get(7).ok(),
             tianhun_layer3_result: row.get(8).ok(),
             tianhun_reason: row.get(9).ok(),
-            previous_round_narrative: row.get(10).ok(),
-            final_intent_id: row.get(11).ok(),
-            final_action_type: row.get(12).ok(),
-            final_action_data: row.get(13).ok(),
-            final_pipeline_json: row.get(14).ok(),
-            route_type: row.get(15).unwrap_or_else(|_| "main".to_string()),
-            world_time: row.get(16).ok(),
+            final_intent_id: row.get(10).ok(),
+            final_action_type: row.get(11).ok(),
+            final_action_data: row.get(12).ok(),
+            final_pipeline_json: row.get(13).ok(),
+            route_type: row.get(14).unwrap_or_else(|_| "main".to_string()),
+            world_time: row.get(15).ok(),
             created_at,
         }
     }

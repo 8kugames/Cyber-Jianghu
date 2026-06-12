@@ -233,6 +233,18 @@ impl super::CognitiveEngine {
 
         let outcome_section = self.get_outcome_context();
 
+        let last_action_result_section = {
+            let summary = self.get_last_tick_action_summary();
+            if summary.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "\n### 上轮行动结果（已全部执行完毕，以下为结果反馈，不要进行无谓的重复）\n{}\n",
+                    summary
+                )
+            }
+        };
+
         // FocusSummary 替代完整 WorldState
         let world_state_section = match focus_summary {
             Some(fs) => {
@@ -279,6 +291,10 @@ impl super::CognitiveEngine {
         );
         ws_vars.insert("memory_section".to_string(), memory_section.clone());
         ws_vars.insert("outcome_section".to_string(), outcome_section.clone());
+        ws_vars.insert(
+            "last_action_result_section".to_string(),
+            last_action_result_section.clone(),
+        );
         if let Some(rendered) = tmpl.render_section("world_state", &ws_vars) {
             result.push_str(&rendered);
         }

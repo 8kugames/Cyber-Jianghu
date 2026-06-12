@@ -385,26 +385,8 @@ function renderExpTable() {
     empty.style.display = "none";
     if (tableWrap) tableWrap.classList.remove("hidden");
 
-    // 构建 [上轮回顾] 跨行映射：将 tianhun.narrative 归入上一个 Tick 的行
-    // tianhun.narrative 描述的是上一轮的人魂叙事，按 agent 分组后查找上一个 tick
-    var prevNarrativeMap = {};
-    experiences.forEach((e, idx) => {
-        const metadata = e.soul_cycle_metadata || {};
-        const cycles = metadata.cycles || [];
-        const narrative = cycles.length > 0 && cycles[0].tianhun ? cycles[0].tianhun.narrative : null;
-        if (narrative) {
-            // 将 narrative 挂到同一 agent 的上一个 tick 行
-            for (var j = idx + 1; j < experiences.length; j++) {
-                if (experiences[j].agent_id === e.agent_id) {
-                    prevNarrativeMap[j] = narrative;
-                    break;
-                }
-            }
-        }
-    });
-
     tbody.innerHTML = experiences
-        .map((e, idx) => {
+        .map((e) => {
             const metadata = e.soul_cycle_metadata || {};
             const cycles = metadata.cycles || [];
             const isSuccess = e.result === "success";
@@ -417,10 +399,7 @@ function renderExpTable() {
                       })
                     : "-");
 
-            // [上轮回顾]：从下一个 tick 的 tianhun.narrative 中获取（描述本 tick 的叙事）
-            const prevNarrative = prevNarrativeMap[idx] || null;
-
-            const renhunHtml = renderRenhunCell(cycles, e, prevNarrative);
+            const renhunHtml = renderRenhunCell(cycles, e);
             const dihunHtml = renderDihunCell(cycles, e);
             const tianhunHtml = renderTianhunCell(cycles, e);
 
@@ -441,23 +420,34 @@ function renderExpTable() {
         .join("");
 }
 
-// 渲染人魂单元格（含 [上轮回顾]）
-function renderRenhunCell(cycles, entry, prevNarrative) {
+// 渲染人魂单元格（叙事 + 推理 + JSON action）
+function renderRenhunCell(cycles, entry) {
     let html = "";
-    // [上轮回顾]：来自下一 tick 的 tianhun.narrative，描述本 tick 的行为
-    if (prevNarrative) {
-        html += `<div class="exp-meta-text" style="color:var(--text-subtle);font-size:11px;border-bottom:1px dashed var(--border);padding-bottom:3px;margin-bottom:3px;">[上轮回顾] ${escapeHtml(prevNarrative)}</div>`;
-    }
     if (!cycles || cycles.length === 0) {
-        if (!entry.thought_log) return html || "-";
-        return html + `<div class="exp-meta-text" style="font-style:italic;color:var(--text-secondary);">${escapeHtml(entry.thought_log)}</div>`;
+        if (!entry.thought_log) return "-";
+        return `<div class="exp-meta-text" style="font-style:italic;color:var(--text-secondary);">${escapeHtml(entry.thought_log)}</div>`;
     }
     cycles.forEach((cycle, idx) => {
         if (cycles.length > 1) html += `<div class="tick-attempt-label">第${idx + 1}次</div>`;
         const rh = cycle.renhun;
-        if (!rh) return;
-        if (rh.narrative) html += `<div class="exp-meta-text">${escapeHtml(rh.narrative)}</div>`;
-        if (rh.thought_log) html += `<div class="exp-meta-text" style="font-style:italic;color:var(--text-secondary);">${escapeHtml(rh.thought_log)}</div>`;
+        if (rh) {
+            if (rh.narrative) html += `<div class="exp-meta-text">${escapeHtml(rh.narrative)}</div>`;
+            if (rh.thought_log) html += `<div class="exp-meta-text" style="font-style:italic;color:var(--text-secondary);">${escapeHtml(rh.thought_log)}</div>`;
+        }
+        const fi = cycle.final_intent;
+        if (fi) {
+            if (fi.pipeline_actions && fi.pipeline_actions.length > 0) {
+                fi.pipeline_actions.forEach((item) => {
+                    const aType = item.action_type || "";
+                    const aData = parseActionData(item.action_data);
+                    html += `<div class="exp-meta-text" style="color:var(--text-subtle);">${renderSingleAction(aType, aData)}</div>`;
+                });
+            } else if (fi.action_type) {
+                const aType = fi.action_type || "";
+                const aData = parseActionData(fi.action_data);
+                html += `<div class="exp-meta-text" style="color:var(--text-subtle);">${renderSingleAction(aType, aData)}</div>`;
+            }
+        }
     });
     return html || "-";
 }
@@ -531,51 +521,9 @@ function renderSingleAction(aType, aData) {
     return text;
 }
 
-// 渲染地魂单元格
-function renderDihunCell(cycles, entry) {
-    if (!cycles || cycles.length === 0) {
-        const topData = parseActionData(entry.action_data);
-        const topType = entry.action_type || "";
-        const topContent = topData.content || "";
-        if (isSpeakAtype(topType, topData) && topContent)
-            return `<div class="exp-meta-text">"${escapeHtml(topContent)}"</div>`;
-        if (isWhisperAtype(topType, topData) && topContent) {
-            const name = resolveTargetName(topData.target_agent_id);
-            return `<div class="exp-meta-text">向${escapeHtml(name)}密语: "${escapeHtml(topContent)}"</div>`;
-        }
-        if (isShoutAtype(topType, topData) && topContent)
-            return `<div class="exp-meta-text">大喊: "${escapeHtml(topContent)}"</div>`;
-        return "-";
-    }
-    let html = "";
-    cycles.forEach((cycle, idx) => {
-        if (cycles.length > 1) html += `<div class="tick-attempt-label">第${idx + 1}次</div>`;
-        const fi = cycle.final_intent;
-        if (!fi) return;
-        // 优先使用 pipeline_actions（新数据格式）
-        if (fi.pipeline_actions && fi.pipeline_actions.length > 0) {
-            fi.pipeline_actions.forEach((item) => {
-                const aType = item.action_type || "";
-                const aData = parseActionData(item.action_data);
-                html += `<div class="exp-meta-text">${renderSingleAction(aType, aData)}</div>`;
-            });
-        } else {
-            // 旧数据兜底：action_data 可能是数组或单对象
-            const fiData = fi.action_data;
-            if (Array.isArray(fiData)) {
-                fiData.forEach((item) => {
-                    const aType = item.action_type || "";
-                    const aData = parseActionData(item.action_data);
-                    html += `<div class="exp-meta-text">${renderSingleAction(aType, aData)}</div>`;
-                });
-            } else {
-                const aType = fi.action_type || "";
-                const aData = parseActionData(fiData);
-                html += `<div class="exp-meta-text">${renderSingleAction(aType, aData)}</div>`;
-            }
-        }
-    });
-    return html || "-";
+// 渲染地魂单元格（tool calling 数据尚未记录）
+function renderDihunCell() {
+    return "-";
 }
 
 function updateExpPagination() {
