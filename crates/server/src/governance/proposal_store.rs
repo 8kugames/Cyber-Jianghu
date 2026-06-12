@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use cyber_jianghu_protocol::GovernanceTopic;
-use sqlx::{PgPool, Postgres};
+use cyber_jianghu_protocol::{types::governance::ProposedActionIR, GovernanceTopic};
+use sqlx::{PgPool, Postgres, Row};
 use uuid::Uuid;
 
 use super::types::{ProposalEvidence, ProposalStatus};
@@ -284,6 +286,46 @@ impl ProposalStore {
                 })
             })
             .collect()
+    }
+
+    pub async fn get_proposal(&self, proposal_id: Uuid) -> Result<Option<ProposalEvidence>> {
+        let row = sqlx::query(
+            r"SELECT agent_id, tick_id, proposed_action_type, rationale,
+                      actor_arity, target_arity, tick_span, phase_count,
+                      protocol_kind, state_transition_count,
+                      effect_refs, requirement_refs,
+                      governance_topics, topic_confidence
+               FROM action_evolution_proposals WHERE id = $1",
+        )
+        .bind(proposal_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| {
+            let effect_refs: Vec<String> = serde_json::from_value(r.get::<serde_json::Value, _>(10)).unwrap_or_default();
+            let requirement_refs: Vec<String> = serde_json::from_value(r.get::<serde_json::Value, _>(11)).unwrap_or_default();
+            let governance_topics: Vec<GovernanceTopic> = serde_json::from_value(r.get::<serde_json::Value, _>(12)).unwrap_or_default();
+            let topic_confidence: HashMap<GovernanceTopic, f64> = serde_json::from_value(r.get::<serde_json::Value, _>(13)).unwrap_or_default();
+
+            ProposalEvidence {
+                agent_id: r.get(0),
+                tick_id: r.get(1),
+                proposed_action_type: r.get(2),
+                rationale: r.get(3),
+                ir: ProposedActionIR {
+                    actor_arity: r.get::<i16, _>(4) as u8,
+                    target_arity: r.get(5),
+                    tick_span: r.get::<i16, _>(6) as u8,
+                    phase_count: r.get::<i16, _>(7) as u8,
+                    protocol_kind: r.get(8),
+                    state_transition_count: r.get::<i16, _>(9) as u8,
+                    effect_refs,
+                    requirement_refs,
+                },
+                governance_topics,
+                topic_confidence,
+            }
+        }))
     }
 
     pub async fn update_group_status(&self, group_id: Uuid, status: ProposalStatus) -> Result<()> {
