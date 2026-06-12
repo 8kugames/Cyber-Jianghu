@@ -578,6 +578,7 @@ impl IntentWorker {
     // ========================================================================
 
     /// 发送 ExecutionResult 给指定 Agent
+    #[allow(clippy::too_many_arguments)]
     async fn send_execution_result(
         &self,
         agent_id: uuid::Uuid,
