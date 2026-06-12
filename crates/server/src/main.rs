@@ -19,8 +19,12 @@
 // ============================================================================
 
 // 引入 library crate
-use cyber_jianghu_server::governance::{ActionEvolutionConfig, CapabilityManifest, ProposalStore, SoulReviewEngine, TopicClassifier};
-use cyber_jianghu_server::state::{create_agent_state_cache, populate_agent_state_cache, GovernanceState};
+use cyber_jianghu_server::governance::{
+    ActionEvolutionConfig, CapabilityManifest, ProposalStore, SoulReviewEngine, TopicClassifier,
+};
+use cyber_jianghu_server::state::{
+    GovernanceState, create_agent_state_cache, populate_agent_state_cache,
+};
 use cyber_jianghu_server::tick::{IntentWorker, StateProcessor, create_worker_channel};
 use cyber_jianghu_server::*;
 
@@ -131,24 +135,29 @@ async fn init_governance(
 
     // 加载 action_evolution.yaml
     let ae_path = config_dir.join("action_evolution.yaml");
-    let ae_content = std::fs::read_to_string(&ae_path)
-        .context("读取 action_evolution.yaml 失败")?;
-    let ae_outer: serde_json::Value = serde_yaml::from_str(&ae_content)
-        .context("解析 action_evolution.yaml 失败")?;
-    let ae_data = ae_outer.get("data").context("action_evolution.yaml 缺少 data 字段")?;
-    let action_evo_config: ActionEvolutionConfig = serde_json::from_value(ae_data.clone())
-        .context("反序列化 ActionEvolutionConfig 失败")?;
+    let ae_content =
+        std::fs::read_to_string(&ae_path).context("读取 action_evolution.yaml 失败")?;
+    let ae_outer: serde_json::Value =
+        serde_yaml::from_str(&ae_content).context("解析 action_evolution.yaml 失败")?;
+    let ae_data = ae_outer
+        .get("data")
+        .context("action_evolution.yaml 缺少 data 字段")?;
+    let action_evo_config: ActionEvolutionConfig =
+        serde_json::from_value(ae_data.clone()).context("反序列化 ActionEvolutionConfig 失败")?;
     info!("action_evolution.yaml 加载完成");
 
     let manifest = CapabilityManifest::load();
-    info!("CapabilityManifest 加载完成: {} 条目", manifest.entries().len());
+    info!(
+        "CapabilityManifest 加载完成: {} 条目",
+        manifest.entries().len()
+    );
 
     let classifier = Arc::new(TopicClassifier::new(action_evo_config.topic_classifier));
     let proposal_store = Arc::new(ProposalStore::new(db_pool.clone()));
 
     // SoulReviewEngine::load 接受 config_dir，内部加载 souls.yaml
-    let engine = Arc::new(SoulReviewEngine::load(&config_dir)
-        .context("SoulReviewEngine 初始化失败")?);
+    let engine =
+        Arc::new(SoulReviewEngine::load(&config_dir).context("SoulReviewEngine 初始化失败")?);
 
     let review_config = engine.config().review.clone();
 
@@ -743,6 +752,16 @@ async fn main() -> Result<()> {
         .route(
             "/admin",
             get(|| async { axum::response::Redirect::temporary("/admin/") }),
+        )
+        // Action Evolution — 管理面板统计
+        .route(
+            "/api/dashboard/action-evolution/stats",
+            get(handlers::dashboard::get_action_evolution_stats).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
         )
         // Action Evolution — 治理提案提交
         .route(
