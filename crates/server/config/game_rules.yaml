@@ -288,7 +288,7 @@ data:
   lesson:
     threshold: 3
     max_broadcast: 5
-    cause_advice_map:
+      cause_advice_map:
       satiation:
         label: "饥饿"
         advice: "请留意饱食度，及时进食"
@@ -304,3 +304,12 @@ data:
       environmental:
         label: "环境"
         advice: "请注意天气和环境影响"
+
+  # 动作演化治理配置
+  action_evolution:
+    capability_policy:
+      allowed_capability_groups:
+        - survival
+        - social
+        - economic
+      denied_capability_ids: []
