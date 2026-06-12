@@ -150,6 +150,8 @@ pub struct TopicClassifierConfig {
     pub confidence_threshold: f64,
     #[serde(default = "default_fallback_topic")]
     pub default_fallback_topic: String,
+    #[serde(default = "default_fallback_confidence")]
+    pub fallback_confidence: f64,
 }
 
 fn default_confidence_threshold() -> f64 {
@@ -158,6 +160,10 @@ fn default_confidence_threshold() -> f64 {
 
 fn default_fallback_topic() -> String {
     "evolution".to_string()
+}
+
+fn default_fallback_confidence() -> f64 {
+    0.5
 }
 
 #[derive(Debug, Clone, Deserialize)]
