@@ -1,5 +1,6 @@
 pub mod classifier;
 pub mod engine;
+pub mod handlers;
 pub mod manifest;
 pub mod mapper;
 pub mod proposal_store;

@@ -744,6 +744,11 @@ async fn main() -> Result<()> {
             "/admin",
             get(|| async { axum::response::Redirect::temporary("/admin/") }),
         )
+        // Action Evolution — 治理提案提交
+        .route(
+            "/api/v1/action-evolution/propose",
+            post(crate::governance::handlers::submit_proposal),
+        )
         .with_state(state);
 
     // 12. 启动Web服务器
