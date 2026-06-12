@@ -154,7 +154,7 @@ mod tests {
     fn make_attribute_rules() -> Vec<AffectAttributeRule> {
         vec![
             AffectAttributeRule {
-                attribute: "hunger".into(),
+                attribute: "satiation".into(),
                 comfort_zone: [40.0, 100.0],
                 absolute_floor: 0.0,
                 valence_sensitivity: 0.3,
@@ -172,19 +172,19 @@ mod tests {
 
     #[test]
     fn test_physiological_below_lower_bound() {
-        let attrs = HashMap::from([("hunger".into(), 20), ("hp".into(), 80)]);
+        let attrs = HashMap::from([("satiation".into(), 20), ("hp".into(), 80)]);
         let (v, a) = CoreAffect::compute_physiological_affect(&attrs, &make_attribute_rules(), 0.5);
-        assert!(v < 0.0, "hunger 低于舒适区应产生负效价，got valence={}", v);
+        assert!(v < 0.0, "satiation 低于舒适区应产生负效价，got valence={}", v);
         assert!(
             a > 0.0,
-            "hunger 低于舒适区应产生正唤醒度，got arousal={}",
+            "satiation 低于舒适区应产生正唤醒度，got arousal={}",
             a
         );
     }
 
     #[test]
     fn test_physiological_in_comfort_zone() {
-        let attrs = HashMap::from([("hunger".into(), 60), ("hp".into(), 80)]);
+        let attrs = HashMap::from([("satiation".into(), 60), ("hp".into(), 80)]);
         let (v, a) = CoreAffect::compute_physiological_affect(&attrs, &make_attribute_rules(), 0.5);
         assert!(
             (v - 0.0).abs() < 0.001,
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn test_physiological_above_upper_bound() {
-        let attrs = HashMap::from([("hunger".into(), 60), ("hp".into(), 120)]);
+        let attrs = HashMap::from([("satiation".into(), 60), ("hp".into(), 120)]);
         let (v, a) = CoreAffect::compute_physiological_affect(&attrs, &make_attribute_rules(), 0.5);
         assert!(v < 0.0, "超过上限应产生负效价，got valence={}", v);
         assert!(a > 0.0, "超过上限应产生正唤醒度，got arousal={}", a);
@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn test_over_arousal_damping_configurable() {
-        let attrs = HashMap::from([("hunger".into(), 60), ("hp".into(), 120)]);
+        let attrs = HashMap::from([("satiation".into(), 60), ("hp".into(), 120)]);
         let (_, a_half) =
             CoreAffect::compute_physiological_affect(&attrs, &make_attribute_rules(), 0.5);
         let (_, a_full) =
@@ -218,15 +218,15 @@ mod tests {
 
     #[test]
     fn test_physiological_deviation_scale_consistency() {
-        let attrs_hunger = HashMap::from([("hunger".into(), 20), ("hp".into(), 80)]);
-        let attrs_hp = HashMap::from([("hunger".into(), 60), ("hp".into(), 15)]);
+        let attrs_satiation = HashMap::from([("satiation".into(), 20), ("hp".into(), 80)]);
+        let attrs_hp = HashMap::from([("satiation".into(), 60), ("hp".into(), 15)]);
         let (v1, _) =
-            CoreAffect::compute_physiological_affect(&attrs_hunger, &make_attribute_rules(), 0.5);
+            CoreAffect::compute_physiological_affect(&attrs_satiation, &make_attribute_rules(), 0.5);
         let (v2, _) =
             CoreAffect::compute_physiological_affect(&attrs_hp, &make_attribute_rules(), 0.5);
         assert!(
             (v1 - (-0.15)).abs() < 0.001,
-            "hunger 偏离 0.5 * sens 0.3 = -0.15，got {}",
+            "satiation 偏离 0.5 * sens 0.3 = -0.15，got {}",
             v1
         );
         assert!(

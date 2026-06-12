@@ -668,9 +668,9 @@ impl DirectLlmClient {
                 &self.config.get_model_with_default(),
             );
             tracing::warn!(
-                "LLM response JSON parse failed: provider={}, raw_body[:500]={:?}",
+                "LLM response JSON parse failed: provider={}, raw_body_len={}",
                 self.config.provider.as_str(),
-                &raw_body[..raw_body.len().min(500)]
+                raw_body.len()
             );
             anyhow::anyhow!("Failed to parse LLM response: {}", e)
         })?;

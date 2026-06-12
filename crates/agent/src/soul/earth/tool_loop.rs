@@ -377,7 +377,7 @@ mod tests {
     fn test_extract_json_object_multiple_prefers_marked() {
         // 第一个无 actions，第二个有 actions → 优先取有 actions 的
         let content = r#"analysis...
-{"step":"reasoning","thirst":99}
+{"step":"reasoning","hydration":99}
 {"actions":[{"action_type":"喝水","action_data":{"item_id":"水"}}]}"#;
         let extracted = extract_json_object(content).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
