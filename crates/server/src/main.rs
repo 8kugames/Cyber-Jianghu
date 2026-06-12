@@ -19,7 +19,8 @@
 // ============================================================================
 
 // 引入 library crate
-use cyber_jianghu_server::state::{create_agent_state_cache, populate_agent_state_cache};
+use cyber_jianghu_server::governance::{ActionEvolutionConfig, CapabilityManifest, ProposalStore, SoulReviewEngine, TopicClassifier};
+use cyber_jianghu_server::state::{create_agent_state_cache, populate_agent_state_cache, GovernanceState};
 use cyber_jianghu_server::tick::{IntentWorker, StateProcessor, create_worker_channel};
 use cyber_jianghu_server::*;
 
@@ -115,6 +116,72 @@ fn start_tick_engine(
         if let Err(e) = tick_scheduler.run().await {
             error!("Tick引擎运行失败: {}", e);
         }
+    })
+}
+
+/// 初始化治理系统
+///
+/// 加载 action_evolution.yaml 配置，创建 TopicClassifier、ProposalStore、SoulReviewEngine，
+/// 并启动周期审议后台任务。
+async fn init_governance(
+    db_pool: &DbPool,
+    connection_manager: websocket::ConnectionManager,
+) -> Result<GovernanceState> {
+    let config_dir = crate::paths::get_config_dir();
+
+    // 加载 action_evolution.yaml
+    let ae_path = config_dir.join("action_evolution.yaml");
+    let ae_content = std::fs::read_to_string(&ae_path)
+        .context("读取 action_evolution.yaml 失败")?;
+    let ae_outer: serde_json::Value = serde_yaml::from_str(&ae_content)
+        .context("解析 action_evolution.yaml 失败")?;
+    let ae_data = ae_outer.get("data").context("action_evolution.yaml 缺少 data 字段")?;
+    let action_evo_config: ActionEvolutionConfig = serde_json::from_value(ae_data.clone())
+        .context("反序列化 ActionEvolutionConfig 失败")?;
+    info!("action_evolution.yaml 加载完成");
+
+    let manifest = CapabilityManifest::load();
+    info!("CapabilityManifest 加载完成: {} 条目", manifest.entries().len());
+
+    let classifier = Arc::new(TopicClassifier::new(action_evo_config.topic_classifier));
+    let proposal_store = Arc::new(ProposalStore::new(db_pool.clone()));
+
+    // SoulReviewEngine::load 接受 config_dir，内部加载 souls.yaml
+    let engine = Arc::new(SoulReviewEngine::load(&config_dir)
+        .context("SoulReviewEngine 初始化失败")?);
+
+    let review_config = engine.config().review.clone();
+
+    // 启动周期审议任务
+    let engine_clone = engine.clone();
+    let store_clone = proposal_store.clone();
+    let poll_interval = review_config.poll_interval_secs;
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(poll_interval));
+        loop {
+            interval.tick().await;
+            match store_clone.get_pending_groups().await {
+                Ok(groups) if !groups.is_empty() => {
+                    let results = engine_clone.review_pending(&store_clone, &groups).await;
+                    for (group_id, status) in results {
+                        info!("Group {} 审议完成: {}", group_id, status);
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("获取待审议 groups 失败: {}", e);
+                }
+            }
+        }
+    });
+
+    Ok(GovernanceState {
+        manifest: Arc::new(tokio::sync::RwLock::new(manifest)),
+        classifier,
+        proposal_store,
+        engine,
+        connection_manager,
+        review_config,
     })
 }
 
@@ -289,7 +356,19 @@ async fn main() -> Result<()> {
         chrono::Utc::now().signed_duration_since(deployment_time)
     );
 
-    // 9.2 创建应用状态
+    // 9.2 初始化治理系统
+    let governance = match init_governance(&db_pool, connection_manager.clone()).await {
+        Ok(g) => {
+            info!("治理系统初始化成功");
+            Some(g)
+        }
+        Err(e) => {
+            warn!("治理系统初始化失败（将继续运行，治理功能不可用）: {}", e);
+            None
+        }
+    };
+
+    // 9.3 创建应用状态
     let state = Arc::new(AppState::new(
         db_pool.clone(),
         connection_manager.clone(),
@@ -304,6 +383,7 @@ async fn main() -> Result<()> {
         deployment_time,
         crate::paths::get_config_dir(),
         accepting_tick_id.clone(),
+        governance,
     ));
 
     // 10. 启动Tick引擎（后台任务）

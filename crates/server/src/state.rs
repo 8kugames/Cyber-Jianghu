@@ -8,6 +8,7 @@ use tracing::info;
 use crate::db::DbPool;
 use crate::dialogue;
 use crate::game_data;
+use crate::governance::{CapabilityManifest, ProposalStore, SoulReviewEngine, TopicClassifier, SoulsReviewConfig};
 use crate::models::AgentState;
 use crate::tick::WorkerMessage;
 use crate::websocket;
@@ -136,6 +137,28 @@ pub async fn populate_agent_state_cache(
 }
 
 // ============================================================================
+// 治理状态
+// ============================================================================
+
+/// 治理状态 — 跨 handler 和 worker 共享
+pub struct GovernanceState {
+    pub manifest: Arc<RwLock<CapabilityManifest>>,
+    pub classifier: Arc<TopicClassifier>,
+    pub proposal_store: Arc<ProposalStore>,
+    pub engine: Arc<SoulReviewEngine>,
+    pub connection_manager: websocket::ConnectionManager,
+    pub review_config: SoulsReviewConfig,
+}
+
+impl std::fmt::Debug for GovernanceState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GovernanceState")
+            .field("review_config", &self.review_config)
+            .finish()
+    }
+}
+
+// ============================================================================
 // 应用状态（共享状态）
 // ============================================================================
 
@@ -189,6 +212,9 @@ pub struct AppState {
 
     /// Prompt 模板 JSON 缓存（Server YAML→JSON 解析后，用于 WS 连接时下发）
     pub prompt_template_cache: Arc<tokio::sync::RwLock<Option<PromptTemplateCache>>>,
+
+    /// 治理状态（Soul 审议引擎、提案存储等）
+    pub governance: Option<GovernanceState>,
 }
 
 impl AppState {
@@ -207,6 +233,7 @@ impl AppState {
         start_time: chrono::DateTime<chrono::Utc>,
         config_dir: std::path::PathBuf,
         current_accepting_tick_id: Arc<AtomicI64>,
+        governance: Option<GovernanceState>,
     ) -> Self {
         Self {
             db_pool,
@@ -224,6 +251,7 @@ impl AppState {
             current_accepting_tick_id,
             vendor_pending_events: crate::models::VendorPendingEvents::default(),
             prompt_template_cache: Arc::new(tokio::sync::RwLock::new(None)),
+            governance,
         }
     }
 }
