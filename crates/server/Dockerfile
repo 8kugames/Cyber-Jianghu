@@ -46,11 +46,13 @@ RUN mkdir -p ./.cargo \
 # 复制 Cargo 元数据以缓存依赖下载
 COPY Cargo.toml Cargo.lock* ./
 COPY crates/protocol/Cargo.toml ./crates/protocol/
+COPY crates/embedding/Cargo.toml ./crates/embedding/
 COPY crates/server/Cargo.toml ./crates/server/
 COPY crates/agent/Cargo.toml ./crates/agent/
 
 # 创建最小占位源文件，使 workspace 解析成功
-RUN mkdir -p crates/protocol/src crates/server/src crates/agent/src/bin && \
+RUN mkdir -p crates/protocol/src crates/embedding/src crates/server/src crates/agent/src/bin && \
+    echo "fn main() {}" > crates/embedding/src/lib.rs && \
     echo "fn main() {}" > crates/server/src/main.rs && \
     echo "fn main() {}" > crates/agent/src/bin/cyber-jianghu-agent.rs
 
