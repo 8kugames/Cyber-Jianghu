@@ -18,7 +18,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::types::{GameRules, NarrativeConfig, WorldBuildingRules, WorldEvent, WorldState};
+use crate::types::{GameRules, GovernanceCode, NarrativeConfig, WorldBuildingRules, WorldEvent, WorldState};
 
 // ============================================================================
 // 对话消息类型
@@ -249,6 +249,9 @@ pub enum ServerMessage {
         /// 状态变更摘要（如 "吃了馒头, 饱食度+20"）
         #[serde(skip_serializing_if = "Option::is_none")]
         state_change_summary: Option<String>,
+        /// Server 端映射后的治理分类码
+        #[serde(skip_serializing_if = "Option::is_none")]
+        governance_code: Option<GovernanceCode>,
     },
 
     /// 每日动作日志汇总（server → agent）
