@@ -156,3 +156,13 @@ function initAuth() {
         showAuthModal();
     }
 }
+
+/// 返回带鉴权 header 的 Headers 对象（用于 fetch(url, { headers: getAuthHeaders() })）
+/// 若未鉴权则弹出鉴权弹窗并返回空 headers（由调用方决定是否 throw）
+function getAuthHeaders() {
+    if (!authToken) {
+        showAuthModal();
+        return {};
+    }
+    return { "Authorization": "Bearer " + authToken };
+}

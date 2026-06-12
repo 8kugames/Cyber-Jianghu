@@ -154,6 +154,18 @@ impl super::super::Agent {
                 },
             ))
             .await;
+
+        // action_evolution 热更新回调（Phase 0: 仅 log；Phase 1+ 全量更新本地 action table）
+        let agent_name_for_ae = self.character_name().to_string();
+        self.client
+            .set_action_evolution_update_callback(Arc::new(move |content: &serde_json::Value| {
+                info!(
+                    "Agent '{}' received action_evolution config update (Phase 0: log only): keys={:?}",
+                    agent_name_for_ae,
+                    content.as_object().map(|m| m.keys().cloned().collect::<Vec<_>>())
+                );
+            }))
+            .await;
     }
 
     /// 构建并设置 Server 消息回调（链式：lifecycle 处理 + binary 回调透传）
