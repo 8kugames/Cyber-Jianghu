@@ -406,7 +406,6 @@ pub struct TianhunReport {
     pub result: Option<String>,
     pub layers: Vec<LayerReport>,
     pub reason: Option<String>,
-    pub narrative: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

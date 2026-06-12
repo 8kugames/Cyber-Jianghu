@@ -525,22 +525,18 @@ function renderExperiences(data) {
       html +=
         '<div class="tick-section"><div class="tick-section-title">行动</div>';
 
-      // 伪装人魂：叙事与思考
-      var renhunHtml = "";
+      // 人魂（叙事 + 推理 + JSON action）
+      html += '<div class="exp-renhun"><span class="exp-soul-label">人魂</span><div class="exp-soul-content">';
       if (exp.narrative)
-        renhunHtml +=
-          '<div class="soul-text">' + escapeHtml(exp.narrative) + "</div>";
+        html += '<div class="soul-text">' + escapeHtml(exp.narrative) + "</div>";
       if (exp.thought_log)
-        renhunHtml +=
-          '<div class="soul-thought">' + escapeHtml(exp.thought_log) + "</div>";
-      if (renhunHtml)
-        html += renderServerSoulInline(
-          "人魂",
-          { narrative: exp.narrative, thought_log: exp.thought_log },
-          "renhun",
-        );
+        html += '<div class="soul-thought">' + escapeHtml(exp.thought_log) + "</div>";
+      html += renderServerActionHtml(exp.action_type, exp.action_data);
+      html += "</div></div>";
 
-      // 伪装天魂：审查结果
+      // 地魂（工具调用）— tool call data not yet recorded
+
+      // 天魂（审查）
       var tianhunHtml = "";
       if (exp.result) {
         tianhunHtml +=
@@ -555,12 +551,6 @@ function renderExperiences(data) {
           '<div class="exp-tianhun"><span class="exp-soul-label">天魂</span><div class="exp-soul-content">' +
           tianhunHtml +
           "</div></div>";
-
-      // 伪装地魂：复用 renderServerActionHtml 统一渲染
-      html +=
-        '<div class="exp-action"><span class="exp-soul-label">地魂</span><div class="exp-soul-content">';
-      html += renderServerActionHtml(exp.action_type, exp.action_data);
-      html += "</div></div>";
 
       html += "</div></div>";
       return html;
@@ -600,12 +590,12 @@ function renderTickCard(exp, metadata, time) {
       html +=
         '<div class="tick-attempt-label">行动 ' + (idx + 1) + "</div>";
     }
-    // 1. 人魂（叙事 + 推理）
+    // 1. 人魂（叙事 + 推理 + JSON action）
     html += renderServerSoulInline("人魂", attempt.renhun, "renhun");
-    // 2. 地魂（工具调用 / action 执行）
     if (attempt.final_intent) {
-      html += renderServerSoulInline("地魂", attempt.final_intent, "action");
+      html += renderServerSoulInline(null, attempt.final_intent, "action");
     }
+    // 2. 地魂（工具调用）— tool call data not yet recorded
     // 3. 天魂（审查）
     html += renderServerSoulInline("天魂", attempt.tianhun, "tianhun");
     html += "</div>";
@@ -685,9 +675,9 @@ function renderServerSoulInline(label, data, type) {
   var html =
     '<div class="exp-' +
     type +
-    '"><span class="exp-soul-label">' +
-    label +
-    '</span><div class="exp-soul-content">';
+    '">' +
+    (label ? '<span class="exp-soul-label">' + label + '</span>' : '') +
+    '<div class="exp-soul-content">';
 
   if (type === "renhun") {
     // 人魂：叙事 + 思考过程

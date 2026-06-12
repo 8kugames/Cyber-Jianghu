@@ -192,6 +192,8 @@ pub struct CognitiveEngine {
     persona_ref: std::sync::RwLock<Option<std::sync::Arc<ThreadSafePersona>>>,
     /// 规则缓存（EarthSoul query_rules tool 按需检索）
     pub(super) rule_cache: std::sync::RwLock<Option<crate::component::rule_cache::RuleCache>>,
+    /// 上轮行动执行结果摘要（由 lifecycle 写入，供 build_tick_message 注入人魂推理上下文）
+    last_tick_action_summary: std::sync::RwLock<String>,
 }
 
 impl CognitiveEngine {
@@ -237,6 +239,7 @@ impl CognitiveEngine {
             semi_static_message: std::sync::RwLock::new(String::new()),
             persona_ref: std::sync::RwLock::new(Some(std::sync::Arc::new(persona.clone()))),
             rule_cache: std::sync::RwLock::new(None),
+            last_tick_action_summary: std::sync::RwLock::new(String::new()),
         };
         engine.load_skill_cache_from_disk();
         engine.init_rule_cache_from_template();
@@ -357,6 +360,7 @@ impl CognitiveEngine {
             semi_static_message: std::sync::RwLock::new(String::new()),
             persona_ref: std::sync::RwLock::new(Some(std::sync::Arc::new(persona.clone()))),
             rule_cache: std::sync::RwLock::new(None),
+            last_tick_action_summary: std::sync::RwLock::new(String::new()),
         };
         engine.load_skill_cache_from_disk();
         engine.init_rule_cache_from_template();
@@ -837,6 +841,23 @@ impl CognitiveEngine {
             .as_ref()
             .map(|m| m.to_prompt_context())
             .unwrap_or_default()
+    }
+
+    /// 设置上轮行动执行结果摘要（由 lifecycle 在处理 ExecutionResult 后调用）
+    pub fn set_last_tick_action_summary(&self, summary: String) {
+        let mut guard = self
+            .last_tick_action_summary
+            .write()
+            .expect("last_tick_action_summary lock not poisoned");
+        *guard = summary;
+    }
+
+    /// 获取上轮行动执行结果摘要（供 build_tick_message 注入人魂推理上下文）
+    pub(super) fn get_last_tick_action_summary(&self) -> String {
+        self.last_tick_action_summary
+            .read()
+            .expect("last_tick_action_summary lock not poisoned")
+            .clone()
     }
 
     /// 重建 semi-static 内容并写入字段

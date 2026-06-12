@@ -37,7 +37,6 @@ struct TianhunEntry {
     result: Option<String>,
     layers: Vec<LayerResultEntry>,
     reason: Option<String>,
-    narrative: Option<String>,
 }
 
 /// 最终 Intent 记录
@@ -143,7 +142,6 @@ fn record_to_attempt_entry(
             result: r.tianhun_result,
             layers,
             reason: r.tianhun_reason,
-            narrative: r.previous_round_narrative,
         },
         final_intent: r.final_intent_id.map(|id| {
             let pipeline_actions: Option<Vec<cyber_jianghu_protocol::PipelineAction>> = r

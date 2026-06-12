@@ -863,6 +863,43 @@ impl super::Agent {
                                         }
                                     }
 
+                                    // 上轮行动结果因果链：逐条格式化注入下轮人魂推理
+                                    if let Some(ref engine) = self.cognitive_engine {
+                                        let result_ids: std::collections::HashSet<uuid::Uuid> =
+                                            results.iter().map(|r| r.intent_id).collect();
+                                        let mut lines: Vec<String> = Vec::new();
+
+                                        // 按 intent_map 原始顺序输出（primary + subsequent）
+                                        // primary intent
+                                        if let Some((at, ad)) = intent_map.get(&final_intent.intent_id)
+                                            && let Some(result) = results.iter().find(|r| r.intent_id == final_intent.intent_id) {
+                                                let desc = Self::summarize_intent(at.as_str(), ad.as_ref(), &world_state.location.name, &world_state.entities);
+                                                if result.success {
+                                                    lines.push(format!("- {} → 成功", desc));
+                                                } else {
+                                                    let reason = result.error.as_deref().unwrap_or("未知原因");
+                                                    lines.push(format!("- {} → 失败（{}）", desc, reason));
+                                                }
+                                            }
+                                        // subsequent intents（保持 pipeline 原始顺序）
+                                        for si in &final_intent.subsequent_intents {
+                                            if let Some(result) = results.iter().find(|r| r.intent_id == si.intent_id) {
+                                                let desc = Self::summarize_intent(si.action_type.as_str(), si.action_data.as_ref(), &world_state.location.name, &world_state.entities);
+                                                if result.success {
+                                                    lines.push(format!("- {} → 成功", desc));
+                                                } else {
+                                                    let reason = result.error.as_deref().unwrap_or("未知原因");
+                                                    lines.push(format!("- {} → 失败（{}）", desc, reason));
+                                                }
+                                            } else if !result_ids.contains(&si.intent_id) {
+                                                // Saga rollback: 前序失败导致此 intent 未执行
+                                                let desc = Self::summarize_intent(si.action_type.as_str(), si.action_data.as_ref(), &world_state.location.name, &world_state.entities);
+                                                lines.push(format!("- {} → 未执行（因前序动作失败被跳过）", desc));
+                                            }
+                                        }
+                                        engine.set_last_tick_action_summary(lines.join("\n"));
+                                    }
+
                                     // Summary 更新
                                     if let Some(ref engine) = self.cognitive_engine {
                                         let label = if all_success {
@@ -926,9 +963,16 @@ impl super::Agent {
                                 }
                                 Ok(_) => {
                                     debug!("ExecutionResult timeout ({}ms), no results received", self.config.llm.execution_result_timeout_ms);
+                                    // 超时无结果时清除旧摘要，防止下轮显示过期数据
+                                    if let Some(ref engine) = self.cognitive_engine {
+                                        engine.set_last_tick_action_summary(String::new());
+                                    }
                                 }
                                 Err(e) => {
                                     debug!("ExecutionResult poll error: {}", e);
+                                    if let Some(ref engine) = self.cognitive_engine {
+                                        engine.set_last_tick_action_summary(String::new());
+                                    }
                                 }
                             }
 
