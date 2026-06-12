@@ -1,14 +1,18 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use tracing::{error, info, warn};
 
 use cyber_jianghu_protocol::GovernanceTopic;
 
+use super::llm_review::{GovernanceLlmClient, build_review_message, build_soul_prompt};
+use super::manifest::CapabilityManifest;
 use super::proposal_store::{PendingGroup, ProposalStore};
 use super::types::{
-    PolicyRule, ProposalEvidence, ProposalStatus, ReviewVerdict, SoulsConfig, VoteChoice,
+    PolicyRule, ProposalEvidence, ProposalStatus, ReviewRole, ReviewVerdict, SoulsConfig,
+    VoteChoice,
 };
 
 // ---------------------------------------------------------------------------
@@ -50,6 +54,8 @@ impl SourceProvider for NullSourceProvider {
 pub struct SoulReviewEngine {
     config: SoulsConfig,
     sources: HashMap<String, Box<dyn SourceProvider>>,
+    llm_client: Arc<GovernanceLlmClient>,
+    capability_manifest: CapabilityManifest,
 }
 
 impl SoulReviewEngine {
@@ -61,14 +67,21 @@ impl SoulReviewEngine {
         let data = outer.get("data").context("souls.yaml 缺少 data 字段")?;
         let config: SoulsConfig =
             serde_json::from_value(data.clone()).context("反序列化 SoulsConfig 失败")?;
+
+        let llm_client = Arc::new(GovernanceLlmClient::load());
+        let capability_manifest = CapabilityManifest::load();
+
         info!(
-            "SoulReviewEngine 加载完成: {} souls, {} topic mappings",
+            "SoulReviewEngine 加载完成: {} souls, {} topic mappings, LLM enabled={}",
             config.souls.len(),
-            config.topic_to_soul.len()
+            config.topic_to_soul.len(),
+            llm_client.is_enabled(),
         );
         Ok(Self {
             config,
             sources: HashMap::new(),
+            llm_client,
+            capability_manifest,
         })
     }
 
@@ -170,8 +183,8 @@ impl SoulReviewEngine {
         }
     }
 
-    /// 对单个 soul 的完整 review（评估 hard_reject / hard_approve）
-    pub async fn review(&self, soul_id: &str, evidence: &ProposalEvidence) -> ReviewVerdict {
+    /// 对单个 soul 的完整 review（评估 hard_reject / hard_approve / soft_concern / LLM soft review）
+    pub async fn review(&self, soul_id: &str, evidence: &ProposalEvidence, role: ReviewRole) -> ReviewVerdict {
         let soul_config = match self.config.souls.get(soul_id) {
             Some(c) => c,
             None => {
@@ -218,13 +231,57 @@ impl SoulReviewEngine {
             }
         }
 
-        // 无规则命中 → Abstain（需要 LLM soft review）
-        ReviewVerdict {
-            soul: soul_id.to_string(),
-            vote: VoteChoice::Abstain,
-            rationale: "无硬性规则命中，需要 soft review".to_string(),
-            evidence_refs: vec![],
+        // 评估 soft_concern_if（warn 级软规则，标记但不阻断）
+        let mut soft_concerns: Vec<String> = Vec::new();
+        for rule in &soul_config.review_policy.soft_concern_if {
+            if self.evaluate_rule(rule, soul_id, evidence).await {
+                let reason = match rule {
+                    PolicyRule::Metric { reason, .. } => reason.clone(),
+                    PolicyRule::EffectRef { reason, .. } => reason.clone(),
+                    PolicyRule::EffectGroup { .. } => "EffectGroup 匹配".to_string(),
+                };
+                soft_concerns.push(reason);
+            }
         }
+
+        // 无硬规则命中 → LLM soft review
+        let role_instruction = match role {
+            ReviewRole::Primary => "你是首审官，负责深度分析提案的合理性。输出详细 rationale，引用真源指标。",
+            ReviewRole::CoReviewer => "你是复审官，基于各自真源对齐，输出简洁 rationale。",
+        };
+        let system_prompt = match build_soul_prompt(
+            soul_id,
+            &soul_config.system_prompt_template,
+            &self.capability_manifest,
+            evidence,
+        ) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("构建 Soul {} prompt 失败: {}, 回退 Abstain", soul_id, e);
+                return ReviewVerdict {
+                    soul: soul_id.to_string(),
+                    vote: VoteChoice::Abstain,
+                    rationale: format!("prompt 构建失败: {}", e),
+                    evidence_refs: vec![],
+                };
+            }
+        };
+        let user_message = build_review_message(evidence);
+        let user_message = format!("{}\n\n{}", role_instruction, user_message);
+
+        let mut verdict = self
+            .llm_client
+            .review_with_llm(&system_prompt, &user_message)
+            .await;
+        verdict.soul = soul_id.to_string();
+
+        // 注入 soft_concern 上下文到 rationale
+        if !soft_concerns.is_empty() {
+            let concern_note = format!("\n[soft_concerns: {}]", soft_concerns.join("; "));
+            verdict.rationale.push_str(&concern_note);
+        }
+
+        verdict
     }
 
     // ----- vote resolution -----
@@ -305,7 +362,7 @@ impl SoulReviewEngine {
         // Primary soul 评估
         for proposal_id in &group_full.proposal_ids {
             let evidence = self.build_evidence_from_group(store, *proposal_id).await?;
-            let verdict = self.review(&primary_soul, &evidence).await;
+            let verdict = self.review(&primary_soul, &evidence, ReviewRole::Primary).await;
             if !matches!(verdict.vote, VoteChoice::Abstain) {
                 votes.push(verdict);
             }
@@ -315,7 +372,7 @@ impl SoulReviewEngine {
         for co_soul in &group_full.co_reviewers {
             for proposal_id in &group_full.proposal_ids {
                 let evidence = self.build_evidence_from_group(store, *proposal_id).await?;
-                let verdict = self.review(co_soul, &evidence).await;
+                let verdict = self.review(co_soul, &evidence, ReviewRole::CoReviewer).await;
                 if !matches!(verdict.vote, VoteChoice::Abstain) {
                     votes.push(verdict);
                 }
@@ -431,6 +488,11 @@ mod tests {
         SoulReviewEngine {
             config: test_souls_config(),
             sources: HashMap::new(),
+            llm_client: Arc::new(GovernanceLlmClient {
+                enabled: false,
+                config: None,
+            }),
+            capability_manifest: CapabilityManifest::default(),
         }
     }
 
