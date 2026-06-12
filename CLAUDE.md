@@ -91,6 +91,8 @@ docker compose exec db psql -U cyberjianghu -d cyberjianghu
 
 # Run migrations (handled automatically on startup)
 # Migration files: crates/server/migrations/*.sql
+# Key tables: agents, agent_states, experiences, action_evolution_proposals,
+#   action_evolution_proposal_groups, soul_review_votes
 ```
 
 ### CI/CD Requirements
@@ -162,6 +164,7 @@ Key server modules:
 - `src/tick/processor/` - StateProcessor (validate + execute + Saga rollback)
 - `src/actions/` - Action execution with data-driven ActionType
 - `src/game_data/` - Config loading, caching, and formula evaluation
+- `src/governance/` - Soul 审议引擎 (SoulReviewEngine): 投票式提案审核, ProposalStore, TopicClassifier
 - `src/websocket/` - WebSocket connection management
 - `src/handlers/` - HTTP API endpoints (dashboard SPA via `/admin/*`)
 - `src/state.rs` - Shared AppState, AgentStateCache
@@ -296,6 +299,8 @@ use super::builder::AgentBuilder;
 | World-building rules | `crates/server/config/world_building_rules.yaml` |
 | Skill definitions | `crates/server/config/skills/{category}/{skill_id}/SKILL.md` |
 | Prompt templates (agent) | `crates/server/config/prompt_templates.yaml` (含 `rule_sections` 按需检索配置) |
+| Souls governance config | `crates/server/config/souls.yaml` (Soul 审议规则、投票阈值、主题路由) |
+| Action evolution config | `crates/server/config/action_evolution.yaml` (动作演化策略、能力清单) |
 | Database migrations | `crates/server/migrations/*.sql` |
 | Docker stack | `docker-compose.yml`, `docker-compose.prod.yml` |
 
@@ -314,6 +319,7 @@ use super::builder::AgentBuilder;
 - `GET /api/v1/agent/{id}/biography` - Get agent biography from server DB (fallback read for agent)
 - `POST /api/v1/agent/grant-items` - Admin inventory injection (requires write_token)
 - `POST /api/v1/validate-action` - Validate action parameters
+- `POST /api/v1/action-evolution/propose` - Submit action evolution proposal
 
 **WebSocket**:
 - `WS /ws?token={auth_token}` - WebSocket connection

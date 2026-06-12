@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### 治理系统 (Governance)
+
+- **Soul 审议引擎 (SoulReviewEngine)**
+  - 新增 `SoulReviewEngine`：基于 `souls.yaml` 配置的投票式提案审核引擎，支持硬性规则 (hard_reject_if / hard_approve_if) 自动裁定。
+  - 引入 `ProposalStore`：提案组生命周期管理（PendingReview → UnderReview → Approved/Rejected/EscalatedAdmin）。
+  - `TopicClassifier`：基于 `action_evolution.yaml` 规则的治理主题分类器，自动路由提案到对应 Soul。
+  - 审议结果广播：Approved 提案组通过 `ConfigUpdate` 广播到所有在线 Agent。
+- **动作演化 API (Action Evolution API)**
+  - 新增 `POST /api/v1/action-evolution/propose`：Agent 提交动作演化提案。
+- **数据库表**
+  - `action_evolution_proposals`：动作演化提案表。
+  - `action_evolution_proposal_groups`：提案组表。
+  - `soul_review_votes`：Soul 审议投票记录表。
+
 ### 核心架构 (Core Architecture)
 
 - **实时 Intent 处理管道 (Realtime Pipeline)**

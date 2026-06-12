@@ -164,6 +164,7 @@ async fn init_governance(
     // 启动周期审议任务
     let engine_clone = engine.clone();
     let store_clone = proposal_store.clone();
+    let cm_clone = connection_manager.clone();
     let poll_interval = review_config.poll_interval_secs;
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(poll_interval));
@@ -172,8 +173,29 @@ async fn init_governance(
             match store_clone.get_pending_groups().await {
                 Ok(groups) if !groups.is_empty() => {
                     let results = engine_clone.review_pending(&store_clone, &groups).await;
-                    for (group_id, status) in results {
+                    for (group_id, status) in &results {
                         info!("Group {} 审议完成: {}", group_id, status);
+                        if *status == crate::governance::ProposalStatus::Approved {
+                            let config_update =
+                                cyber_jianghu_protocol::messages::ServerMessage::ConfigUpdate {
+                                    config_type: "action_evolution".to_string(),
+                                    update_type: "full".to_string(),
+                                    version: chrono::Utc::now().to_rfc3339(),
+                                    content: serde_json::json!({
+                                        "event": "proposal_group_approved",
+                                        "group_id": group_id.to_string(),
+                                    }),
+                                    content_hash: None,
+                                    updated_items: vec![group_id.to_string()],
+                                    removed_items: vec![],
+                                };
+                            if let Err(e) =
+                                crate::websocket::broadcast_config_update(config_update, &cm_clone)
+                                    .await
+                            {
+                                warn!("Approved group {} broadcast 失败: {}", group_id, e);
+                            }
+                        }
                     }
                 }
                 Ok(_) => {}
