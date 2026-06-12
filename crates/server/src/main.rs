@@ -202,16 +202,16 @@ async fn init_governance(
                                     for (group_id, status) in &results {
                                         info!("Group {} 审议完成: {}", group_id, status);
                                         if *status == crate::governance::ProposalStatus::Approved {
+                                            let actions_content = std::fs::read_to_string(
+                                                crate::paths::get_config_dir().join("actions.yaml")
+                                            ).unwrap_or_default();
                                             let config_update = cyber_jianghu_protocol::messages::ServerMessage::ConfigUpdate {
-                                                config_type: "action_evolution".to_string(),
+                                                config_type: "actions".to_string(),
                                                 update_type: "full".to_string(),
                                                 version: chrono::Utc::now().to_rfc3339(),
-                                                content: serde_json::json!({
-                                                    "event": "proposal_group_approved",
-                                                    "group_id": group_id.to_string(),
-                                                }),
+                                                content: serde_json::json!({"yaml": actions_content}),
                                                 content_hash: None,
-                                                updated_items: vec![group_id.to_string()],
+                                                updated_items: vec![],
                                                 removed_items: vec![],
                                             };
                                             if let Err(e) = crate::websocket::broadcast_config_update(config_update, &cm_clone).await {
@@ -849,6 +849,16 @@ async fn main() -> Result<()> {
                 axum::middleware::from_fn_with_state(
                     state.clone(),
                     handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        // Action Evolution — 管理员审批/驳回提案组
+        .route(
+            "/api/dashboard/action-evolution/groups/:id/action",
+            post(handlers::dashboard::admin_action_on_group).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_write_token,
                 ),
             ),
         )
