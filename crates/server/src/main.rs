@@ -139,6 +139,7 @@ struct GovernanceShutdown {
 async fn init_governance(
     db_pool: &DbPool,
     connection_manager: websocket::ConnectionManager,
+    game_data_cache: Arc<game_data::GameDataCache>,
 ) -> Result<(GovernanceState, GovernanceShutdown)> {
     let config_dir = crate::paths::get_config_dir();
 
@@ -177,6 +178,7 @@ async fn init_governance(
     let engine_clone = engine.clone();
     let store_clone = proposal_store.clone();
     let cm_clone = connection_manager.clone();
+    let gdc_clone = game_data_cache.clone();
     let poll_interval = review_config.poll_interval_secs;
     let governance_poll_handle = tokio::spawn(async move {
         let mut shutdown_rx = poll_shutdown_rx;
@@ -202,6 +204,20 @@ async fn init_governance(
                                     for (group_id, status) in &results {
                                         info!("Group {} 审议完成: {}", group_id, status);
                                         if *status == crate::governance::ProposalStatus::Approved {
+                                            // Auto-evolve 已在 engine.review_group() 中写入 actions.yaml
+                                            // 重新加载 ActionRegistry 到内存
+                                            match crate::game_data::loaders::load_actions(
+                                                crate::paths::get_config_dir(),
+                                            ) {
+                                                Ok(new_actions) => {
+                                                    gdc_clone.update_actions(new_actions);
+                                                    info!("ActionRegistry 已更新（auto-evolution）");
+                                                }
+                                                Err(e) => {
+                                                    warn!("ActionRegistry 重载失败: {}", e);
+                                                }
+                                            }
+
                                             let actions_content = std::fs::read_to_string(
                                                 crate::paths::get_config_dir().join("actions.yaml")
                                             ).unwrap_or_default();
@@ -434,17 +450,22 @@ async fn main() -> Result<()> {
     );
 
     // 9.2 初始化治理系统
-    let (governance, mut governance_shutdown) =
-        match init_governance(&db_pool, connection_manager.clone()).await {
-            Ok((g, s)) => {
-                info!("治理系统初始化成功");
-                (Some(g), Some(s))
-            }
-            Err(e) => {
-                warn!("治理系统初始化失败（将继续运行，治理功能不可用）: {}", e);
-                (None, None)
-            }
-        };
+    let (governance, mut governance_shutdown) = match init_governance(
+        &db_pool,
+        connection_manager.clone(),
+        game_data_cache.clone(),
+    )
+    .await
+    {
+        Ok((g, s)) => {
+            info!("治理系统初始化成功");
+            (Some(g), Some(s))
+        }
+        Err(e) => {
+            warn!("治理系统初始化失败（将继续运行，治理功能不可用）: {}", e);
+            (None, None)
+        }
+    };
 
     // 9.3 创建应用状态
     let state = Arc::new(AppState::new(
