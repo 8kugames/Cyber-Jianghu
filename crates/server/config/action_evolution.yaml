@@ -1,0 +1,26 @@
+version: "0.0.1"
+
+data:
+  capability_policy:
+    allowed_capability_groups:
+      - survival
+      - social
+      - economic
+    denied_capability_ids: []
+
+  topic_classifier:
+    confidence_threshold: 0.6
+    default_fallback_topic: "evolution"
+    rules:
+      - match:
+          effect_refs_prefix: ["combat", "martial"]
+        topics: ["order"]
+      - match:
+          effect_refs_prefix: ["social", "dialogue"]
+        topics: ["evolution"]
+      - match:
+          effect_refs_prefix: ["survival", "craft", "economic"]
+        topics: ["resource"]
+      - match:
+          effect_refs_prefix: ["skill", "discover"]
+        topics: ["evolution"]
