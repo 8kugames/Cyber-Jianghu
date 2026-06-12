@@ -58,7 +58,7 @@ mod tests {
                         "item_type": "consumable",
                         "effects": [
                             {
-                                "attribute": "hunger",
+                                "attribute": "satiation",
                                 "operation": "add",
                                 "value": 30
                             }
@@ -88,7 +88,7 @@ data:
     name: "馒头"
     item_type: "consumable"
     effects:
-      - attribute: "hunger"
+      - attribute: "satiation"
         operation: "add"
         value: 30
     stack_size: 10

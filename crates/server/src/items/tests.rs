@@ -32,8 +32,8 @@ fn test_init_item_cache_from_config() {
         name: "测试食物".to_string(),
         item_type: "consumable".to_string(),
         effects: vec![ItemEffect {
-            description: "恢复饥饿值".to_string(),
-            attribute: "hunger".to_string(),
+            description: "恢复饱食度".to_string(),
+            attribute: "satiation".to_string(),
             operation: "add".to_string(),
             value: serde_json::json!(1),
         }],
@@ -81,8 +81,8 @@ fn test_get_item_definition() {
         name: "馒头".to_string(),
         item_type: "consumable".to_string(),
         effects: vec![ItemEffect {
-            description: "恢复饥饿值".to_string(),
-            attribute: "hunger".to_string(),
+            description: "恢复饱食度".to_string(),
+            attribute: "satiation".to_string(),
             operation: "add".to_string(),
             value: serde_json::json!(1),
         }],
@@ -122,8 +122,8 @@ fn test_item_usability() {
             name: "食物".to_string(),
             item_type: "consumable".to_string(),
             effects: vec![ItemEffect {
-                description: "恢复饥饿值".to_string(),
-                attribute: "hunger".to_string(),
+                description: "恢复饱食度".to_string(),
+                attribute: "satiation".to_string(),
                 operation: "add".to_string(),
                 value: serde_json::json!(1),
             }],

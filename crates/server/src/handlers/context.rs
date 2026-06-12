@@ -122,8 +122,8 @@ pub async fn get_agent_context(
 
     // Generate narrative self-status
     let hp = agent_state.status.get_attr_value("hp").unwrap_or(100);
-    let hunger = agent_state.status.get_attr_value("hunger").unwrap_or(100);
-    let thirst = agent_state.status.get_attr_value("thirst").unwrap_or(100);
+    let satiation = agent_state.status.get_attr_value("satiation").unwrap_or(100);
+    let hydration = agent_state.status.get_attr_value("hydration").unwrap_or(100);
     let stamina = agent_state.status.get_attr_value("stamina").unwrap_or(100);
 
     let hp_status = if hp > 80 {
@@ -136,17 +136,17 @@ pub async fn get_agent_context(
         "生命垂危"
     };
 
-    let hunger_status = if hunger > 80 {
+    let satiation_status = if satiation > 80 {
         "肚子很饱"
-    } else if hunger > 40 {
+    } else if satiation > 40 {
         "肚子有些饿了"
     } else {
         "饥肠辘辘"
     };
 
-    let thirst_status = if thirst > 80 {
+    let hydration_status = if hydration > 80 {
         "完全不渴"
-    } else if thirst > 40 {
+    } else if hydration > 40 {
         "有些口渴"
     } else {
         "非常口渴"
@@ -162,7 +162,7 @@ pub async fn get_agent_context(
 
     let self_status = format!(
         "### 自身状态\n- 身体: {}\n- 饥饿: {}\n- 口渴: {}\n- 体力: {}\n",
-        hp_status, hunger_status, thirst_status, stamina_status
+        hp_status, satiation_status, hydration_status, stamina_status
     );
 
     // Build inventory summary (simplified for now)

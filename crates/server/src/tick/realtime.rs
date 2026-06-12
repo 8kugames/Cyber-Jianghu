@@ -850,20 +850,20 @@ impl IntentWorker {
             let death_metadata = if let Some(state) = self.state_cache.get(&agent_id) {
                 let attrs = &state.value().status;
                 let hp = attrs.get("hp").unwrap_or(-1);
-                let hunger = attrs.get("hunger").unwrap_or(-1);
-                let thirst = attrs.get("thirst").unwrap_or(-1);
+                let satiation = attrs.get("satiation").unwrap_or(-1);
+                let hydration = attrs.get("hydration").unwrap_or(-1);
                 let sanity = attrs.get("sanity").unwrap_or(-1);
                 let birth_tick = state.value().birth_tick;
                 let survival_ticks = birth_tick.map(|bt| tick_id - bt).unwrap_or(-1);
                 info!(
-                    "[death] agent={} cause={} tick={} hp={} hunger={} thirst={} sanity={} survival_ticks={}",
-                    agent_id, notif.cause, tick_id, hp, hunger, thirst, sanity, survival_ticks
+                    "[death] agent={} cause={} tick={} hp={} satiation={} hydration={} sanity={} survival_ticks={}",
+                    agent_id, notif.cause, tick_id, hp, satiation, hydration, sanity, survival_ticks
                 );
                 Some(serde_json::json!({
                     "attributes": {
                         "hp": hp,
-                        "hunger": hunger,
-                        "thirst": thirst,
+                        "satiation": satiation,
+                        "hydration": hydration,
                         "sanity": sanity,
                     },
                     "birth_tick": birth_tick,
