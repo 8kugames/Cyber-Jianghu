@@ -12,7 +12,7 @@ core_affect:
 
   # 属性偏离对 CoreAffect 的影响
   attributes:
-    - attribute: hunger
+    - attribute: satiation
       comfort_zone: [40.0, 100.0]
       absolute_floor: 0.0
       valence_sensitivity: 0.3

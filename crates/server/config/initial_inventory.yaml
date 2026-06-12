@@ -33,13 +33,13 @@ data:
       - item_id: "馒头"
         name: "馒头"
         quantity: 8
-        description: "普通的馒头，可以恢复饥饿值"
+        description: "普通的馒头，可以恢复饱食度"
 
     drink:
       - item_id: "水"
         name: "水"
         quantity: 8
-        description: "干净的饮用水，可以恢复口渴值"
+        description: "干净的饮用水，可以恢复饱饮度"
 
     currency:
       - item_id: "银子"
