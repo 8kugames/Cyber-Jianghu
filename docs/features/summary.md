@@ -64,3 +64,22 @@
   - 完全由 JS 驱动的客户端渲染面板 (#/dashboard, #/characters, #/settings)，支持 SSE 实时查看推演日志。
 - **纪传体传记 (Chronicle & Biography)**
   - 服务器每 7 游戏日生成全服群像传记。角色死亡时触发基于每日摘要的纪传体生成。
+
+---
+
+## 动作演化治理 (Action Evolution Governance)
+
+### P0 核心机制
+
+- **拒绝 → 提案转化**: Agent 提交未知动作或表达力不足的动作时，天魂拒绝后经 `ServerGovernanceMapper` 映射为 `GovernanceCode`（UnknownAction / ExpressionGap），Agent 端 `SelfEvaluator` 产出结构化 `ProposedActionIR`，通过原子闸门后提交到 Server。
+- **原子行为闸门**: `check_atomicity()` 检查 `actor_arity==1 && tick_span==0 && phase_count==1 && protocol_kind=="none"`，复合行为直接 Drop。
+- **Soul 审议引擎 (SoulReviewEngine)**: 配置驱动的投票式审核引擎，从 `souls.yaml` 加载 Soul 策略（hard_reject_if / hard_approve_if），周期任务（`poll_interval_secs`）审议 pending 提案。
+- **真源三皇**: 伏羲（演化）、神农（资源/生存）、轩辕（秩序/伦理），通过 `topic_to_soul` 路由映射实现"单皇首审 + 双皇复审"。Phase 0 仅伏羲单皇审议，配置已就绪。
+- **数据驱动**: 全部行为由 `souls.yaml` 和 `action_evolution.yaml` 驱动，新增 Soul 只需加 YAML 条目 + 实现 `SourceProvider` trait。
+- **能力注册表 (CapabilityManifest)**: 从 `ActionRegistry` 自动投影，作为审议引擎的"事实层"真源。
+- **优雅降级**: `init_governance` 失败时 `governance: None`，非治理路径不受影响。
+
+### 破坏性更新
+
+- `ExecutionResult` 新增 `governance_code: Option<GovernanceCode>` 字段，`skip_serializing_if = "Option::is_none"` 保持向后兼容。
+- `cyber-jianghu-protocol` 版本从 0.1.68 升级到 0.1.69。

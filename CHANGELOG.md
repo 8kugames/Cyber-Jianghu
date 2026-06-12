@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+> **BREAKING**: `ExecutionResult` 新增 `governance_code` 字段（向后兼容：`Option<GovernanceCode>` 序列化时 `skip_serializing_if`）。protocol crate 版本从 0.1.68 升级到 0.1.69。
+
 ### 治理系统 (Governance)
 
 - **Soul 审议引擎 (SoulReviewEngine)**
