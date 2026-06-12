@@ -271,12 +271,12 @@ impl CognitiveContextBuilder {
         let descriptions = &self_state.attribute_descriptions;
 
         let hp_desc = descriptions.get("hp").map(|s| s.as_str()).unwrap_or("未知");
-        let hunger_desc = descriptions
-            .get("hunger")
+        let satiation_desc = descriptions
+            .get("satiation")
             .map(|s| s.as_str())
             .unwrap_or("未知");
-        let thirst_desc = descriptions
-            .get("thirst")
+        let hydration_desc = descriptions
+            .get("hydration")
             .map(|s| s.as_str())
             .unwrap_or("未知");
         let stamina_desc = descriptions
@@ -290,12 +290,12 @@ impl CognitiveContextBuilder {
             .get("hp")
             .map(|v| format!("[{}]", v))
             .unwrap_or_default();
-        let hunger_raw = attrs
-            .get("hunger")
+        let satiation_raw = attrs
+            .get("satiation")
             .map(|v| format!("[{}]", v))
             .unwrap_or_default();
-        let thirst_raw = attrs
-            .get("thirst")
+        let hydration_raw = attrs
+            .get("hydration")
             .map(|v| format!("[{}]", v))
             .unwrap_or_default();
         let stamina_raw = attrs
@@ -307,10 +307,10 @@ impl CognitiveContextBuilder {
             "{} {}, {} {}, {} {}, {} {}",
             hp_desc,
             hp_raw,
-            hunger_desc,
-            hunger_raw,
-            thirst_desc,
-            thirst_raw,
+            satiation_desc,
+            satiation_raw,
+            hydration_desc,
+            hydration_raw,
             stamina_desc,
             stamina_raw
         );

@@ -96,7 +96,7 @@ mod tests {
         let mut sections = HashMap::new();
         sections.insert(
             "survival_rules".into(),
-            "饥饿值超过80将严重损害健康。".into(),
+            "饱食度低于40时需尽快进食。".into(),
         );
         sections.insert("narrative_limits".into(), "叙事应使用第二人称。".into());
 
@@ -129,7 +129,7 @@ mod tests {
         let rules = result["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0]["category"], "survival");
-        assert!(rules[0]["content"].as_str().unwrap().contains("饥饿"));
+        assert!(rules[0]["content"].as_str().unwrap().contains("饱食度"));
     }
 
     #[test]

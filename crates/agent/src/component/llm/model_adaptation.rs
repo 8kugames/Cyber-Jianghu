@@ -12,22 +12,22 @@ use regex::Regex;
 
 static PAIRED_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?is)<(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call)[^>]*>.*?</(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call)[^>]*>"
+        r"(?is)<(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call|invoke)[^>]*>.*?</(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call|invoke)[^>]*>"
     ).expect("paired tag regex valid")
 });
 
 static SELF_CLOSING_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)<(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call)[^>]*/>\s*")
+    Regex::new(r"(?i)<(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call|invoke)[^>]*/>\s*")
         .expect("self-closing tag regex valid")
 });
 
 static OPENING_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)<(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call)[^>]*>")
+    Regex::new(r"(?i)<(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call|invoke)[^>]*>")
         .expect("opening tag regex valid")
 });
 
 static CLOSING_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)</(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call)[^>]*>\s*")
+    Regex::new(r"(?i)</(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call|invoke)[^>]*>\s*")
         .expect("closing tag regex valid")
 });
 
@@ -56,6 +56,7 @@ const TAG_NAMES: &[&str] = &[
     "thought",
     "thinking",
     "minimax:tool_call",
+    "invoke",
 ];
 
 /// 规范化 LLM 响应内容中的模型专有格式
@@ -280,5 +281,21 @@ mod tests {
             normalize_llm_content("plain text without tags"),
             Cow::Borrowed(_)
         ));
+    }
+
+    #[test]
+    fn invoke_tag_stripped_before_json() {
+        // LLM 输出 <invoke> 包裹的内容后跟 JSON
+        let input = r#"<invoke name="query_world">{"section":"state"}</invoke>{"actions":[{"action_type":"说话"}]}"#;
+        let result = normalize_llm_content(input);
+        assert_eq!(result.as_ref(), r#"{"actions":[{"action_type":"说话"}]}"#);
+    }
+
+    #[test]
+    fn invoke_tag_only_preserves_content() {
+        // JSON 被包裹在 invoke 标签内（罕见情况）
+        let input = r#"<invoke>{"actions":[{"action_type":"说话"}]}</invoke>"#;
+        let result = normalize_llm_content(input);
+        assert_eq!(result.as_ref(), r#"{"actions":[{"action_type":"说话"}]}"#);
     }
 }

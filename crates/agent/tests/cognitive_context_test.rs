@@ -14,8 +14,8 @@ fn create_test_world_state() -> WorldState {
     let mut attributes = HashMap::new();
     attributes.insert("hp".to_string(), 80);
     attributes.insert("stamina".to_string(), 60);
-    attributes.insert("hunger".to_string(), 70);
-    attributes.insert("thirst".to_string(), 50);
+    attributes.insert("satiation".to_string(), 70);
+    attributes.insert("hydration".to_string(), 50);
 
     WorldState {
         event_type: "world_state".to_string(),
@@ -54,8 +54,8 @@ fn create_test_world_state() -> WorldState {
             attribute_descriptions: HashMap::from([
                 ("hp".to_string(), "生命值 80/100，状态良好".to_string()),
                 ("stamina".to_string(), "体力有些消耗".to_string()),
-                ("hunger".to_string(), "饥饿感明显".to_string()),
-                ("thirst".to_string(), "有些口渴".to_string()),
+                ("satiation".to_string(), "饥饿感明显".to_string()),
+                ("hydration".to_string(), "有些口渴".to_string()),
             ]),
             survival_drives: vec![],
             status_effects: vec![],

@@ -145,7 +145,7 @@ mod tests {
         let mut sections = HashMap::new();
         sections.insert(
             "survival_rules".into(),
-            "饥饿值超过80将严重损害健康。健康归零即死亡。".into(),
+            "饱食度低于40时需尽快进食。降至0将死亡。".into(),
         );
         sections.insert(
             "narrative_limits".into(),
@@ -188,7 +188,7 @@ mod tests {
         let results = cache.query(&["survival".into()], &tmpl);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "survival");
-        assert!(results[0].content.contains("饥饿"));
+        assert!(results[0].content.contains("饱食度"));
     }
 
     #[test]
@@ -221,7 +221,7 @@ mod tests {
         let cache = RuleCache::new(&make_rule_config());
         let tmpl = make_prompt_template();
         let results = cache.query(&["survival".into()], &tmpl);
-        // "饥饿值超过80将严重损害健康。健康归零即死亡。" = 23 chars → 23/4 = 5.75 → ceil = 6
+        // "饱食度低于40时需尽快进食。降至0将死亡。" = 23 chars → 23/4 = 5.75 → ceil = 6
         assert_eq!(results[0].token_estimate, 6);
     }
 }

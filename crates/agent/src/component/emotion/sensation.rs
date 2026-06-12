@@ -62,7 +62,7 @@ mod tests {
     #[test]
     fn test_build_sensation_positive() {
         let config = SensationConfig::default();
-        let attrs = HashMap::from([("hunger".into(), 60), ("hp".into(), 80)]);
+        let attrs = HashMap::from([("satiation".into(), 60), ("hp".into(), 80)]);
         let result = build_internal_sensation(0.5, 0.3, &attrs, &config);
         assert!(result.contains("明显的愉悦"), "got: {}", result);
         assert!(result.contains("平静清醒"), "got: {}", result);
@@ -71,10 +71,10 @@ mod tests {
     #[test]
     fn test_build_sensation_with_distress() {
         let config = SensationConfig::default();
-        let attrs = HashMap::from([("hunger".into(), 10), ("hp".into(), 80)]);
+        let attrs = HashMap::from([("satiation".into(), 10), ("hp".into(), 80)]);
         let result = build_internal_sensation(-0.5, 0.7, &attrs, &config);
         assert!(
-            result.contains("hunger"),
+            result.contains("satiation"),
             "应包含 distress hint，got: {}",
             result
         );

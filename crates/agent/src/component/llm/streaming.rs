@@ -392,10 +392,10 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
                         }
                         Err(e) => {
                             tracing::warn!(
-                                "[SSE 解析失败] chunk #{}: {} (data: {})",
+                                "[SSE 解析失败] chunk #{}: {} (data_len={})",
                                 chunk_count + 1,
                                 e,
-                                &data[..data.len().min(2000)]
+                                data.len()
                             );
                         }
                     }
