@@ -815,8 +815,21 @@ impl super::Agent {
                                                         "rationale": eval.rationale,
                                                     });
                                                     let url = format!("{}/api/v1/action-evolution/propose", self.config.server.http_url);
+                                                    let auth_token = self
+                                                        .device_config
+                                                        .as_ref()
+                                                        .map(|d| d.auth_token.clone())
+                                                        .unwrap_or_default();
                                                     tokio::spawn(async move {
-                                                        let _ = reqwest::Client::new().post(&url).json(&proposal).send().await;
+                                                        let _ = reqwest::Client::new()
+                                                            .post(&url)
+                                                            .header(
+                                                                reqwest::header::AUTHORIZATION,
+                                                                format!("Bearer {}", auth_token),
+                                                            )
+                                                            .json(&proposal)
+                                                            .send()
+                                                            .await;
                                                     });
                                                 }
                                             }

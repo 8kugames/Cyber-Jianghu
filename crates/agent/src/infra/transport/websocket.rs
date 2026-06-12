@@ -121,6 +121,10 @@ struct ConnectionState {
     /// 叙事化配置更新回调（ConfigUpdate with config_type="narrative_config"）
     /// 参数: (NarrativeConfig, Option<content_hash>)
     narrative_config_callback: Option<NarrativeConfigCallback>,
+    /// 动作演化配置更新回调（ConfigUpdate with config_type="action_evolution"）
+    /// 参数: serde_json::Value（完整 content，Phase 0 仅 log，Phase 1+ 全量更新本地 action table）
+    #[allow(clippy::type_complexity)]
+    action_evolution_update_cb: Option<Arc<dyn Fn(&serde_json::Value) + Send + Sync>>,
 
     // ---- 后台任务架构 ----
     /// 后台 WebSocket 任务句柄
@@ -163,6 +167,7 @@ impl WebSocketClient {
                 prompt_template_received: false,
                 persona_event_rules_callback: None,
                 narrative_config_callback: None,
+                action_evolution_update_cb: None,
                 reader_task: None,
                 shutdown_tx: None,
                 intent_tx: None,
@@ -410,6 +415,21 @@ impl WebSocketClient {
             rt.block_on(async {
                 let mut state = self.state.write().await;
                 state.narrative_config_callback = Some(callback);
+            });
+        });
+    }
+
+    /// 设置动作演化配置更新回调（ConfigUpdate with config_type="action_evolution"）
+    /// Phase 0：回调仅 log；Phase 1+ 全量更新本地 action table
+    pub fn set_action_evolution_update_callback(
+        &self,
+        cb: Arc<dyn Fn(&serde_json::Value) + Send + Sync>,
+    ) {
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let mut state = self.state.write().await;
+                state.action_evolution_update_cb = Some(cb);
             });
         });
     }
@@ -758,7 +778,7 @@ async fn websocket_background_task(
                 match msg_result {
                     Some(Ok(Message::Text(text))) => {
                         // 克隆回调（避免在处理中持有锁）
-                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, skill_update_cb, prompt_template_cb, persona_event_rules_cb, narrative_config_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
+                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, skill_update_cb, prompt_template_cb, persona_event_rules_cb, narrative_config_cb, action_evolution_update_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
                             let state_guard = state.read().await;
                             (
                                 state_guard.game_rules_callback.clone(),
@@ -769,6 +789,7 @@ async fn websocket_background_task(
                                 state_guard.prompt_template_callback.clone(),
                                 state_guard.persona_event_rules_callback.clone(),
                                 state_guard.narrative_config_callback.clone(),
+                                state_guard.action_evolution_update_cb.clone(),
                                 state_guard.server_msg_callback.clone(),
                                 state_guard.worldstate_tx.clone(),
                                 state_guard.registered_tx.clone(),
@@ -912,6 +933,13 @@ async fn websocket_background_task(
                                             }
                                         } else {
                                             warn!("Failed to parse narrative_config content from ConfigUpdate");
+                                        }
+                                    // 处理 action_evolution 配置更新
+                                    // Phase 0：仅 log；Phase 1+ 全量更新本地 action table
+                                    } else if config_type == "action_evolution" {
+                                        info!("Action evolution config update received (Phase 0: log only)");
+                                        if let Some(ref cb) = action_evolution_update_cb {
+                                            cb(content);
                                         }
                                     }
                                 }
@@ -1264,6 +1292,16 @@ impl AgentClient {
     pub async fn set_narrative_config_callback(&self, callback: NarrativeConfigCallback) {
         let client = self.client.read().await;
         client.set_narrative_config_callback(callback);
+    }
+
+    /// 设置动作演化配置更新回调（ConfigUpdate with config_type="action_evolution"）
+    /// Phase 0：仅 log；Phase 1+ 全量更新本地 action table
+    pub async fn set_action_evolution_update_callback(
+        &self,
+        cb: Arc<dyn Fn(&serde_json::Value) + Send + Sync>,
+    ) {
+        let client = self.client.read().await;
+        client.set_action_evolution_update_callback(cb);
     }
 
     /// 设置 Server 消息透传回调（用于 OpenClaw 集成）
