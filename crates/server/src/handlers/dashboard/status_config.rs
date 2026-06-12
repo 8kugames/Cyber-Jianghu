@@ -50,10 +50,10 @@ pub struct AgentDetail {
     pub location: String,
     pub hp: i32,
     pub max_hp: i32,
-    pub hunger: i32,
-    pub max_hunger: i32,
-    pub thirst: i32,
-    pub max_thirst: i32,
+    pub satiation: i32,
+    pub max_satiation: i32,
+    pub hydration: i32,
+    pub max_hydration: i32,
     pub stamina: i32,
     pub max_stamina: i32,
     pub is_alive: bool,
@@ -132,10 +132,10 @@ pub async fn get_agent_details(
         location,
         hp,
         max_hp,
-        hunger,
-        max_hunger,
-        thirst,
-        max_thirst,
+        satiation,
+        max_satiation,
+        hydration,
+        max_hydration,
         stamina,
         max_stamina,
         is_alive,
@@ -176,18 +176,18 @@ pub async fn get_agent_details(
                 .and_then(|v| v.as_i64())
                 .map(|v| v as i32)
                 .unwrap_or_else(|| get_max("hp")),
-            attrs.get("hunger").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
+            attrs.get("satiation").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
             attrs
-                .get("hunger_max")
+                .get("satiation_max")
                 .and_then(|v| v.as_i64())
                 .map(|v| v as i32)
-                .unwrap_or_else(|| get_max("hunger")),
-            attrs.get("thirst").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
+                .unwrap_or_else(|| get_max("satiation")),
+            attrs.get("hydration").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
             attrs
-                .get("thirst_max")
+                .get("hydration_max")
                 .and_then(|v| v.as_i64())
                 .map(|v| v as i32)
-                .unwrap_or_else(|| get_max("thirst")),
+                .unwrap_or_else(|| get_max("hydration")),
             attrs.get("stamina").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
             attrs
                 .get("stamina_max")
@@ -288,10 +288,10 @@ pub async fn get_agent_details(
         location,
         hp,
         max_hp,
-        hunger,
-        max_hunger,
-        thirst,
-        max_thirst,
+        satiation,
+        max_satiation,
+        hydration,
+        max_hydration,
         stamina,
         max_stamina,
         is_alive,

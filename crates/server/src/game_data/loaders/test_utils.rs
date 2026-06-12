@@ -69,8 +69,8 @@ pub fn create_test_config_dir() -> TempDir {
                     "item_type": "consumable",
                     "effects": [
                         {
-                            "description": "恢复饥饿值",
-                            "attribute": "hunger",
+                            "description": "恢复饱食度",
+                            "attribute": "satiation",
                             "operation": "add",
                             "value": 30
                         }
@@ -225,25 +225,25 @@ pub fn create_test_config_dir() -> TempDir {
                     "display_name": "体力",
                     "description": "Agent的体力值，用于行动消耗"
                 },
-                "hunger": {
+                "satiation": {
                     "type": "integer",
                     "default_value": 50,
                     "min_value": 0,
                     "max_value": 100,
                     "decay_per_tick": -5,
                     "death_condition": {"operator": "equals", "value": 0},
-                    "display_name": "饥饿",
-                    "description": "Agent的饥饿值，过低会影响生命值"
+                    "display_name": "饱食度",
+                    "description": "Agent的饱食程度，过低会影响生命值"
                 },
-                "thirst": {
+                "hydration": {
                     "type": "integer",
                     "default_value": 50,
                     "min_value": 0,
                     "max_value": 100,
                     "decay_per_tick": -5,
                     "death_condition": {"operator": "equals", "value": 0},
-                    "display_name": "口渴",
-                    "description": "Agent的口渴值，过低会影响生命值"
+                    "display_name": "饱饮度",
+                    "description": "Agent的饮水程度，过低会影响生命值"
                 }
             }
         }"#,
@@ -395,22 +395,22 @@ pub fn create_test_config_dir() -> TempDir {
                             "max_value_formula": "100",
                             "decay_per_tick": 5
                         },
-                        "hunger": {
-                            "name": "hunger",
+                        "satiation": {
+                            "name": "satiation",
                             "type": "status",
-                            "display_name": "饥饿",
-                            "description": "Agent的饥饿值，过低会影响生命值",
+                            "display_name": "饱食度",
+                            "description": "Agent的饱食程度，过低会影响生命值",
                             "default_value": 50,
                             "min_value": 0,
                             "max_value_formula": "100",
                             "decay_per_tick": -5,
                             "death_condition": {"operator": "equals", "value": 0}
                         },
-                        "thirst": {
-                            "name": "thirst",
+                        "hydration": {
+                            "name": "hydration",
                             "type": "status",
-                            "display_name": "口渴",
-                            "description": "Agent的口渴值，过低会影响生命值",
+                            "display_name": "饱饮度",
+                            "description": "Agent的饮水程度，过低会影响生命值",
                             "default_value": 50,
                             "min_value": 0,
                             "max_value_formula": "100",

@@ -30,8 +30,8 @@ mod tests {
         let mut attributes: HashMap<String, serde_json::Value> = HashMap::new();
         attributes.insert("hp".to_string(), json!(100));
         attributes.insert("stamina".to_string(), json!(100));
-        attributes.insert("hunger".to_string(), json!(50));
-        attributes.insert("thirst".to_string(), json!(50));
+        attributes.insert("satiation".to_string(), json!(50));
+        attributes.insert("hydration".to_string(), json!(50));
         attributes.insert("sanity".to_string(), json!(100));
         attributes.insert("reputation".to_string(), json!(0));
         attributes.insert("qi".to_string(), json!(0));
@@ -42,8 +42,8 @@ mod tests {
         let obj = json_val.as_object().unwrap();
         assert_eq!(obj.get("hp").unwrap(), &100);
         assert_eq!(obj.get("stamina").unwrap(), &100);
-        assert_eq!(obj.get("hunger").unwrap(), &50);
-        assert_eq!(obj.get("thirst").unwrap(), &50);
+        assert_eq!(obj.get("satiation").unwrap(), &50);
+        assert_eq!(obj.get("hydration").unwrap(), &50);
         assert_eq!(obj.get("sanity").unwrap(), &100);
         assert_eq!(obj.get("reputation").unwrap(), &0);
         assert_eq!(obj.get("qi").unwrap(), &0);
@@ -55,8 +55,8 @@ mod tests {
         let json_val = json!({
             "hp": 100,
             "stamina": 100,
-            "hunger": 50,
-            "thirst": 50,
+            "satiation": 50,
+            "hydration": 50,
             "sanity": 100,
             "reputation": 0,
             "qi": 0
@@ -68,8 +68,8 @@ mod tests {
 
         assert_eq!(attributes.get("hp").unwrap().as_i64().unwrap(), 100);
         assert_eq!(attributes.get("stamina").unwrap().as_i64().unwrap(), 100);
-        assert_eq!(attributes.get("hunger").unwrap().as_i64().unwrap(), 50);
-        assert_eq!(attributes.get("thirst").unwrap().as_i64().unwrap(), 50);
+        assert_eq!(attributes.get("satiation").unwrap().as_i64().unwrap(), 50);
+        assert_eq!(attributes.get("hydration").unwrap().as_i64().unwrap(), 50);
     }
 
     #[test]
@@ -78,8 +78,8 @@ mod tests {
         let json_val = json!({
             "hp": 100,
             "stamina": 100,
-            "hunger": 50,
-            "thirst": 50,
+            "satiation": 50,
+            "hydration": 50,
             // 新属性，无需修改 Rust 代码
             "new_attr": 999,
             "another_attr": "test_value"

@@ -589,21 +589,21 @@ mod tests {
         let cache =
             super::super::registry::registry().expect("test registry should be initialized");
 
-        // Test hunger death info
-        let info = cache.get_death_info("hunger");
-        assert!(info.is_some(), "hunger should have death info");
+        // Test satiation death info
+        let info = cache.get_death_info("satiation");
+        assert!(info.is_some(), "satiation should have death info");
         let info = info.unwrap();
-        assert_eq!(info.cause, "hunger");
+        assert_eq!(info.cause, "satiation");
         assert!(
             info.message.contains("饥饿"),
-            "death message should mention hunger"
+            "death message should mention satiation"
         );
 
-        // Test thirst death info
-        let info = cache.get_death_info("thirst");
-        assert!(info.is_some(), "thirst should have death info");
+        // Test hydration death info
+        let info = cache.get_death_info("hydration");
+        assert!(info.is_some(), "hydration should have death info");
         let info = info.unwrap();
-        assert_eq!(info.cause, "thirst");
+        assert_eq!(info.cause, "hydration");
         assert!(
             info.message.contains("脱水"),
             "death message should mention dehydration"

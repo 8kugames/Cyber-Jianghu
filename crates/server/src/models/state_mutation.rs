@@ -40,7 +40,7 @@ impl AgentState {
     /// 应用生理值衰减（委托给 StatusComponent）
     ///
     /// 处理两类属性变化：
-    /// 1. decay_per_tick: 衰减值（正值表示扣减，如 hunger 每tick扣减5）
+    /// 1. decay_per_tick: 衰减值（正值表示扣减，如 satiation 每tick扣减5）
     /// 2. recovery_formula: 恢复公式（如 stamina 每tick恢复 5 + constitution * 0.1）
     ///
     /// 季节修饰系数从 time.json 的季节配置中读取（数据驱动）
@@ -54,7 +54,7 @@ impl AgentState {
         let context = self.get_formula_context();
 
         // 1. 处理衰减属性
-        // decay_per_tick 表示扣减量（正值=扣减量，如 hunger 每tick扣减5）
+        // decay_per_tick 表示扣减量（正值=扣减量，如 satiation 每tick扣减5）
         let attributes_to_decay = self.status.get_decaying_attributes();
 
         for (attr_name, decay_amount) in attributes_to_decay {

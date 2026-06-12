@@ -18,30 +18,30 @@ mod tests {
         let mut state = AgentState::new(Uuid::new_v4(), 1);
 
         // 根据 PRD，白板重生初始值：HP=100, 体力=100, 饥饿=50, 口渴=50
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 50);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 50);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 50);
+        assert_eq!(state.status.get("hydration").unwrap_or(0), 50);
         assert_eq!(state.status.get("hp").unwrap_or(0), 100);
         assert!(state.is_alive);
 
-        // 测试配置：hunger/thirst decay_per_tick = 0.2
-        // 单 tick 累计器未到 1.0，hunger/thirst 保持原值
+        // 测试配置：satiation/hydration decay_per_tick = 0.2
+        // 单 tick 累计器未到 1.0，satiation/hydration 保持原值
         let _ = state.apply_decay(1);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 50);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 50);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 50);
+        assert_eq!(state.status.get("hydration").unwrap_or(0), 50);
         assert_eq!(state.status.get("stamina").unwrap_or(0), 100);
 
-        // 跑满 5 tick，累计器到 -1.0，hunger 扣 1
+        // 跑满 5 tick，累计器到 -1.0，satiation 扣 1
         for _ in 0..4 {
             let _ = state.apply_decay(1);
         }
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 49);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 49);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 49);
+        assert_eq!(state.status.get("hydration").unwrap_or(0), 49);
 
         // 验证累计器不漂移：再跑 5 tick，应再扣 1
         for _ in 0..5 {
             let _ = state.apply_decay(1);
         }
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 48);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 48);
 
         // 持续衰减至死亡：0.2/tick → 5 tick 扣 1，48 → 0 需 ~240 tick
         for _ in 0..300 {
@@ -50,8 +50,8 @@ mod tests {
             }
             let _ = state.apply_decay(1);
         }
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 0);
-        assert!(state.status.get("thirst").unwrap_or(0) <= 1);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 0);
+        assert!(state.status.get("hydration").unwrap_or(0) <= 1);
         assert!(!state.is_alive);
         assert_eq!(state.status.get("hp").unwrap_or(0), 0);
     }
@@ -62,41 +62,41 @@ mod tests {
         crate::game_data::init_test_registry();
 
         let mut state = AgentState::new(Uuid::new_v4(), 1);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 50);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 50);
 
         for tick in 1..=4 {
             let _ = state.apply_decay(tick);
             assert_eq!(
-                state.status.get("hunger").unwrap_or(-1),
+                state.status.get("satiation").unwrap_or(-1),
                 50,
-                "tick {} 累计器未到 1.0，hunger 应保持 50",
+                "tick {} 累计器未到 1.0，satiation 应保持 50",
                 tick
             );
-            let acc = state.decay_accumulator.get("hunger").copied().unwrap_or(0.0);
+            let acc = state.decay_accumulator.get("satiation").copied().unwrap_or(0.0);
             assert!((acc - (-0.2 * tick as f32)).abs() < 1e-5);
         }
 
         let _ = state.apply_decay(5);
-        assert_eq!(state.status.get("hunger").unwrap_or(-1), 49);
-        let acc = state.decay_accumulator.get("hunger").copied().unwrap_or(0.0);
+        assert_eq!(state.status.get("satiation").unwrap_or(-1), 49);
+        let acc = state.decay_accumulator.get("satiation").copied().unwrap_or(0.0);
         assert!(acc.abs() < 1e-5, "累计器应在扣减后归零，实际 {}", acc);
     }
         }
         println!("Loop count to death: {}", loop_count);
         // Since attributes.json config has decay_per_tick = 5, and default is 50.
         // 50 -> 45 -> ... -> 0.
-        // However, the test checks hunger and thirst, and tests might start with 50.
-        // If hunger decays to 0 at tick 10, it triggers death.
-        // In the test output we saw 10 hunger logs, and it died.
-        // But maybe hunger was only reduced 9 times? Wait, 50 - 10*5 = 0.
+        // However, the test checks satiation and hydration, and tests might start with 50.
+        // If satiation decays to 0 at tick 10, it triggers death.
+        // In the test output we saw 10 satiation logs, and it died.
+        // But maybe satiation was only reduced 9 times? Wait, 50 - 10*5 = 0.
         // If it triggers death at 0, then the loop breaks!
         // That means the state is_alive = false.
         // If it breaks, the remaining assertions might fail. Let's just check the values.
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 0);
-        // Note: Because it breaks when hunger reaches 0, thirst might not have been decremented the 10th time!
-        // So thirst might be 5 instead of 0.
-        // Let's remove the exact thirst assert and just assert it's <= 5.
-        assert!(state.status.get("thirst").unwrap_or(0) <= 5);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 0);
+        // Note: Because it breaks when satiation reaches 0, hydration might not have been decremented the 10th time!
+        // So hydration might be 5 instead of 0.
+        // Let's remove the exact hydration assert and just assert it's <= 5.
+        assert!(state.status.get("hydration").unwrap_or(0) <= 5);
         assert!(!state.is_alive);
         assert_eq!(state.status.get("hp").unwrap_or(0), 0);
     }
@@ -109,20 +109,20 @@ mod tests {
 
         // 应用衰减
         let _ = state.apply_decay(1);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 45);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 45);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 45);
+        assert_eq!(state.status.get("hydration").unwrap_or(0), 45);
 
-        // 恢复饥饿值
-        state.restore_attribute("hunger", 30);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 75); // 45 + 30 = 75
+        // 恢复饱食度
+        state.restore_attribute("satiation", 30);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 75); // 45 + 30 = 75
 
-        // 恢复口渴值
-        state.restore_attribute("thirst", 20);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 65); // 45 + 20 = 65
+        // 恢复饱饮度
+        state.restore_attribute("hydration", 20);
+        assert_eq!(state.status.get("hydration").unwrap_or(0), 65); // 45 + 20 = 65
 
         // 恢复到最大值
-        state.restore_attribute("hunger", 50);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 100); // 最大100
+        state.restore_attribute("satiation", 50);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 100); // 最大100
     }
 
     #[test]
@@ -142,8 +142,8 @@ mod tests {
         assert!(!state.is_alive);
 
         // 死亡后无法恢复
-        state.restore_attribute("hunger", 50);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 50); // 死亡状态下恢复无效
+        state.restore_attribute("satiation", 50);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 50); // 死亡状态下恢复无效
     }
 
     #[test]

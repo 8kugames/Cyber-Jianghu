@@ -100,7 +100,7 @@ impl StatusComponent {
             }
         }
 
-        // Ensure consistent ordering for tests (e.g. hunger, thirst, stamina)
+        // Ensure consistent ordering for tests (e.g. satiation, hydration, stamina)
         // Tests rely on specific execution order if checking death conditions.
         // Sort by decay amount, then name to ensure predictable order.
         result.sort_by(|a, b| {

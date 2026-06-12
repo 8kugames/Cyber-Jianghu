@@ -96,8 +96,8 @@ pub fn init_test_registry() {
                         "attributes": {
                             "hp": { "name": "hp", "display_name": "生命值", "description": "生命值", "type": "status", "default_value": 100, "min_value": 0, "max_value_formula": "100", "decay_per_tick": 0, "death_condition": { "operator": "equals", "value": 0 } },
                             "stamina": { "name": "stamina", "display_name": "体力", "description": "体力", "type": "status", "default_value": 100, "min_value": 0, "max_value_formula": "100", "decay_per_tick": 0, "recovery_formula": "5 + constitution * 0.1" },
-                           "hunger": { "name": "hunger", "display_name": "饥饿", "description": "饥饿", "type": "status", "default_value": 50, "min_value": 0, "max_value_formula": "100", "decay_per_tick": 0.2, "death_condition": { "operator": "equals", "value": 0 }, "death_cause": "hunger", "death_message": "你因长期饥饿而倒下，意识逐渐模糊..." },
-                           "thirst": { "name": "thirst", "display_name": "口渴", "description": "口渴", "type": "status", "default_value": 50, "min_value": 0, "max_value_formula": "100", "decay_per_tick": 0.2, "death_condition": { "operator": "equals", "value": 0 }, "death_cause": "thirst", "death_message": "你因严重脱水而倒下，眼前一片黑暗..." },
+                           "satiation": { "name": "satiation", "display_name": "饱食度", "description": "饥饿", "type": "status", "default_value": 50, "min_value": 0, "max_value_formula": "100", "decay_per_tick": 0.2, "death_condition": { "operator": "equals", "value": 0 }, "death_cause": "satiation", "death_message": "你因长期饥饿而倒下，意识逐渐模糊..." },
+                           "hydration": { "name": "hydration", "display_name": "饱饮度", "description": "口渴", "type": "status", "default_value": 50, "min_value": 0, "max_value_formula": "100", "decay_per_tick": 0.2, "death_condition": { "operator": "equals", "value": 0 }, "death_cause": "hydration", "death_message": "你因严重脱水而倒下，眼前一片黑暗..." },
                             "qi": { "name": "qi", "display_name": "内气", "description": "内气", "type": "status", "default_value": 50, "min_value": 0, "max_value_formula": "100", "decay_per_tick": 0 },
                             "sanity": { "name": "sanity", "display_name": "理智", "description": "理智", "type": "status", "default_value": 100, "min_value": 0, "max_value_formula": "100", "decay_per_tick": 0 },
                             "reputation": { "name": "reputation", "display_name": "声望", "description": "声望", "type": "status", "default_value": 0, "min_value": -1000, "max_value_formula": "1000", "decay_per_tick": 0 }
@@ -124,8 +124,8 @@ pub fn init_test_registry() {
                         "item_type": "consumable",
                         "effects": [
                             {
-                                "description": "恢复饥饿值",
-                                "attribute": "hunger",
+                                "description": "恢复饱食度",
+                                "attribute": "satiation",
                                 "operation": "add",
                                 "value": 30
                             }
@@ -139,8 +139,8 @@ pub fn init_test_registry() {
                         "item_type": "consumable",
                         "effects": [
                             {
-                                "description": "恢复口渴值",
-                                "attribute": "thirst",
+                                "description": "恢复饱饮度",
+                                "attribute": "hydration",
                                 "operation": "add",
                                 "value": 30
                             }
@@ -452,25 +452,25 @@ pub fn init_test_registry() {
                         "display_name": "体力",
                         "description": "Agent的体力值，用于行动消耗"
                     },
-                    "hunger": {
+                    "satiation": {
                         "type": "integer",
                         "default_value": 50,
                         "min_value": 0,
                         "max_value": 100,
                         "decay_per_tick": -5,
                         "death_condition": { "operator": "equals", "value": 0 },
-                        "display_name": "饥饿",
-                        "description": "Agent的饥饿值，过低会影响生命值"
+                        "display_name": "饱食度",
+                        "description": "Agent的饱食程度，过低会影响生命值"
                     },
-                    "thirst": {
+                    "hydration": {
                         "type": "integer",
                         "default_value": 50,
                         "min_value": 0,
                         "max_value": 100,
                         "decay_per_tick": -5,
                         "death_condition": { "operator": "equals", "value": 0 },
-                        "display_name": "口渴",
-                        "description": "Agent的口渴值，过低会影响生命值"
+                        "display_name": "饱饮度",
+                        "description": "Agent的饮水程度，过低会影响生命值"
                     }
                 }
             }
@@ -548,8 +548,8 @@ pub fn init_test_registry() {
                             "temperature_modifier": 0,
                             "resource_growth_rate": 1.0,
                             "attribute_modifiers": {
-                                "hunger": 1.0,
-                                "thirst": 1.0,
+                                "satiation": 1.0,
+                                "hydration": 1.0,
                                 "stamina": 1.0
                             }
                         }
@@ -575,8 +575,8 @@ attribute_categories:
   status:
     - hp
     - stamina
-    - hunger
-    - thirst
+    - satiation
+    - hydration
     - qi
     - sanity
     - reputation
@@ -596,9 +596,9 @@ attributes:
           max: 49
           description: "身体虚弱，伤痛明显"
 
-    hunger:
-      name: hunger
-      display_name: 饥饿值
+    satiation:
+      name: satiation
+      display_name: 饱食度
       thresholds:
         - min: 80
           max: 100
@@ -607,9 +607,9 @@ attributes:
           max: 79
           description: "有些饿"
 
-    thirst:
-      name: thirst
-      display_name: 口渴值
+    hydration:
+      name: hydration
+      display_name: 饱饮度
       thresholds:
         - min: 80
           max: 100
