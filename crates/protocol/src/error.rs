@@ -310,8 +310,8 @@ mod tests {
 
     #[test]
     fn test_game_error_effect_apply_failed() {
-        let err = GameError::EffectApplyFailed("属性 hunger 不存在".to_string());
-        assert_eq!(err.to_string(), "效果应用失败: 属性 hunger 不存在");
+        let err = GameError::EffectApplyFailed("属性 satiation 不存在".to_string());
+        assert_eq!(err.to_string(), "效果应用失败: 属性 satiation 不存在");
     }
 
     #[test]

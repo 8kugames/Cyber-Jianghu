@@ -98,7 +98,7 @@ impl NarrativeConfig {
     /// 根据属性值获取叙事描述
     ///
     /// 越界回退: 值超出所有阈值范围时，取最近的边界阈值描述。
-    /// 例如 thirst=104 但阈值只到 100 → 使用 80-100 的 "完全不渴"。
+    /// 例如 hydration=104 但阈值只到 100 → 使用 80-100 的 "完全不渴"。
     pub fn get_description(&self, attr_name: &str, value: i32) -> Option<&str> {
         self.attributes.get(attr_name).and_then(|config| {
             // 精确匹配
@@ -438,10 +438,10 @@ mod tests {
             },
         );
         attributes.insert(
-            "hunger".to_string(),
+            "satiation".to_string(),
             NarrativeAttributeConfig {
-                name: "hunger".to_string(),
-                display_name: "饥饿".to_string(),
+                name: "satiation".to_string(),
+                display_name: "饱食度".to_string(),
                 thresholds: vec![
                     NarrativeThreshold {
                         min: 80,
@@ -524,7 +524,7 @@ mod tests {
     fn test_get_display_name() {
         let config = make_test_narrative_config();
         assert_eq!(config.get_display_name("hp"), Some("生命值"));
-        assert_eq!(config.get_display_name("hunger"), Some("饥饿"));
+        assert_eq!(config.get_display_name("satiation"), Some("饱食度"));
     }
 
     // --- AgentRecognition 容错反序列化测试 ---

@@ -150,11 +150,11 @@ impl FromStr for ItemType {
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 pub enum EffectType {
-    /// 恢复饥饿值
-    RestoreHunger,
+    /// 恢复饱食度
+    RestoreSatiation,
 
-    /// 恢复口渴值
-    RestoreThirst,
+    /// 恢复饱饮度
+    RestoreHydration,
 
     /// 增加攻击力
     IncreaseAttack,
@@ -163,8 +163,8 @@ pub enum EffectType {
 impl fmt::Display for EffectType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::RestoreHunger => write!(f, "restore_hunger"),
-            Self::RestoreThirst => write!(f, "restore_thirst"),
+            Self::RestoreSatiation => write!(f, "restore_satiation"),
+            Self::RestoreHydration => write!(f, "restore_hydration"),
             Self::IncreaseAttack => write!(f, "increase_attack"),
         }
     }
@@ -175,8 +175,8 @@ impl FromStr for EffectType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "restore_hunger" => Ok(Self::RestoreHunger),
-            "restore_thirst" => Ok(Self::RestoreThirst),
+            "restore_satiation" => Ok(Self::RestoreSatiation),
+            "restore_hydration" => Ok(Self::RestoreHydration),
             "increase_attack" => Ok(Self::IncreaseAttack),
             _ => Err(format!("Invalid effect type: {}", s)),
         }
