@@ -21,10 +21,16 @@ pub enum ProposalStatus {
 
 impl std::fmt::Display for ProposalStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-          let s = serde_json::to_value(self)
+        let s = serde_json::to_value(self)
             .map(|v| v.as_str().unwrap_or("unknown").to_string())
             .unwrap_or_else(|_| format!("{:?}", self).to_lowercase());
         write!(f, "{}", s)
+    }
+}
+
+impl ProposalStatus {
+    pub fn from_db_str(s: &str) -> Self {
+        serde_json::from_value(serde_json::Value::String(s.to_string())).unwrap_or(Self::Error)
     }
 }
 
