@@ -161,7 +161,7 @@ pub async fn get_agent_context(
     };
 
     let self_status = format!(
-        "### 自身状态\n- 身体: {}\n- 饥饿: {}\n- 口渴: {}\n- 体力: {}\n",
+        "### 自身状态\n- 身体: {}\n- 饱食度: {}\n- 饱饮度: {}\n- 体力: {}\n",
         hp_status, satiation_status, hydration_status, stamina_status
     );
 
