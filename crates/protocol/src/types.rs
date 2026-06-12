@@ -30,6 +30,7 @@ pub mod narrative;
 pub mod prompt_template;
 pub mod rules;
 pub mod world;
+pub mod governance;
 
 // 重导出所有公共类型
 pub use actions::*;
@@ -40,6 +41,7 @@ pub use narrative::*;
 pub use prompt_template::*;
 pub use rules::*;
 pub use world::*;
+pub use governance::*;
 
 // ============================================================================
 // 测试
