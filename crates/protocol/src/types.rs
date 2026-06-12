@@ -134,8 +134,8 @@ mod tests {
                     let mut attrs = std::collections::HashMap::new();
                     attrs.insert("hp".to_string(), 100);
                     attrs.insert("stamina".to_string(), 100);
-                    attrs.insert("hunger".to_string(), 50);
-                    attrs.insert("thirst".to_string(), 50);
+                    attrs.insert("satiation".to_string(), 50);
+                    attrs.insert("hydration".to_string(), 50);
                     attrs
                 },
                 derived_attributes: std::collections::HashMap::new(),
