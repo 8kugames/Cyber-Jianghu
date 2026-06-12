@@ -1,0 +1,67 @@
+version: "0.0.1"
+
+data:
+  souls:
+    fuxi:
+      display_name: "伏羲"
+      governance_role: "evolution"
+      review_policy:
+        hard_approve_if: []
+        hard_reject_if: []
+        soft_concern_if: []
+      source_bindings:
+        capability_manifest: true
+      system_prompt_template: "fuxi_review_prompt"
+
+    shennong:
+      display_name: "神农"
+      governance_role: "resource"
+      review_policy:
+        hard_approve_if:
+          - metric: "agent_survival_rate_24h"
+            operator: ">"
+            threshold: 0.7
+            reason: "Agent 存活率健康"
+        hard_reject_if:
+          - metric: "agent_survival_rate_24h"
+            operator: "<"
+            threshold: 0.3
+            reason: "生存压力已饱和"
+      source_bindings:
+        resource_indicators: true
+        survival_indicators: true
+      system_prompt_template: "shennong_review_prompt"
+
+    xuanyuan:
+      display_name: "轩辕"
+      governance_role: "order"
+      review_policy:
+        hard_approve_if: []
+        hard_reject_if:
+          - effect_ref_matches: ["instant_kill", "force_trade"]
+            reason: "伦理红线"
+      source_bindings:
+        order_indicators: true
+        ethics_indicators: true
+      system_prompt_template: "xuanyuan_review_prompt"
+
+  topic_to_soul:
+    evolution: "fuxi"
+    resource: "shennong"
+    order: "xuanyuan"
+
+  topic_priority:
+    evolution: 0
+    resource: 1
+    order: 2
+
+  classifier:
+    confidence_threshold: 0.6
+    default_fallback_topic: "evolution"
+
+  review:
+    timeout_secs: 1800
+    dissent_log_threshold: 3
+    approve_threshold: 2
+    reject_threshold: 2
+    poll_interval_secs: 60

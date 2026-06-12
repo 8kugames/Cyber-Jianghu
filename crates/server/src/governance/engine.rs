@@ -1,0 +1,515 @@
+use std::collections::HashMap;
+use std::path::Path;
+
+use anyhow::{Context, Result};
+use tracing::{error, info, warn};
+
+use cyber_jianghu_protocol::types::governance::{GovernanceTopic, ProposedActionIR};
+
+use super::proposal_store::{PendingGroup, ProposalStore};
+use super::types::{
+    PolicyRule, ProposalEvidence, ProposalStatus, ReviewVerdict, SoulsConfig, VoteChoice,
+};
+
+// ---------------------------------------------------------------------------
+// SourceProvider trait
+// ---------------------------------------------------------------------------
+
+/// 数据源提供者 — 为 Soul 审议提供外部指标数据
+#[async_trait::async_trait]
+pub trait SourceProvider: Send + Sync {
+    /// 获取指定 metric 的当前值
+    async fn get_metric(&self, metric: &str) -> Result<f64>;
+
+    /// 检查 effect_ref 是否匹配
+    fn match_effect_ref(&self, effect_refs: &[String], pattern: &str) -> bool;
+}
+
+// ---------------------------------------------------------------------------
+// NullSourceProvider
+// ---------------------------------------------------------------------------
+
+/// 空实现 — 所有 metric 返回 0.0，effect_ref 精确匹配
+pub struct NullSourceProvider;
+
+#[async_trait::async_trait]
+impl SourceProvider for NullSourceProvider {
+    async fn get_metric(&self, _metric: &str) -> Result<f64> {
+        Ok(0.0)
+    }
+
+    fn match_effect_ref(&self, effect_refs: &[String], pattern: &str) -> bool {
+        effect_refs.iter().any(|e| e == pattern)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SoulReviewEngine
+// ---------------------------------------------------------------------------
+
+pub struct SoulReviewEngine {
+    config: SoulsConfig,
+    sources: HashMap<String, Box<dyn SourceProvider>>,
+}
+
+impl SoulReviewEngine {
+    pub fn load(config_dir: &Path) -> Result<Self> {
+        let yaml_path = config_dir.join("souls.yaml");
+        let yaml_content = std::fs::read_to_string(&yaml_path).context("读取 souls.yaml 失败")?;
+        let outer: serde_json::Value =
+            serde_yaml::from_str(&yaml_content).context("解析 souls.yaml 失败")?;
+        let data = outer.get("data").context("souls.yaml 缺少 data 字段")?;
+        let config: SoulsConfig =
+            serde_json::from_value(data.clone()).context("反序列化 SoulsConfig 失败")?;
+        info!(
+            "SoulReviewEngine 加载完成: {} souls, {} topic mappings",
+            config.souls.len(),
+            config.topic_to_soul.len()
+        );
+        Ok(Self {
+            config,
+            sources: HashMap::new(),
+        })
+    }
+
+    pub fn register_source(&mut self, soul_id: &str, provider: Box<dyn SourceProvider>) {
+        self.sources.insert(soul_id.to_string(), provider);
+    }
+
+    pub fn config(&self) -> &SoulsConfig {
+        &self.config
+    }
+
+    // ----- routing -----
+
+    /// 根据 governance topic 路由到对应的 primary soul
+    /// 读取 config 中的 topic_to_soul 映射，不硬编码任何 soul 名称
+    pub fn route_primary_soul(&self, topic: &GovernanceTopic) -> Option<String> {
+        let topic_key = serde_json::to_value(topic)
+            .ok()
+            .and_then(|v| v.as_str().map(String::from));
+        topic_key.and_then(|key| self.config.topic_to_soul.get(&key).cloned())
+    }
+
+    /// 根据 topic 列表路由，返回优先级最高的 soul
+    pub fn route_for_topics(&self, topics: &[GovernanceTopic]) -> Option<String> {
+        let mut best: Option<(u8, String)> = None;
+        for topic in topics {
+            if let Some(soul) = self.route_primary_soul(topic) {
+                let priority = self
+                    .config
+                    .topic_priority
+                    .get(
+                        &serde_json::to_value(topic)
+                            .ok()
+                            .and_then(|v| v.as_str().map(String::from))
+                            .unwrap_or_default(),
+                    )
+                    .copied()
+                    .unwrap_or(u8::MAX);
+                if best.as_ref().is_none_or(|(p, _)| priority < *p) {
+                    best = Some((priority, soul));
+                }
+            }
+        }
+        best.map(|(_, soul)| soul)
+    }
+
+    // ----- policy evaluation -----
+
+    /// 评估单条 PolicyRule
+    async fn evaluate_rule(
+        &self,
+        rule: &PolicyRule,
+        soul_id: &str,
+        evidence: &ProposalEvidence,
+    ) -> bool {
+        match rule {
+            PolicyRule::Metric {
+                metric,
+                operator,
+                threshold,
+                ..
+            } => {
+                let provider = self.sources.get(soul_id);
+                let value = match provider {
+                    Some(p) => p.get_metric(metric).await.unwrap_or(0.0),
+                    None => {
+                        warn!(
+                            "Soul {} 没有注册 metric source，metric {} 返回默认值 0.0",
+                            soul_id, metric
+                        );
+                        0.0
+                    }
+                };
+                match operator.as_str() {
+                    ">" => value > *threshold,
+                    ">=" => value >= *threshold,
+                    "<" => value < *threshold,
+                    "<=" => value <= *threshold,
+                    "==" | "=" => (value - *threshold).abs() < f64::EPSILON,
+                    "!=" => (value - *threshold).abs() >= f64::EPSILON,
+                    _ => {
+                        warn!("未知 operator: {}", operator);
+                        false
+                    }
+                }
+            }
+            PolicyRule::EffectRef {
+                effect_ref_matches, ..
+            } => {
+                let provider = self.sources.get(soul_id);
+                effect_ref_matches.iter().any(|pattern| match provider {
+                    Some(p) => p.match_effect_ref(&evidence.ir.effect_refs, pattern),
+                    None => evidence.ir.effect_refs.iter().any(|e| e == pattern),
+                })
+            }
+            PolicyRule::EffectGroup { all_effects_in } => all_effects_in
+                .iter()
+                .all(|cap| evidence.ir.effect_refs.iter().any(|e| e == cap)),
+        }
+    }
+
+    /// 对单个 soul 的完整 review（评估 hard_reject / hard_approve）
+    pub async fn review(&self, soul_id: &str, evidence: &ProposalEvidence) -> ReviewVerdict {
+        let soul_config = match self.config.souls.get(soul_id) {
+            Some(c) => c,
+            None => {
+                return ReviewVerdict {
+                    soul: soul_id.to_string(),
+                    vote: VoteChoice::Abstain,
+                    rationale: format!("Soul {} 未在配置中注册", soul_id),
+                    evidence_refs: vec![],
+                };
+            }
+        };
+
+        // 评估 hard_reject_if
+        for rule in &soul_config.review_policy.hard_reject_if {
+            if self.evaluate_rule(rule, soul_id, evidence).await {
+                let reason = match rule {
+                    PolicyRule::Metric { reason, .. } => reason.clone(),
+                    PolicyRule::EffectRef { reason, .. } => reason.clone(),
+                    PolicyRule::EffectGroup { .. } => "EffectGroup 匹配".to_string(),
+                };
+                return ReviewVerdict {
+                    soul: soul_id.to_string(),
+                    vote: VoteChoice::Reject,
+                    rationale: reason,
+                    evidence_refs: evidence.ir.effect_refs.clone(),
+                };
+            }
+        }
+
+        // 评估 hard_approve_if
+        for rule in &soul_config.review_policy.hard_approve_if {
+            if self.evaluate_rule(rule, soul_id, evidence).await {
+                let reason = match rule {
+                    PolicyRule::Metric { reason, .. } => reason.clone(),
+                    PolicyRule::EffectRef { reason, .. } => reason.clone(),
+                    PolicyRule::EffectGroup { .. } => "EffectGroup 匹配".to_string(),
+                };
+                return ReviewVerdict {
+                    soul: soul_id.to_string(),
+                    vote: VoteChoice::Approve,
+                    rationale: reason,
+                    evidence_refs: evidence.ir.effect_refs.clone(),
+                };
+            }
+        }
+
+        // 无规则命中 → Abstain（需要 LLM soft review）
+        ReviewVerdict {
+            soul: soul_id.to_string(),
+            vote: VoteChoice::Abstain,
+            rationale: "无硬性规则命中，需要 soft review".to_string(),
+            evidence_refs: vec![],
+        }
+    }
+
+    // ----- vote resolution -----
+
+    /// 根据配置阈值解析投票结果
+    pub fn resolve_votes(&self, votes: &[ReviewVerdict]) -> ProposalStatus {
+        let approve_count = votes
+            .iter()
+            .filter(|v| v.vote == VoteChoice::Approve)
+            .count() as u8;
+        let reject_count = votes
+            .iter()
+            .filter(|v| v.vote == VoteChoice::Reject)
+            .count() as u8;
+
+        if approve_count >= self.config.review.approve_threshold {
+            ProposalStatus::Approved
+        } else if reject_count >= self.config.review.reject_threshold {
+            ProposalStatus::Rejected
+        } else {
+            ProposalStatus::UnderReview
+        }
+    }
+
+    // ----- batch review -----
+
+    /// 批量审核待处理的 proposal groups
+    /// 单个 group 失败不中断整个批次
+    pub async fn review_pending(
+        &self,
+        store: &ProposalStore,
+        groups: &[PendingGroup],
+    ) -> Vec<(uuid::Uuid, ProposalStatus)> {
+        let mut results = Vec::new();
+
+        for group in groups {
+            match self.review_group(store, group).await {
+                Ok(status) => {
+                    results.push((group.id, status));
+                }
+                Err(e) => {
+                    error!("Group {} 审核失败: {:?}，跳过继续处理", group.id, e);
+                    results.push((group.id, ProposalStatus::Error));
+                }
+            }
+        }
+
+        results
+    }
+
+    /// 审核单个 proposal group
+    async fn review_group(
+        &self,
+        store: &ProposalStore,
+        group: &PendingGroup,
+    ) -> Result<ProposalStatus> {
+        let group_full = store
+            .get_group(group.id)
+            .await
+            .context("获取 group 详情失败")?
+            .context("Group 不存在")?;
+
+        // 确定 primary soul
+        let primary_soul = match &group_full.primary_soul {
+            Some(s) => s.clone(),
+            None => match self.route_for_topics(&group_full.governance_topics) {
+                Some(soul) => soul,
+                None => {
+                    warn!("Group {} 无法路由到 primary soul，使用 fallback", group.id);
+                    self.config.classifier.default_fallback_topic.clone()
+                }
+            },
+        };
+
+        // 收集投票
+        let mut votes: Vec<ReviewVerdict> = Vec::new();
+
+        // Primary soul 评估
+        for proposal_id in &group_full.proposal_ids {
+            let evidence = self.build_evidence_from_group(store, *proposal_id).await?;
+            let verdict = self.review(&primary_soul, &evidence).await;
+            if !matches!(verdict.vote, VoteChoice::Abstain) {
+                votes.push(verdict);
+            }
+        }
+
+        // Co-reviewers 评估
+        for co_soul in &group_full.co_reviewers {
+            for proposal_id in &group_full.proposal_ids {
+                let evidence = self.build_evidence_from_group(store, *proposal_id).await?;
+                let verdict = self.review(co_soul, &evidence).await;
+                if !matches!(verdict.vote, VoteChoice::Abstain) {
+                    votes.push(verdict);
+                }
+            }
+        }
+
+        let status = self.resolve_votes(&votes);
+
+        // 检查 dissent log 阈值
+        let dissent_count = group_full.dissent_log.len() as u32;
+        if dissent_count >= self.config.review.dissent_log_threshold {
+            return Ok(ProposalStatus::EscalatedAdmin);
+        }
+
+        // 更新 group 状态
+        store
+            .update_group_status(group.id, status)
+            .await
+            .context("更新 group 状态失败")?;
+
+        Ok(status)
+    }
+
+    /// 从 proposal store 构建 evidence（简化版，实际应从 proposal 表读取）
+    async fn build_evidence_from_group(
+        &self,
+        _store: &ProposalStore,
+        _proposal_id: uuid::Uuid,
+    ) -> Result<ProposalEvidence> {
+        // TODO: 从 ProposalStore 读取完整的 proposal evidence
+        // 目前返回空 evidence，实际实现需要 store.get_proposal(proposal_id)
+        Ok(ProposalEvidence {
+            agent_id: uuid::Uuid::nil(),
+            tick_id: 0,
+            proposed_action_type: String::new(),
+            ir: ProposedActionIR {
+                actor_arity: 1,
+                target_arity: "zero_to_many".into(),
+                tick_span: 0,
+                phase_count: 1,
+                protocol_kind: "none".into(),
+                state_transition_count: 1,
+                effect_refs: vec![],
+                requirement_refs: vec![],
+            },
+            governance_topics: vec![],
+            topic_confidence: HashMap::new(),
+            rationale: String::new(),
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::governance::types::{
+        ReviewPolicy, SoulConfig, SoulsClassifierConfig, SoulsReviewConfig,
+    };
+
+    fn test_souls_config() -> SoulsConfig {
+        let mut souls = HashMap::new();
+        souls.insert(
+            "fuxi".to_string(),
+            SoulConfig {
+                display_name: "伏羲".to_string(),
+                governance_role: "evolution".to_string(),
+                review_policy: ReviewPolicy::default(),
+                source_bindings: HashMap::new(),
+                system_prompt_template: "fuxi_review_prompt".to_string(),
+            },
+        );
+        souls.insert(
+            "shennong".to_string(),
+            SoulConfig {
+                display_name: "神农".to_string(),
+                governance_role: "resource".to_string(),
+                review_policy: ReviewPolicy::default(),
+                source_bindings: HashMap::new(),
+                system_prompt_template: "shennong_review_prompt".to_string(),
+            },
+        );
+
+        SoulsConfig {
+            souls,
+            topic_to_soul: [
+                ("evolution".to_string(), "fuxi".to_string()),
+                ("resource".to_string(), "shennong".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            topic_priority: [("evolution".to_string(), 0), ("resource".to_string(), 1)]
+                .into_iter()
+                .collect(),
+            classifier: SoulsClassifierConfig {
+                confidence_threshold: 0.6,
+                default_fallback_topic: "evolution".to_string(),
+            },
+            review: SoulsReviewConfig {
+                timeout_secs: 1800,
+                dissent_log_threshold: 3,
+                approve_threshold: 2,
+                reject_threshold: 2,
+                poll_interval_secs: 60,
+            },
+        }
+    }
+
+    fn test_engine() -> SoulReviewEngine {
+        SoulReviewEngine {
+            config: test_souls_config(),
+            sources: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_route_primary_soul() {
+        let engine = test_engine();
+        assert_eq!(
+            engine.route_primary_soul(&GovernanceTopic::Evolution),
+            Some("fuxi".to_string())
+        );
+        assert_eq!(
+            engine.route_primary_soul(&GovernanceTopic::Resource),
+            Some("shennong".to_string())
+        );
+    }
+
+    #[test]
+    fn test_route_for_topics() {
+        let engine = test_engine();
+        let result =
+            engine.route_for_topics(&[GovernanceTopic::Resource, GovernanceTopic::Evolution]);
+        assert_eq!(result, Some("fuxi".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_votes_approved() {
+        let engine = test_engine();
+        let votes = vec![
+            ReviewVerdict {
+                soul: "fuxi".to_string(),
+                vote: VoteChoice::Approve,
+                rationale: String::new(),
+                evidence_refs: vec![],
+            },
+            ReviewVerdict {
+                soul: "shennong".to_string(),
+                vote: VoteChoice::Approve,
+                rationale: String::new(),
+                evidence_refs: vec![],
+            },
+        ];
+        assert_eq!(engine.resolve_votes(&votes), ProposalStatus::Approved);
+    }
+
+    #[test]
+    fn test_resolve_votes_rejected() {
+        let engine = test_engine();
+        let votes = vec![
+            ReviewVerdict {
+                soul: "fuxi".to_string(),
+                vote: VoteChoice::Reject,
+                rationale: String::new(),
+                evidence_refs: vec![],
+            },
+            ReviewVerdict {
+                soul: "shennong".to_string(),
+                vote: VoteChoice::Reject,
+                rationale: String::new(),
+                evidence_refs: vec![],
+            },
+        ];
+        assert_eq!(engine.resolve_votes(&votes), ProposalStatus::Rejected);
+    }
+
+    #[test]
+    fn test_resolve_votes_under_review() {
+        let engine = test_engine();
+        let votes = vec![ReviewVerdict {
+            soul: "fuxi".to_string(),
+            vote: VoteChoice::Approve,
+            rationale: String::new(),
+            evidence_refs: vec![],
+        }];
+        assert_eq!(engine.resolve_votes(&votes), ProposalStatus::UnderReview);
+    }
+
+    #[test]
+    fn test_resolve_votes_empty() {
+        let engine = test_engine();
+        assert_eq!(engine.resolve_votes(&[]), ProposalStatus::UnderReview);
+    }
+}
