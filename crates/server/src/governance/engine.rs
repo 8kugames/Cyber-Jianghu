@@ -416,8 +416,44 @@ impl SoulReviewEngine {
                 approve_count = approve_count,
                 total_votes = total_votes,
                 proposal_count = group_full.proposal_ids.len(),
-                "Proposal group approved — caller broadcasts ConfigUpdate"
+                "Proposal group approved — auto-evolving action configs"
             );
+
+            // Auto-evolve: 从每个 proposal 的 IR 生成 action config 并写入 actions.yaml
+            let config_dir = crate::paths::get_config_dir();
+            for proposal_id in &group_full.proposal_ids {
+                match self.build_evidence_from_group(store, *proposal_id).await {
+                    Ok(evidence) => match super::auto_evolve::generate_action_config(&evidence) {
+                        Ok((action_name, entry)) => {
+                            if let Err(e) = super::action_writer::append_action_to_yaml(
+                                &config_dir,
+                                &action_name,
+                                &entry,
+                            ) {
+                                error!(
+                                    action_name = %action_name,
+                                    error = %e,
+                                    "auto-evolve: 写入 actions.yaml 失败"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                proposal_id = %proposal_id,
+                                error = %e,
+                                "auto-evolve: 生成 action config 失败"
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        warn!(
+                            proposal_id = %proposal_id,
+                            error = %e,
+                            "auto-evolve: 获取 proposal evidence 失败"
+                        );
+                    }
+                }
+            }
         }
 
         Ok(status)
