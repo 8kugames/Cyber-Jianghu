@@ -27,7 +27,7 @@ use cyber_jianghu_protocol::DeathInfo;
 pub struct DeathNotification {
     /// 死亡Agent的ID
     pub agent_id: Uuid,
-    /// 死亡原因代码（如 "hunger", "thirst", "hp"）
+    /// 死亡原因代码（如 "satiation", "hydration", "hp"）
     pub cause: String,
     /// 死亡描述信息
     pub description: String,
@@ -62,7 +62,7 @@ impl DeathNotification {
 /// 应用生理值衰减和环境压力伤害
 ///
 /// 生理值衰减逻辑由 StatusComponent 统一处理（基于配置），包括：
-/// - 饥饿值、口渴值、体力等属性的自然变化
+/// - 饱食度、饱饮度、体力等属性的自然变化
 ///
 /// 环境压力伤害（如果启用）：
 /// - 基于当前位置的 environmental_damage 配置
@@ -385,22 +385,22 @@ mod tests {
         // 测试 AgentState 的衰减逻辑
         // 根据 PRD，白板重生初始值：HP=100, 体力=100, 饥饿=50, 口渴=50
         let mut state = AgentState::new(uuid::Uuid::new_v4(), 1);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 50);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 50);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 50);
+        assert_eq!(state.status.get("hydration").unwrap_or(0), 50);
         assert_eq!(state.status.get("stamina").unwrap_or(0), 100);
 
         // 测试配置 decay_per_tick = 0.2（累计器）→ 单 tick 不扣减
         let _ = state.apply_decay(1);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 50);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 50);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 50);
+        assert_eq!(state.status.get("hydration").unwrap_or(0), 50);
         assert_eq!(state.status.get("stamina").unwrap_or(0), 100);
 
         // 跑满 5 tick 累计器到 -1.0，扣 1
         for _ in 0..4 {
             let _ = state.apply_decay(1);
         }
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 49);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 49);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 49);
+        assert_eq!(state.status.get("hydration").unwrap_or(0), 49);
     }
 
     // ============================================================================
@@ -409,17 +409,17 @@ mod tests {
 
     /// 测试饥饿死亡时创建死亡通知
     #[test]
-    fn test_hunger_death_creates_notification() {
+    fn test_satiation_death_creates_notification() {
         crate::game_data::init_test_registry();
 
-        // 创建一个饥饿值极低的 Agent
+        // 创建一个饱食度极低的 Agent
         let mut agent = AgentState::new(Uuid::new_v4(), 1);
         agent.is_alive = true;
         agent.node_id = "test_location".to_string();
 
-        // 设置饥饿值为 0（触发死亡条件）
-        // 根据配置，hunger 的 death_condition 是 equals 0
-        agent.status.set("hunger", 0).unwrap();
+        // 设置饱食度为 0（触发死亡条件）
+        // 根据配置，satiation 的 death_condition 是 equals 0
+        agent.status.set("satiation", 0).unwrap();
 
         let tick_id = 100;
         let agents = vec![agent];
@@ -432,7 +432,7 @@ mod tests {
         assert_eq!(death_notifications.len(), 1, "应该创建一个死亡通知");
 
         let notification = &death_notifications[0];
-        assert_eq!(notification.cause, "hunger", "死亡原因应该是 hunger");
+        assert_eq!(notification.cause, "satiation", "死亡原因应该是 satiation");
         assert!(
             notification.description.contains("饥饿"),
             "描述应该包含饥饿相关文字，实际描述: {}",
@@ -454,15 +454,15 @@ mod tests {
 
     /// 测试口渴死亡时创建死亡通知
     #[test]
-    fn test_thirst_death_creates_notification() {
+    fn test_hydration_death_creates_notification() {
         crate::game_data::init_test_registry();
 
         let mut agent = AgentState::new(Uuid::new_v4(), 1);
         agent.is_alive = true;
         agent.node_id = "test_location".to_string();
 
-        // 设置口渴值为 0（触发死亡条件）
-        agent.status.set("thirst", 0).unwrap();
+        // 设置饱饮度为 0（触发死亡条件）
+        agent.status.set("hydration", 0).unwrap();
 
         let tick_id = 200;
         let agents = vec![agent];
@@ -473,7 +473,7 @@ mod tests {
         // 验证死亡通知
         assert_eq!(death_notifications.len(), 1);
         let notification = &death_notifications[0];
-        assert_eq!(notification.cause, "thirst");
+        assert_eq!(notification.cause, "hydration");
         assert!(
             notification.description.contains("脱水"),
             "描述应该包含脱水相关文字，实际描述: {}",
@@ -500,8 +500,8 @@ mod tests {
         agent.node_id = "test_location".to_string();
 
         // 设置健康值（高于死亡阈值）
-        agent.status.set("hunger", 50).unwrap();
-        agent.status.set("thirst", 50).unwrap();
+        agent.status.set("satiation", 50).unwrap();
+        agent.status.set("hydration", 50).unwrap();
 
         let agents = vec![agent];
 
@@ -518,16 +518,16 @@ mod tests {
     fn test_multiple_deaths_create_multiple_notifications() {
         crate::game_data::init_test_registry();
 
-        // 创建两个饥饿值极低的 Agent
+        // 创建两个饱食度极低的 Agent
         let mut agent1 = AgentState::new(Uuid::new_v4(), 1);
         agent1.is_alive = true;
         agent1.node_id = "location_a".to_string();
-        agent1.status.set("hunger", 0).unwrap();
+        agent1.status.set("satiation", 0).unwrap();
 
         let mut agent2 = AgentState::new(Uuid::new_v4(), 1);
         agent2.is_alive = true;
         agent2.node_id = "location_b".to_string();
-        agent2.status.set("thirst", 0).unwrap();
+        agent2.status.set("hydration", 0).unwrap();
 
         let tick_id = 300;
         let agents = vec![agent1, agent2];
@@ -550,8 +550,8 @@ mod tests {
             .iter()
             .map(|n| n.cause.as_str())
             .collect();
-        assert!(causes.contains(&"hunger"), "应该包含饥饿死亡");
-        assert!(causes.contains(&"thirst"), "应该包含口渴死亡");
+        assert!(causes.contains(&"satiation"), "应该包含饥饿死亡");
+        assert!(causes.contains(&"hydration"), "应该包含口渴死亡");
     }
 
     /// 测试已死亡的 Agent 不会再次触发死亡通知
@@ -563,7 +563,7 @@ mod tests {
         let mut agent = AgentState::new(Uuid::new_v4(), 1);
         agent.is_alive = false; // 已死亡
         agent.node_id = "test_location".to_string();
-        agent.status.set("hunger", 0).unwrap();
+        agent.status.set("satiation", 0).unwrap();
 
         let agents = vec![agent];
 

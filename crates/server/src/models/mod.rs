@@ -117,24 +117,24 @@ mod tests {
         let mut state = AgentState::new(Uuid::new_v4(), 1);
 
         // 根据 PRD，白板重生初始值：HP=100, 体力=100, 饥饿=50, 口渴=50
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 50);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 50);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 50);
+        assert_eq!(state.status.get("hydration").unwrap_or(0), 50);
         assert_eq!(state.status.get("hp").unwrap_or(0), 100);
         assert!(state.is_alive);
 
-        // 测试配置 hunger/thirst decay_per_tick = 0.2
-        // 单 tick 累计器未到 1.0，hunger/thirst 保持原值
+        // 测试配置 satiation/hydration decay_per_tick = 0.2
+        // 单 tick 累计器未到 1.0，satiation/hydration 保持原值
         let _ = state.apply_decay(1);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 50);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 50);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 50);
+        assert_eq!(state.status.get("hydration").unwrap_or(0), 50);
         assert_eq!(state.status.get("stamina").unwrap_or(0), 100);
 
-        // 跑满 5 tick，累计器到 -1.0，hunger 扣 1
+        // 跑满 5 tick，累计器到 -1.0，satiation 扣 1
         for _ in 0..4 {
             let _ = state.apply_decay(1);
         }
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 49);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 49);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 49);
+        assert_eq!(state.status.get("hydration").unwrap_or(0), 49);
 
         // 持续衰减至死亡：0.2/tick → 5 tick 扣 1，49 → 0 需 ~245 tick
         for _ in 0..300 {
@@ -143,8 +143,8 @@ mod tests {
             }
             let _ = state.apply_decay(1);
         }
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 0);
-        assert!(state.status.get("thirst").unwrap_or(0) <= 1);
+        assert!(state.status.get("satiation").unwrap_or(0) <= 1);
+        assert!(state.status.get("hydration").unwrap_or(0) <= 1);
         assert!(!state.is_alive);
         assert_eq!(state.status.get("hp").unwrap_or(0), 0);
     }
@@ -155,24 +155,24 @@ mod tests {
 
         let mut state = AgentState::new(Uuid::new_v4(), 1);
 
-        // 跑满 5 tick 让 hunger/thirst 扣 1
+        // 跑满 5 tick 让 satiation/hydration 扣 1
         for _ in 0..5 {
             let _ = state.apply_decay(1);
         }
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 49);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 49);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 49);
+        assert_eq!(state.status.get("hydration").unwrap_or(0), 49);
 
-        // 恢复饥饿值
-        state.restore_attribute("hunger", 30);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 79);
+        // 恢复饱食度
+        state.restore_attribute("satiation", 30);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 79);
 
-        // 恢复口渴值
-        state.restore_attribute("thirst", 20);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 69);
+        // 恢复饱饮度
+        state.restore_attribute("hydration", 20);
+        assert_eq!(state.status.get("hydration").unwrap_or(0), 69);
 
         // 恢复到最大值
-        state.restore_attribute("hunger", 50);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 100);
+        state.restore_attribute("satiation", 50);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 100);
     }
 
     #[test]
@@ -192,8 +192,8 @@ mod tests {
         assert!(!state.is_alive);
 
         // 死亡后无法恢复
-        state.restore_attribute("hunger", 50);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 50); // 死亡状态下恢复无效
+        state.restore_attribute("satiation", 50);
+        assert_eq!(state.status.get("satiation").unwrap_or(0), 50); // 死亡状态下恢复无效
     }
 
     #[test]
@@ -313,14 +313,14 @@ mod tests {
             "stamina should be in recovering attributes"
         );
 
-        // 验证 hunger 和 thirst 在衰减列表中
+        // 验证 satiation 和 hydration 在衰减列表中
         assert!(
-            decaying.iter().any(|(name, _)| name == "hunger"),
-            "hunger should be in decaying attributes"
+            decaying.iter().any(|(name, _)| name == "satiation"),
+            "satiation should be in decaying attributes"
         );
         assert!(
-            decaying.iter().any(|(name, _)| name == "thirst"),
-            "thirst should be in decaying attributes"
+            decaying.iter().any(|(name, _)| name == "hydration"),
+            "hydration should be in decaying attributes"
         );
     }
 }

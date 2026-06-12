@@ -573,9 +573,9 @@ pub struct SeasonData {
     pub temperature_modifier: i32,
     pub resource_growth_rate: f32,
     /// 属性衰减/恢复修饰系数
-    /// 键为属性名称（如 "hunger", "thirst", "stamina_recovery"）
+    /// 键为属性名称（如 "satiation", "hydration", "stamina_recovery"）
     /// 值为修饰系数（1.0 = 无修饰，>1.0 = 增加，<1.0 = 减少）
-    /// 例如：{"hunger": 1.5, "thirst": 1.5} 表示冬季饥饿/口渴消耗增加 50%
+    /// 例如：{"satiation": 1.5, "hydration": 1.5} 表示冬季饱食度/饱饮度消耗增加 50%
     #[serde(default)]
     pub attribute_modifiers: std::collections::HashMap<String, f32>,
     /// 天气池：该季节可能出现的天气类型列表
