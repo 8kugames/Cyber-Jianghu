@@ -116,7 +116,7 @@ impl super::CognitiveEngine {
         };
 
         let tool_calling_guidance = if use_tool_calling {
-            let max_rounds = self.llm_param("max_tool_rounds", 2);
+            let max_rounds = self.llm_param("max_tool_rounds", 5);
             format!(
                 "## 输出格式\n\
                 直接输出以下 JSON，不要在 JSON 前输出任何推理或思考文本。你的整个输出必须是且仅是一个 JSON 对象。\n\
@@ -459,7 +459,11 @@ impl super::CognitiveEngine {
             } else {
                 action.name.clone()
             };
-            s.push_str(&format!("- {}\n", display_name));
+            if action.description.is_empty() {
+                s.push_str(&format!("- {}\n", display_name));
+            } else {
+                s.push_str(&format!("- {}: {}\n", display_name, action.description));
+            }
         }
         s
     }
