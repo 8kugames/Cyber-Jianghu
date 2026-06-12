@@ -4,6 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use cyber_jianghu_protocol::types::governance::{GovernanceTopic, ProposedActionIR};
 
+/// 审议角色
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewRole {
+    Primary,
+    CoReviewer,
+}
+
 /// 提案组状态机
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -116,6 +123,8 @@ pub enum PolicyRule {
         effect_ref_matches: Vec<String>,
         #[serde(default)]
         reason: String,
+        #[serde(default)]
+        requires: Vec<String>,
     },
     EffectGroup {
         all_effects_in: Vec<String>,

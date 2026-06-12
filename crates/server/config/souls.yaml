@@ -27,6 +27,11 @@ data:
             operator: "<"
             threshold: 0.3
             reason: "生存压力已饱和"
+        soft_concern_if:
+          - metric: "resource_yield_rate"
+            operator: "<"
+            threshold: 0.5
+            reason: "资源产出低迷，谨慎评估新能力的资源消耗"
       source_bindings:
         resource_indicators: true
         survival_indicators: true
@@ -40,6 +45,10 @@ data:
         hard_reject_if:
           - effect_ref_matches: ["instant_kill", "force_trade"]
             reason: "伦理红线"
+        soft_concern_if:
+          - effect_ref_matches: ["combat.*"]
+            reason: "战斗能力需伦理审查"
+            requires: []
       source_bindings:
         order_indicators: true
         ethics_indicators: true
