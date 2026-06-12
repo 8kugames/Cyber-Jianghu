@@ -21,8 +21,8 @@ pub enum ProposalStatus {
 
 impl std::fmt::Display for ProposalStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = serde_json::to_value(self)
-            .and_then(|v| Ok(v.as_str().unwrap_or("unknown").to_string()))
+          let s = serde_json::to_value(self)
+            .map(|v| v.as_str().unwrap_or("unknown").to_string())
             .unwrap_or_else(|_| format!("{:?}", self).to_lowercase());
         write!(f, "{}", s)
     }
