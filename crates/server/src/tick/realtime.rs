@@ -24,6 +24,7 @@ use crate::dialogue::DialogueManager;
 use crate::game_data::GameDataCache;
 use crate::game_data::registry::{ActionRegistry, ItemRegistry};
 use crate::game_data::types::actions::Transmission;
+use crate::governance::ServerGovernanceMapper;
 use crate::models::{AgentState, WorldEvent, WorldEventType};
 use crate::state::AgentStateCache;
 use crate::tick::decay;
@@ -294,6 +295,7 @@ impl IntentWorker {
             true,
             None,
             Some(action_type.clone()),
+            None,
         )
         .await;
 
@@ -421,6 +423,7 @@ impl IntentWorker {
             true,
             None,
             Some(intent.action_type.to_string()),
+            None,
         )
         .await;
 
@@ -583,6 +586,7 @@ impl IntentWorker {
         success: bool,
         error: Option<String>,
         state_change_summary: Option<String>,
+        governance_code: Option<cyber_jianghu_protocol::GovernanceCode>,
     ) {
         let msg = cyber_jianghu_protocol::ServerMessage::ExecutionResult {
             tick_id,
@@ -590,6 +594,7 @@ impl IntentWorker {
             success,
             error,
             state_change_summary,
+            governance_code,
         };
         if let Err(e) = super::send_to_agent(
             agent_id,
@@ -615,6 +620,7 @@ impl IntentWorker {
         message: &str,
         tick_id: i64,
     ) {
+        let governance_code = ServerGovernanceMapper::map_from_error(message);
         self.send_execution_result(
             agent_id,
             intent_id,
@@ -622,6 +628,7 @@ impl IntentWorker {
             false,
             Some(message.to_string()),
             None,
+            Some(governance_code),
         )
         .await;
     }
@@ -857,7 +864,14 @@ impl IntentWorker {
                 let survival_ticks = birth_tick.map(|bt| tick_id - bt).unwrap_or(-1);
                 info!(
                     "[death] agent={} cause={} tick={} hp={} satiation={} hydration={} sanity={} survival_ticks={}",
-                    agent_id, notif.cause, tick_id, hp, satiation, hydration, sanity, survival_ticks
+                    agent_id,
+                    notif.cause,
+                    tick_id,
+                    hp,
+                    satiation,
+                    hydration,
+                    sanity,
+                    survival_ticks
                 );
                 Some(serde_json::json!({
                     "attributes": {

@@ -29,6 +29,7 @@ use crate::dialogue::DialogueResponse;
 use crate::game_data::registry::ActionRegistry;
 use crate::game_data::registry::ItemRegistry;
 use crate::game_data::types::actions::Transmission;
+use crate::governance::ServerGovernanceMapper;
 use crate::inventory::InventoryManager;
 use crate::models::Intent;
 use cyber_jianghu_protocol::{
@@ -958,12 +959,14 @@ async fn handle_intent(
 
     // Handler 层拒绝时发送 ExecutionResult 给 agent（让 OutcomeMemory 记录失败）
     let reject_and_notify = |err_msg: String| async {
+        let governance_code = ServerGovernanceMapper::map_from_error(&err_msg);
         let msg = cyber_jianghu_protocol::ServerMessage::ExecutionResult {
             tick_id,
             intent_id,
             success: false,
             error: Some(err_msg.clone()),
             state_change_summary: None,
+            governance_code: Some(governance_code),
         };
         let _ = crate::tick::send_to_agent(
             agent_id,

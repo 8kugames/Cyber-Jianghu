@@ -74,6 +74,7 @@ pub struct ExecutionResultData {
     pub success: bool,
     pub error: Option<String>,
     pub state_change_summary: Option<String>,
+    pub governance_code: Option<cyber_jianghu_protocol::GovernanceCode>,
 }
 
 /// 技能配置更新回调类型
@@ -941,6 +942,7 @@ async fn websocket_background_task(
                                 success,
                                 error,
                                 state_change_summary,
+                                governance_code,
                             }) => {
                                 debug!(
                                     "Background: ExecutionResult tick={}, intent={}, success={}",
@@ -953,6 +955,7 @@ async fn websocket_background_task(
                                         success,
                                         error: error.clone(),
                                         state_change_summary: state_change_summary.clone(),
+                                        governance_code,
                                     });
                                 }
                             }
