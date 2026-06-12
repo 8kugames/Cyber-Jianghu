@@ -195,7 +195,6 @@ impl SoulCycleRecorder {
         layer2: Option<&str>,
         layer3: Option<&str>,
         reason: Option<&str>,
-        _narrative: Option<&str>,
     ) {
         let conn = self
             .conn
@@ -664,7 +663,6 @@ mod tests {
                 Some("物品存在"),
                 None,
                 None,
-                None,
             )
             .await;
         let records = recorder.get_by_tick(1).await;
@@ -688,7 +686,6 @@ mod tests {
                 None,
                 None,
                 Some("意图不合理"),
-                None,
             )
             .await;
         let records = recorder.get_by_tick(1).await;

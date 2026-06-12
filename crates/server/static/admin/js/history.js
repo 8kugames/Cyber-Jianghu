@@ -401,9 +401,6 @@ function renderExpTable() {
             const renhunHtml = renderRenhunCell(cycles, e);
             const tianhunHtml = renderTianhunCell(cycles, e);
             const dihunHtml = renderDihunCell(cycles, e);
-            const narrativeHtml = e.narrative
-                ? escapeHtml(e.narrative)
-                : '<span style="color:var(--text-subtle)">-</span>';
 
             return (
                 `<tr>` +
@@ -414,7 +411,6 @@ function renderExpTable() {
                 `<td class="soul-cell"><div class="soul-cell-inner">${renhunHtml}</div></td>` +
                 `<td class="soul-cell"><div class="soul-cell-inner">${tianhunHtml}</div></td>` +
                 `<td class="soul-cell"><div class="soul-cell-inner">${dihunHtml}</div></td>` +
-                `<td class="narrative-cell"><div class="narrative-cell-inner">${narrativeHtml}</div></td>` +
                 `<td>${resultBadge}</td>` +
                 `<td class="mono-text">${escapeHtml(timeStr)}</td>` +
                 `</tr>`
@@ -462,6 +458,7 @@ function renderTianhunCell(cycles, entry) {
             html += `</div>`;
         }
         if (th.reason) html += `<div class="exp-meta-text" style="color:var(--text-secondary);">${escapeHtml(th.reason)}</div>`;
+        if (th.narrative) html += `<div class="exp-meta-text" style="color:var(--text-subtle);font-size:11px;">[上轮回顾] ${escapeHtml(th.narrative)}</div>`;
     });
     return html || "-";
 }

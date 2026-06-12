@@ -155,10 +155,6 @@ pub struct Intent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reflector_thought: Option<String>,
 
-    /// 叙事化描述（ReflectorSoul 生成的经历描述）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub narrative: Option<String>,
-
     /// 混沌行为标记（前端据此渲染"陷入混乱"徽章）
     ///
     /// None = 正常决策；Some = 混沌降级行为
@@ -215,7 +211,6 @@ impl Intent {
             action_data,
             priority: 5,
             reflector_thought: None,
-            narrative: None,
             chaos_marker: None,
             dream_marker: None,
             already_broadcast: false,
@@ -241,7 +236,6 @@ impl Intent {
             action_data,
             priority: 5,
             reflector_thought: None,
-            narrative: None,
             chaos_marker: None,
             dream_marker: None,
             already_broadcast: false,
@@ -259,12 +253,6 @@ impl Intent {
     /// 设置反思之魂审查意见
     pub fn with_reflector_thought(mut self, thought: String) -> Self {
         self.reflector_thought = Some(thought);
-        self
-    }
-
-    /// 设置叙事化描述
-    pub fn with_narrative(mut self, narrative: String) -> Self {
-        self.narrative = Some(narrative);
         self
     }
 

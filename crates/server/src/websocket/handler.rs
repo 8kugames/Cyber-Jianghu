@@ -1121,7 +1121,6 @@ async fn handle_intent(
         action_data: action_data.clone(),
         priority,
         reflector_thought: None,
-        narrative: None,
         chaos_marker: None,
         dream_marker: None,
         already_broadcast: false,

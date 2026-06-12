@@ -723,7 +723,7 @@ function renderServerSoulInline(label, data, type) {
       html += '<div class="soul-reason">' + escapeHtml(data.reason) + "</div>";
     if (data.narrative)
       html +=
-        '<div class="soul-narrative">' + escapeHtml(data.narrative) + "</div>";
+        '<div class="soul-narrative"><span style="color:var(--text-subtle);font-size:11px;">[上轮回顾]</span> ' + escapeHtml(data.narrative) + "</div>";
   } else if (type === "action") {
     var pipelineActions = data.pipeline_actions;
     if (pipelineActions && pipelineActions.length > 0) {

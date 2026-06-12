@@ -141,7 +141,6 @@ impl super::super::Agent {
             let mut approved_intents = Vec::new();
             let mut batch_rejection: Option<String> = None;
             let mut batch_layers: Vec<crate::soul::reflector::LayerResult> = Vec::new();
-            let mut batch_narrative: Option<String> = None;
 
             // multi-intent pipeline: primary + subsequent intents + chaos
             let max_per_tick = _max_intents;
@@ -256,7 +255,7 @@ impl super::super::Agent {
                     crate::soul::reflector::PipelineValidationResult::Approved {
                         intent: approved,
                         layers,
-                        narrative,
+                        narrative: _,
                     } => {
                         // 审查通过后推入 summary window（validated=true）
                         if let Some(ref chain) = cognitive_chain
@@ -284,7 +283,6 @@ impl super::super::Agent {
                             }
                         }
                         batch_layers = layers;
-                        batch_narrative = narrative;
                         approved_intents.push(approved);
                     }
                     crate::soul::reflector::PipelineValidationResult::Rejected {
@@ -326,7 +324,7 @@ impl super::super::Agent {
                                         crate::soul::reflector::PipelineValidationResult::Approved {
                                             intent: approved,
                                             layers: l2,
-                                            narrative: n2,
+                                            narrative: _,
                                         } => {
                                             // self-correct 审查通过后推入 summary window
                                             if let Some(ref chain) = cognitive_chain
@@ -335,7 +333,6 @@ impl super::super::Agent {
                                                 engine.push_summary_to_window(chain, &approved, true);
                                             }
                                             batch_layers = l2;
-                                            batch_narrative = n2;
                                             approved_intents.push(approved);
                                         }
                                         crate::soul::reflector::PipelineValidationResult::Rejected {
@@ -414,7 +411,6 @@ impl super::super::Agent {
                             layer2.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             layer3.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             None,
-                            batch_narrative.as_deref(),
                         )
                         .await;
                     let pipeline = Self::assemble_pipeline(approved_intents.clone());
@@ -465,7 +461,6 @@ impl super::super::Agent {
                     let layer1 = batch_layers.iter().find(|l| l.layer == "layer1");
                     let layer2 = batch_layers.iter().find(|l| l.layer == "layer2");
                     let layer3 = batch_layers.iter().find(|l| l.layer == "layer3");
-                    let narrated = super::super::Agent::narrativize_rejection(&reason);
                     recorder
                         .record_tianhun(
                             world_state.tick_id,
@@ -475,7 +470,6 @@ impl super::super::Agent {
                             layer2.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             layer3.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             Some(&reason),
-                            Some(&narrated),
                         )
                         .await;
                 }

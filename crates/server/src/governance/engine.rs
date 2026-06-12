@@ -184,7 +184,12 @@ impl SoulReviewEngine {
     }
 
     /// 对单个 soul 的完整 review（评估 hard_reject / hard_approve / soft_concern / LLM soft review）
-    pub async fn review(&self, soul_id: &str, evidence: &ProposalEvidence, role: ReviewRole) -> ReviewVerdict {
+    pub async fn review(
+        &self,
+        soul_id: &str,
+        evidence: &ProposalEvidence,
+        role: ReviewRole,
+    ) -> ReviewVerdict {
         let soul_config = match self.config.souls.get(soul_id) {
             Some(c) => c,
             None => {
@@ -246,7 +251,9 @@ impl SoulReviewEngine {
 
         // 无硬规则命中 → LLM soft review
         let role_instruction = match role {
-            ReviewRole::Primary => "你是首审官，负责深度分析提案的合理性。输出详细 rationale，引用真源指标。",
+            ReviewRole::Primary => {
+                "你是首审官，负责深度分析提案的合理性。输出详细 rationale，引用真源指标。"
+            }
             ReviewRole::CoReviewer => "你是复审官，基于各自真源对齐，输出简洁 rationale。",
         };
         let system_prompt = match build_soul_prompt(
@@ -362,7 +369,9 @@ impl SoulReviewEngine {
         // Primary soul 评估
         for proposal_id in &group_full.proposal_ids {
             let evidence = self.build_evidence_from_group(store, *proposal_id).await?;
-            let verdict = self.review(&primary_soul, &evidence, ReviewRole::Primary).await;
+            let verdict = self
+                .review(&primary_soul, &evidence, ReviewRole::Primary)
+                .await;
             if !matches!(verdict.vote, VoteChoice::Abstain) {
                 votes.push(verdict);
             }
@@ -372,7 +381,9 @@ impl SoulReviewEngine {
         for co_soul in &group_full.co_reviewers {
             for proposal_id in &group_full.proposal_ids {
                 let evidence = self.build_evidence_from_group(store, *proposal_id).await?;
-                let verdict = self.review(co_soul, &evidence, ReviewRole::CoReviewer).await;
+                let verdict = self
+                    .review(co_soul, &evidence, ReviewRole::CoReviewer)
+                    .await;
                 if !matches!(verdict.vote, VoteChoice::Abstain) {
                     votes.push(verdict);
                 }

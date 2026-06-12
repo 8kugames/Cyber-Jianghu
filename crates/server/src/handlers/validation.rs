@@ -107,7 +107,6 @@ pub async fn validate_action(
         action_data: req.data,
         priority: 5,
         reflector_thought: None,
-        narrative: None,
         chaos_marker: None,
         dream_marker: None,
         already_broadcast: false,
