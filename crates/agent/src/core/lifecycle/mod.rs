@@ -799,25 +799,25 @@ impl super::Agent {
                                                 .unwrap_or_else(|| ("unknown".to_string(), None));
 
                                             let eval = crate::soul::reflector::SelfEvaluator::evaluate(&action_type_str, governance_code);
-                                            if eval.decision == crate::soul::reflector::EvaluatorDecision::Propose {
-                                                if let Some(ref ir) = eval.ir {
-                                                    let mut decision = eval.decision.clone();
-                                                    crate::soul::reflector::check_atomicity(ir, &mut decision);
-                                                    if decision == crate::soul::reflector::EvaluatorDecision::Propose {
-                                                        let proposal = serde_json::json!({
-                                                            "agent_id": agent_id,
-                                                            "tick_id": result.tick_id,
-                                                            "proposed_action_type": action_type_str,
-                                                            "ir": ir,
-                                                            "governance_topics": eval.governance_topics,
-                                                            "topic_confidence": eval.topic_confidence,
-                                                            "rationale": eval.rationale,
-                                                        });
-                                                        let url = format!("{}/api/v1/action-evolution/propose", self.config.server.http_url);
-                                                        tokio::spawn(async move {
-                                                            let _ = reqwest::Client::new().post(&url).json(&proposal).send().await;
-                                                        });
-                                                    }
+                                            if eval.decision == crate::soul::reflector::EvaluatorDecision::Propose
+                                                && let Some(ref ir) = eval.ir
+                                            {
+                                                let mut decision = eval.decision.clone();
+                                                crate::soul::reflector::check_atomicity(ir, &mut decision);
+                                                if decision == crate::soul::reflector::EvaluatorDecision::Propose {
+                                                    let proposal = serde_json::json!({
+                                                        "agent_id": agent_id,
+                                                        "tick_id": result.tick_id,
+                                                        "proposed_action_type": action_type_str,
+                                                        "ir": ir,
+                                                        "governance_topics": eval.governance_topics,
+                                                        "topic_confidence": eval.topic_confidence,
+                                                        "rationale": eval.rationale,
+                                                    });
+                                                    let url = format!("{}/api/v1/action-evolution/propose", self.config.server.http_url);
+                                                    tokio::spawn(async move {
+                                                        let _ = reqwest::Client::new().post(&url).json(&proposal).send().await;
+                                                    });
                                                 }
                                             }
                                         }
