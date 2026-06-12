@@ -71,7 +71,9 @@ impl TopicClassifier {
         };
         ClassificationResult {
             topics: vec![fallback],
-            confidence: [(fallback, 0.5)].into_iter().collect(),
+            confidence: [(fallback, self.config.fallback_confidence)]
+                .into_iter()
+                .collect(),
             fallback_used: true,
         }
     }
@@ -92,6 +94,7 @@ mod tests {
             }],
             confidence_threshold: 0.6,
             default_fallback_topic: "evolution".to_string(),
+            fallback_confidence: 0.5,
         }
     }
 
