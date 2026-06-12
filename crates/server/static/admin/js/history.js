@@ -384,8 +384,27 @@ function renderExpTable() {
     }
     empty.style.display = "none";
     if (tableWrap) tableWrap.classList.remove("hidden");
+
+    // 构建 [上轮回顾] 跨行映射：将 tianhun.narrative 归入上一个 Tick 的行
+    // tianhun.narrative 描述的是上一轮的人魂叙事，按 agent 分组后查找上一个 tick
+    var prevNarrativeMap = {};
+    experiences.forEach((e, idx) => {
+        const metadata = e.soul_cycle_metadata || {};
+        const cycles = metadata.cycles || [];
+        const narrative = cycles.length > 0 && cycles[0].tianhun ? cycles[0].tianhun.narrative : null;
+        if (narrative) {
+            // 将 narrative 挂到同一 agent 的上一个 tick 行
+            for (var j = idx + 1; j < experiences.length; j++) {
+                if (experiences[j].agent_id === e.agent_id) {
+                    prevNarrativeMap[j] = narrative;
+                    break;
+                }
+            }
+        }
+    });
+
     tbody.innerHTML = experiences
-        .map((e) => {
+        .map((e, idx) => {
             const metadata = e.soul_cycle_metadata || {};
             const cycles = metadata.cycles || [];
             const isSuccess = e.result === "success";
@@ -398,9 +417,12 @@ function renderExpTable() {
                       })
                     : "-");
 
-            const renhunHtml = renderRenhunCell(cycles, e);
-            const tianhunHtml = renderTianhunCell(cycles, e);
+            // [上轮回顾]：从下一个 tick 的 tianhun.narrative 中获取（描述本 tick 的叙事）
+            const prevNarrative = prevNarrativeMap[idx] || null;
+
+            const renhunHtml = renderRenhunCell(cycles, e, prevNarrative);
             const dihunHtml = renderDihunCell(cycles, e);
+            const tianhunHtml = renderTianhunCell(cycles, e);
 
             return (
                 `<tr>` +
@@ -409,8 +431,8 @@ function renderExpTable() {
                 `<td>${escapeHtml(getLocationName(e.location || "-"))}</td>` +
                 `<td><span class="exp-action-badge">${escapeHtml(e.action_type_display || e.action_type || "-")}</span></td>` +
                 `<td class="soul-cell"><div class="soul-cell-inner">${renhunHtml}</div></td>` +
-                `<td class="soul-cell"><div class="soul-cell-inner">${tianhunHtml}</div></td>` +
                 `<td class="soul-cell"><div class="soul-cell-inner">${dihunHtml}</div></td>` +
+                `<td class="soul-cell"><div class="soul-cell-inner">${tianhunHtml}</div></td>` +
                 `<td>${resultBadge}</td>` +
                 `<td class="mono-text">${escapeHtml(timeStr)}</td>` +
                 `</tr>`
@@ -419,13 +441,17 @@ function renderExpTable() {
         .join("");
 }
 
-// 渲染人魂单元格
-function renderRenhunCell(cycles, entry) {
-    if (!cycles || cycles.length === 0) {
-        if (!entry.thought_log) return "-";
-        return `<div class="exp-meta-text" style="font-style:italic;color:var(--text-secondary);">${escapeHtml(entry.thought_log)}</div>`;
-    }
+// 渲染人魂单元格（含 [上轮回顾]）
+function renderRenhunCell(cycles, entry, prevNarrative) {
     let html = "";
+    // [上轮回顾]：来自下一 tick 的 tianhun.narrative，描述本 tick 的行为
+    if (prevNarrative) {
+        html += `<div class="exp-meta-text" style="color:var(--text-subtle);font-size:11px;border-bottom:1px dashed var(--border);padding-bottom:3px;margin-bottom:3px;">[上轮回顾] ${escapeHtml(prevNarrative)}</div>`;
+    }
+    if (!cycles || cycles.length === 0) {
+        if (!entry.thought_log) return html || "-";
+        return html + `<div class="exp-meta-text" style="font-style:italic;color:var(--text-secondary);">${escapeHtml(entry.thought_log)}</div>`;
+    }
     cycles.forEach((cycle, idx) => {
         if (cycles.length > 1) html += `<div class="tick-attempt-label">第${idx + 1}次</div>`;
         const rh = cycle.renhun;
@@ -458,7 +484,6 @@ function renderTianhunCell(cycles, entry) {
             html += `</div>`;
         }
         if (th.reason) html += `<div class="exp-meta-text" style="color:var(--text-secondary);">${escapeHtml(th.reason)}</div>`;
-        if (th.narrative) html += `<div class="exp-meta-text" style="color:var(--text-subtle);font-size:11px;">[上轮回顾] ${escapeHtml(th.narrative)}</div>`;
     });
     return html || "-";
 }
