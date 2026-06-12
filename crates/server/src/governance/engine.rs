@@ -4,7 +4,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use tracing::{error, info, warn};
 
-use cyber_jianghu_protocol::types::governance::{GovernanceTopic, ProposedActionIR};
+use cyber_jianghu_protocol::GovernanceTopic;
 
 use super::proposal_store::{PendingGroup, ProposalStore};
 use super::types::{
@@ -337,41 +337,34 @@ impl SoulReviewEngine {
             .context("更新 group 状态失败")?;
 
         if status == ProposalStatus::Approved {
+            let approve_count = votes
+                .iter()
+                .filter(|v| v.vote == VoteChoice::Approve)
+                .count();
+            let total_votes = votes.len();
             info!(
-                "Proposal group {} approved — broadcast TODO (Phase 1+)",
-                group.id
+                group_id = %group.id,
+                primary_soul = %primary_soul,
+                approve_count = approve_count,
+                total_votes = total_votes,
+                proposal_count = group_full.proposal_ids.len(),
+                "Proposal group approved — caller broadcasts ConfigUpdate"
             );
         }
 
         Ok(status)
     }
 
-    /// 从 proposal store 构建 evidence（简化版，实际应从 proposal 表读取）
     async fn build_evidence_from_group(
         &self,
-        _store: &ProposalStore,
-        _proposal_id: uuid::Uuid,
+        store: &ProposalStore,
+        proposal_id: uuid::Uuid,
     ) -> Result<ProposalEvidence> {
-        // TODO: 从 ProposalStore 读取完整的 proposal evidence
-        // 目前返回空 evidence，实际实现需要 store.get_proposal(proposal_id)
-        Ok(ProposalEvidence {
-            agent_id: uuid::Uuid::nil(),
-            tick_id: 0,
-            proposed_action_type: String::new(),
-            ir: ProposedActionIR {
-                actor_arity: 1,
-                target_arity: "zero_to_many".into(),
-                tick_span: 0,
-                phase_count: 1,
-                protocol_kind: "none".into(),
-                state_transition_count: 1,
-                effect_refs: vec![],
-                requirement_refs: vec![],
-            },
-            governance_topics: vec![],
-            topic_confidence: HashMap::new(),
-            rationale: String::new(),
-        })
+        store
+            .get_proposal(proposal_id)
+            .await
+            .context("获取 proposal evidence 失败")?
+            .ok_or_else(|| anyhow::anyhow!("Proposal {} not found", proposal_id))
     }
 }
 
