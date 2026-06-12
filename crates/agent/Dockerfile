@@ -59,6 +59,8 @@ COPY crates/embedding/src ./crates/embedding/src
 COPY crates/agent/src ./crates/agent/src
 
 # 构建（使用 BuildKit 缓存挂载加速依赖）
+# CACHEBUST: 外部注入以打破 BuildKit cache mount（--no-cache 无法清除 mount cache）
+ARG CACHEBUST=1
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
