@@ -709,13 +709,12 @@ function renderServerSoulInline(label, data, type) {
   } else if (type === "tianhun") {
     // 天魂：审查结果 + 三层详情 + 理由
     if (data.result) {
-      var isApproved = data.result === "approved";
+      var resultLabel = data.result === "approved" ? "通过" :
+        data.result === "chaos_fallback" ? "Chaos 兜底" : "驳回";
+      var resultClass = data.result === "approved" ? "approved" : "rejected";
       html +=
-        '<div class="soul-result ' +
-        (isApproved ? "approved" : "rejected") +
-        '">' +
-        (isApproved ? "通过" : "驳回") +
-        "</div>";
+        '<div class="soul-result ' + resultClass + '">' +
+        resultLabel + "</div>";
     }
     if (data.layers && data.layers.length > 0) {
       html += '<div class="soul-layers">';

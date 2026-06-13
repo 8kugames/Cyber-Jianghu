@@ -141,6 +141,7 @@ impl super::super::Agent {
             let mut approved_intents = Vec::new();
             let mut batch_rejection: Option<String> = None;
             let mut batch_layers: Vec<crate::soul::reflector::LayerResult> = Vec::new();
+            let mut used_chaos_fallback = false;
 
             // multi-intent pipeline: primary + subsequent intents + chaos
             let max_per_tick = _max_intents;
@@ -369,6 +370,7 @@ impl super::super::Agent {
                                                 world_state.tick_id, reason2
                                             );
                                             if opt_chaos_on_double_reject {
+used_chaos_fallback = true;
                                                 approved_intents.push(self.chaos_fallback_intent(
                                                     world_state,
                                                     agent_id,
@@ -384,6 +386,7 @@ impl super::super::Agent {
                                         "Tick {} self-correct LLM 失败 ({}): {}",
                                         world_state.tick_id, tick_llm_fail_count, e
                                     );
+                                    used_chaos_fallback = true;
                                     approved_intents.push(self.chaos_fallback_intent(
                                         world_state,
                                         agent_id,
@@ -392,6 +395,7 @@ impl super::super::Agent {
                                 }
                             }
                         } else if opt_enabled && opt_chaos_on_double_reject {
+                            used_chaos_fallback = true;
                             approved_intents.push(self.chaos_fallback_intent(
                                 world_state,
                                 agent_id,
@@ -415,15 +419,20 @@ impl super::super::Agent {
                     let layer1 = batch_layers.iter().find(|l| l.layer == "layer1");
                     let layer2 = batch_layers.iter().find(|l| l.layer == "layer2");
                     let layer3 = batch_layers.iter().find(|l| l.layer == "layer3");
+                    let tianhun_result = if used_chaos_fallback {
+                        "chaos_fallback"
+                    } else {
+                        "approved"
+                    };
                     recorder
                         .record_tianhun(
                             world_state.tick_id,
                             attempt,
-                            "approved",
+                            tianhun_result,
                             layer1.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             layer2.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             layer3.map(|l| l.detail.as_deref().unwrap_or("通过")),
-                            None,
+                            if used_chaos_fallback { Some("天魂审查未通过，使用 chaos fallback") } else { None },
                         )
                         .await;
                     let pipeline = Self::assemble_pipeline(approved_intents.clone());
