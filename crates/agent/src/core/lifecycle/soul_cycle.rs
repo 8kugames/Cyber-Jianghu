@@ -245,6 +245,31 @@ impl super::super::Agent {
                 }
             }
 
+            // 人魂决策完成，立即记录该 attempt 的人魂输出 + 地魂 tool call（天魂审查前）
+            if let Some(recorder) = self.soul_recorder().await {
+                recorder
+                    .record_renhun(
+                        world_state.tick_id,
+                        attempt,
+                        &renhun_narrative,
+                        renhun_thought_log,
+                    )
+                    .await;
+                if let Some(ref engine) = self.cognitive_engine
+                    && let Some(tool_calls) = engine.take_last_tool_call_log()
+                    && !tool_calls.is_empty()
+                    && let Ok(json) = serde_json::to_string(&tool_calls)
+                {
+                    recorder
+                        .record_earth_tool_calls(world_state.tick_id, attempt, &json)
+                        .await;
+                }
+                let world_time_str = Self::format_world_time(&world_state.world_time);
+                recorder
+                    .record_world_time(world_state.tick_id, attempt, &world_time_str)
+                    .await;
+            }
+
             // 逐 intent 审查 + self-correction（优化模式）
             for intent in all_raw_intents {
                 let intent_for_summary = intent.clone();
@@ -387,32 +412,6 @@ impl super::super::Agent {
 
             if !approved_intents.is_empty() {
                 if let Some(recorder) = self.soul_recorder().await {
-                    recorder
-                        .record_renhun(
-                            world_state.tick_id,
-                            attempt,
-                            &renhun_narrative,
-                            renhun_thought_log,
-                        )
-                        .await;
-                    // 地魂 tool calling 日志
-                    // [KNOWN-LIMIT] tool_call_log 为单槽设计（Mutex<Option<Vec>>），
-                    // 仅记录最终 approved attempt 的 tool call。
-                    // 前序 rejected attempt 的 tool call 被后续 complete_with_tools 覆写，
-                    // 不可观测。状态：已接受，暂无修改计划。
-                    if let Some(ref engine) = self.cognitive_engine
-                        && let Some(tool_calls) = engine.take_last_tool_call_log()
-                        && !tool_calls.is_empty()
-                        && let Ok(json) = serde_json::to_string(&tool_calls)
-                    {
-                        recorder
-                            .record_earth_tool_calls(world_state.tick_id, attempt, &json)
-                            .await;
-                    }
-                    let world_time_str = Self::format_world_time(&world_state.world_time);
-                    recorder
-                        .record_world_time(world_state.tick_id, attempt, &world_time_str)
-                        .await;
                     let layer1 = batch_layers.iter().find(|l| l.layer == "layer1");
                     let layer2 = batch_layers.iter().find(|l| l.layer == "layer2");
                     let layer3 = batch_layers.iter().find(|l| l.layer == "layer3");
