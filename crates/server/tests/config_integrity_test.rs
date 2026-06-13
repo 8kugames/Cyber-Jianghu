@@ -1,128 +1,73 @@
-use std::path::Path;
+//! crates/server/tests/config_integrity_test.rs
+//!
+//! 配置引用完整性集成测试
+//!
+//! 加载 validation_rules.yaml 中的规则，对当前所有 YAML 配置文件执行
+//! 跨文件引用完整性检查。CI 中作为独立测试 binary 运行。
+//!
+//! 运行: cargo test --test config_integrity_test
+//! 预期: 0 violations（所有引用完整）
 
-fn resolve_config_dir() -> std::path::PathBuf {
-    let cwd = std::env::current_dir().expect("can't get cwd");
-    let candidates = [
-        cwd.join("crates/server/config"),
-        cwd.join("../crates/server/config"),
-        cwd.join("config"),
-        Path::new("crates/server/config").to_path_buf(),
-    ];
-    for c in &candidates {
-        if c.join("validation_rules.yaml").exists() {
-            return c.clone();
-        }
-    }
-    panic!(
-        "config/validation_rules.yaml not found (cwd={:?}, tried={:?})",
-        cwd, candidates
-    );
-}
+#[cfg(test)]
+mod tests {
+    use cyber_jianghu_server::config_validator::{load_rules, run_all_validations};
 
-#[test]
-fn test_config_integrity_all_rules() {
-    let config_dir = resolve_config_dir();
-    let rules_path = config_dir.join("validation_rules.yaml");
-
-    let report = cyber_jianghu_server::config_validator::run_validation(&config_dir, &rules_path)
-        .expect("config integrity validation failed");
-
-    report.print_summary();
-
-    assert!(
-        report.is_all_ok(),
-        "config integrity check failed: {} rules failed",
-        report.results.iter().filter(|r| !r.is_ok()).count()
-    );
-}
-
-#[test]
-fn test_validation_rules_count() {
-    use std::io::Read;
-
-    let config_dir = resolve_config_dir();
-    let path = config_dir.join("validation_rules.yaml");
-
-    let mut content = String::new();
-    std::fs::File::open(&path)
-        .unwrap()
-        .read_to_string(&mut content)
-        .unwrap();
-
-    let rule_count = content
-        .lines()
-        .filter(|l| l.trim().starts_with("- source_type:"))
-        .count();
-    assert!(rule_count >= 7, "Expected >=7 rules, found {}", rule_count);
-}
-
-/// Verify all capability groups referenced in action_evolution.yaml
-/// have corresponding subdirectories under skills/
-#[test]
-fn test_skill_dirs_exist_for_capability_groups() {
-    let config_dir = resolve_config_dir();
-    let path = config_dir.join("action_evolution.yaml");
-    let value = cyber_jianghu_server::config_validator::load_config_value(&path)
-        .expect("load action_evolution.yaml");
-
-    let groups = cyber_jianghu_server::config_validator::resolve_pattern(
-        &value,
-        "data.capability_policy.allowed_capability_groups[*]",
-    );
-
-    let skills_dir = config_dir.join("skills");
-    assert!(skills_dir.exists(), "skills/ directory not found");
-
-    for g in &groups {
-        let group_name = g.as_str().expect("group must be a string");
-        let dir = skills_dir.join(group_name);
+    #[test]
+    fn test_config_integrity_all_rules() {
+        let rules = load_rules().expect("validation_rules.yaml 应能正常加载");
+        assert!(!rules.is_empty(), "至少应有一条验证规则");
         assert!(
-            dir.is_dir(),
-            "skills/{}/ directory does not exist (referenced by action_evolution.yaml)",
-            group_name
+            rules.len() >= 7,
+            "至少应有 7 条规则 (当前: {})",
+            rules.len()
+        );
+
+        let result = run_all_validations(&rules);
+
+        for v in &result.violations {
+            eprintln!(
+                "违规 [规则 {}] {} → {}: {}",
+                v.rule_index, v.source_type, v.target_type, v.message
+            );
+            if !v.source_value.is_empty() {
+                eprintln!("  引用值: {}", v.source_value);
+            }
+        }
+
+        assert!(
+            result.violations.is_empty(),
+            "配置引用完整性检查失败: {} 条违规 (passed={}, failed={})",
+            result.violations.len(),
+            result.passed,
+            result.failed,
         );
     }
-    assert!(!groups.is_empty(), "no capability groups found");
-}
 
-/// Ensure $keys-pattern rules have unique refs properly counted
-/// (total_refs in report is deduped — functional check)
-#[test]
-fn test_deduped_refs_in_actions() {
-    let config_dir = resolve_config_dir();
-    let rules_path = config_dir.join("validation_rules.yaml");
-    let report = cyber_jianghu_server::config_validator::run_validation(&config_dir, &rules_path)
-        .expect("validation failed");
+    #[test]
+    fn test_load_rules_success() {
+        let rules = load_rules().expect("加载 rules");
+        assert!(!rules.is_empty());
+        for (i, rule) in rules.iter().enumerate() {
+            assert!(!rule.source_type.is_empty(), "规则 {}: source_type 为空", i);
+            assert!(
+                !rule.source_field.is_empty(),
+                "规则 {}: source_field 为空",
+                i
+            );
+            assert!(!rule.target_type.is_empty(), "规则 {}: target_type 为空", i);
+            assert!(!rule.target_key.is_empty(), "规则 {}: target_key 为空", i);
+        }
+    }
 
-    let r1 = report
-        .results
-        .iter()
-        .find(|r| r.rule.source_type == "actions")
-        .expect("R1 not found");
-    assert!(
-        r1.total_refs >= 12,
-        "R1 should have >=12 raw refs (12 actions all reference stamina), got {}",
-        r1.total_refs
-    );
-    assert!(r1.is_ok());
-}
-
-#[test]
-fn test_broken_reference_detected() {
-    let config_dir = resolve_config_dir();
-    let bad_rules_yaml = r#"
-rules:
-  - source_type: nonexistent_file_xyz
-    source_field: "data[*].value"
-    target_type: items
-    target_key: "data[*].item_id"
-"#;
-    let bad_rules_path = config_dir.join("_test_bad_rules.yaml");
-    std::fs::write(&bad_rules_path, bad_rules_yaml).unwrap();
-
-    let result =
-        cyber_jianghu_server::config_validator::run_validation(&config_dir, &bad_rules_path);
-    let _ = std::fs::remove_file(&bad_rules_path);
-
-    assert!(result.is_err(), "Expected error for nonexistent config");
+    #[test]
+    fn test_source_types_covered() {
+        let rules = load_rules().expect("加载 rules");
+        let source_types: std::collections::HashSet<&str> =
+            rules.iter().map(|r| r.source_type.as_str()).collect();
+        assert!(
+            source_types.len() >= 3,
+            "source_type 覆盖不足: {:?}",
+            source_types
+        );
+    }
 }

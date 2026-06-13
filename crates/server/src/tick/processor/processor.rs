@@ -106,7 +106,7 @@ impl StateProcessor {
                     Some(intent.intent_id),
                 )
             }
-            Ok(()) => executor.execute(&resolved_intent, &mut agent_state, all_states),
+            Ok(parsed) => executor.execute(&resolved_intent, &parsed, &mut agent_state, all_states),
         };
 
         let execution_failed = !result.success;
@@ -204,6 +204,19 @@ impl StateProcessor {
             events.truncate(events_len_before);
         }
 
+        // P0-2: Schema 校验（warning 模式，不阻断执行）
+        let schema_violations = crate::actions::validate_action_data_schema(
+            intent.action_type.as_str(),
+            &intent.action_data,
+        );
+        let soul_cycle_metadata = if schema_violations.is_empty() {
+            None
+        } else {
+            Some(serde_json::json!({
+                "schema_violations": schema_violations,
+            }))
+        };
+
         // 单条 Action log
         let action_type = ActionType::new(intent.action_type.as_str());
         let action_log = AgentAction {
@@ -225,7 +238,7 @@ impl StateProcessor {
             thought_log: intent.thought_log.clone(),
             reflector_thought: intent.reflector_thought.clone(),
             narrative: None,
-            soul_cycle_metadata: None,
+            soul_cycle_metadata,
             chaos_marker: intent
                 .chaos_marker
                 .as_ref()
