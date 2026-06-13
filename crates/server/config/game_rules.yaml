@@ -288,7 +288,7 @@ data:
   lesson:
     threshold: 3
     max_broadcast: 5
-      cause_advice_map:
+    cause_advice_map:
       satiation:
         label: "饥饿"
         advice: "请留意饱食度，及时进食"
