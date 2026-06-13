@@ -385,6 +385,8 @@ pub struct DirectLlmClient {
     earth_soul_config: Option<crate::soul::earth::config::EarthSoulConfig>,
     /// 最近一次 LLM 调用的 reasoning_content（DeepSeek 等模型需要回传）
     last_reasoning_content: std::sync::Mutex<Option<String>>,
+    /// 最近一次 tool loop 的 tool call 日志
+    last_tool_call_log: std::sync::Mutex<Option<Vec<cyber_jianghu_protocol::EarthToolCall>>>,
     /// 上一次请求的 system_hash（用于检测 prefix cache 失效）
     last_system_hash: std::sync::Mutex<Option<[u8; 32]>>,
     /// 共享 circuit-breaker：由 FallbackLlmClient 注入，保证
@@ -398,6 +400,7 @@ impl Clone for DirectLlmClient {
             config: self.config.clone(),
             earth_soul_config: self.earth_soul_config.clone(),
             last_reasoning_content: std::sync::Mutex::new(None),
+            last_tool_call_log: std::sync::Mutex::new(None),
             last_system_hash: std::sync::Mutex::new(None),
             breaker: self.breaker.clone(),
         }
@@ -417,6 +420,7 @@ impl DirectLlmClient {
             config,
             earth_soul_config: None,
             last_reasoning_content: std::sync::Mutex::new(None),
+            last_tool_call_log: std::sync::Mutex::new(None),
             last_system_hash: std::sync::Mutex::new(None),
             breaker: None,
         })
@@ -469,9 +473,24 @@ impl DirectLlmClient {
             .and_then(|mut g| g.take())
     }
 
+    pub fn take_last_tool_call_log(&self) -> Option<Vec<cyber_jianghu_protocol::EarthToolCall>> {
+        self.last_tool_call_log
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
+    }
+
     fn save_reasoning_content(&self, rc: Option<String>) {
         if let Ok(mut g) = self.last_reasoning_content.lock() {
             *g = rc;
+        }
+    }
+
+    fn save_tool_call_log(&self, log: Vec<cyber_jianghu_protocol::EarthToolCall>) {
+        if !log.is_empty()
+            && let Ok(mut g) = self.last_tool_call_log.lock()
+        {
+            *g = Some(log);
         }
     }
 
@@ -1431,7 +1450,15 @@ impl LlmClient for DirectLlmClient {
         )
         .await?;
         self.save_reasoning_content(result.reasoning_content);
+        self.save_tool_call_log(result.tool_call_log);
         Ok(result.content)
+    }
+
+    fn take_last_tool_call_log(&self) -> Option<Vec<cyber_jianghu_protocol::EarthToolCall>> {
+        self.last_tool_call_log
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
     }
 
     async fn complete_with_conversation_and_tools(
@@ -1493,6 +1520,7 @@ impl LlmClient for DirectLlmClient {
         )
         .await?;
         self.save_reasoning_content(result.reasoning_content);
+        self.save_tool_call_log(result.tool_call_log);
         Ok(result.content)
     }
 

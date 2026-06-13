@@ -36,6 +36,8 @@ pub struct SoulCycleRecord {
     pub final_pipeline_json: Option<String>,
     pub route_type: String,
     pub world_time: Option<String>,
+    /// 地魂 tool calling 日志（JSON 序列化的 Vec<EarthToolCall>）
+    pub earth_tool_calls: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -138,6 +140,9 @@ impl SoulCycleRecorder {
             .ok();
         // idempotent migration: add final_pipeline_json column
         conn.execute_batch("ALTER TABLE soul_cycle_record ADD COLUMN final_pipeline_json TEXT")
+            .ok();
+        // idempotent migration: add earth_tool_calls column (地魂 tool calling 日志)
+        conn.execute_batch("ALTER TABLE soul_cycle_record ADD COLUMN earth_tool_calls TEXT")
             .ok();
 
         Ok(())
@@ -309,6 +314,42 @@ impl SoulCycleRecorder {
         }
     }
 
+    /// 记录地魂 tool calling 日志
+    pub async fn record_earth_tool_calls(
+        &self,
+        tick_id: i64,
+        attempt: i32,
+        tool_calls_json: &str,
+    ) {
+        let conn = self
+            .conn
+            .lock()
+            .expect("soul_cycle_recorder lock not poisoned");
+
+        let result = conn.execute(
+            "UPDATE soul_cycle_record SET earth_tool_calls = ?1 WHERE tick_id = ?2 AND attempt = ?3",
+            params![tool_calls_json, tick_id, attempt],
+        );
+
+        match result {
+            Ok(n) if n > 0 => tracing::debug!(
+                "[soul_cycle] Recorded earth_tool_calls for tick {} attempt {}",
+                tick_id,
+                attempt
+            ),
+            Ok(_) => tracing::warn!(
+                "[soul_cycle] No record found for tick {} attempt {} when recording earth_tool_calls",
+                tick_id,
+                attempt
+            ),
+            Err(e) => tracing::warn!(
+                "[soul_cycle] Failed to record earth_tool_calls for tick {}: {}",
+                tick_id,
+                e
+            ),
+        }
+    }
+
     /// 记录即时通道意图
     #[allow(clippy::too_many_arguments)]
     pub async fn record_immediate(
@@ -408,7 +449,7 @@ impl SoulCycleRecorder {
                     tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
                     tianhun_layer3_result, tianhun_reason,
                     final_intent_id, final_action_type, final_action_data, final_pipeline_json,
-                    route_type, world_time, created_at
+                    route_type, world_time, earth_tool_calls, created_at
              FROM soul_cycle_record WHERE tick_id = ?1 ORDER BY attempt ASC",
         ) {
             Ok(s) => s,
@@ -467,7 +508,7 @@ impl SoulCycleRecorder {
                     tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
                     tianhun_layer3_result, tianhun_reason,
                     final_intent_id, final_action_type, final_action_data, final_pipeline_json,
-                    route_type, world_time, created_at
+                    route_type, world_time, earth_tool_calls, created_at
              FROM soul_cycle_record WHERE tick_id IN ({}) ORDER BY tick_id DESC, attempt ASC",
             build_in_placeholders(tick_ids.len())
         );
@@ -544,7 +585,7 @@ impl SoulCycleRecorder {
     }
 
     fn row_to_record(row: &rusqlite::Row<'_>) -> SoulCycleRecord {
-        let created_at_str: String = row.get(16).unwrap_or_default();
+        let created_at_str: String = row.get(17).unwrap_or_default();
         let created_at = DateTime::parse_from_rfc3339(&created_at_str)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
@@ -566,6 +607,7 @@ impl SoulCycleRecorder {
             final_pipeline_json: row.get(13).ok(),
             route_type: row.get(14).unwrap_or_else(|_| "main".to_string()),
             world_time: row.get(15).ok(),
+            earth_tool_calls: row.get(16).ok(),
             created_at,
         }
     }

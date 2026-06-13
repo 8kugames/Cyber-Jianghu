@@ -532,6 +532,12 @@ function renderExperiences(data) {
       if (exp.thought_log)
         html += '<div class="soul-thought">' + escapeHtml(exp.thought_log) + "</div>";
       html += renderServerActionHtml(exp.action_type, exp.action_data);
+      if (exp.result) {
+        var isOk = exp.result === "success";
+        html += '<div style="margin-top:4px;"><span class="result-badge ' +
+          (isOk ? "result-success" : "result-failed") + '">' +
+          (isOk ? "执行成功" : "执行失败") + '</span></div>';
+      }
       html += "</div></div>";
 
       // 地魂（工具调用）— tool call data not yet recorded
@@ -594,8 +600,22 @@ function renderTickCard(exp, metadata, time) {
     html += renderServerSoulInline("人魂", attempt.renhun, "renhun");
     if (attempt.final_intent) {
       html += renderServerSoulInline(null, attempt.final_intent, "action");
+      // 执行结果（仅已通过天魂审查的 attempt）
+      var thApproved = attempt.tianhun && attempt.tianhun.result === "approved";
+      if (thApproved) {
+        var isOk = exp.result === "success";
+        html += '<div style="margin-top:4px;"><span class="result-badge ' +
+          (isOk ? "result-success" : "result-failed") + '">' +
+          (isOk ? "执行成功" : "执行失败") + '</span></div>';
+      }
     }
-    // 2. 地魂（工具调用）— tool call data not yet recorded
+    // 2. 地魂（工具调用，仅展示成功）
+    var successCalls = (attempt.renhun && attempt.renhun.earth_tool_calls)
+      ? attempt.renhun.earth_tool_calls.filter(function(tc) { return tc.success; })
+      : [];
+    if (successCalls.length > 0) {
+      html += renderServerSoulInline("地魂", { earth_tool_calls: successCalls }, "dihun");
+    }
     // 3. 天魂（审查）
     html += renderServerSoulInline("天魂", attempt.tianhun, "tianhun");
     html += "</div>";
@@ -740,6 +760,18 @@ function renderServerSoulInline(label, data, type) {
         '<div class="dream-badge" style="margin-top:4px;"><span class="dream-tag">受托梦影响</span>' +
         (dreamThought ? ' <span style="color:#8b949e;font-size:12px;">' + escapeHtml(dreamThought) + '</span>' : '') +
         '</div>';
+    }
+  } else if (type === "dihun") {
+    // 地魂：tool calling 日志（仅成功）
+    if (data.earth_tool_calls && data.earth_tool_calls.length > 0) {
+      data.earth_tool_calls.forEach(function(tc) {
+        var argsPreview = tc.arguments || "{}";
+        try { argsPreview = Object.entries(JSON.parse(argsPreview)).map(function(e) { return e[0] + ': ' + String(e[1]).substring(0, 30); }).join(', '); } catch(e) {}
+        var summary = tc.result_summary ? escapeHtml(tc.result_summary.substring(0, 60)) : '';
+        html += '<div class="soul-text" style="font-size:12px;color:var(--text-secondary);">' +
+          escapeHtml(tc.name) + '(' + escapeHtml(argsPreview) + ') ' +
+          '<span style="color:var(--text-subtle);">→ ' + summary + '</span></div>';
+      });
     }
   }
   html += "</div></div>";

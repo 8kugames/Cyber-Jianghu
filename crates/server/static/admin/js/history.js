@@ -400,7 +400,7 @@ function renderExpTable() {
                     : "-");
 
             const renhunHtml = renderRenhunCell(cycles, e);
-            const dihunHtml = renderDihunCell(cycles, e);
+            const dihunHtml = renderDihunCell(cycles);
             const tianhunHtml = renderTianhunCell(cycles, e);
 
             return (
@@ -447,6 +447,12 @@ function renderRenhunCell(cycles, entry) {
                 const aData = parseActionData(fi.action_data);
                 html += `<div class="exp-meta-text" style="color:var(--text-subtle);">${renderSingleAction(aType, aData)}</div>`;
             }
+        }
+        // 执行结果（仅已通过天魂审查的 cycle）
+        const thApproved = cycle.tianhun && cycle.tianhun.result === "approved";
+        if (thApproved && entry.result) {
+            const isOk = entry.result === "success";
+            html += `<div style="margin-top:2px;"><span class="result-badge ${isOk ? "result-success" : "result-failed"}" style="font-size:11px;">${isOk ? "成功" : "失败"}</span></div>`;
         }
     });
     return html || "-";
@@ -521,9 +527,24 @@ function renderSingleAction(aType, aData) {
     return text;
 }
 
-// 渲染地魂单元格（tool calling 数据尚未记录）
-function renderDihunCell() {
-    return "-";
+// 渲染地魂单元格（地魂 tool calling 日志）
+function renderDihunCell(cycles) {
+    if (!cycles || cycles.length === 0) return "-";
+    let calls = [];
+    cycles.forEach((cycle) => {
+        if (cycle.renhun && cycle.renhun.earth_tool_calls) {
+            cycle.renhun.earth_tool_calls.forEach((tc) => { if (tc.success) calls.push(tc); });
+        }
+    });
+    if (calls.length === 0) return "-";
+    return calls.map((tc) => {
+        let argsPreview = tc.arguments || "{}";
+        try { argsPreview = Object.entries(JSON.parse(argsPreview)).map(([k, v]) => k + ': ' + String(v).substring(0, 20)).join(', '); } catch(e) {}
+        let summary = tc.result_summary ? escapeHtml(tc.result_summary.substring(0, 40)) : '';
+        return '<div style="font-size:11px;color:var(--text-secondary);">' +
+            escapeHtml(tc.name) + '(' + escapeHtml(argsPreview) + ') ' +
+            '<span style="color:var(--text-subtle);">→ ' + summary + '</span></div>';
+    }).join('');
 }
 
 function updateExpPagination() {

@@ -39,6 +39,7 @@ impl super::super::Agent {
                         renhun: cyber_jianghu_protocol::RenhunReport {
                             narrative: r.renhun_narrative,
                             thought_log: r.renhun_thought_log,
+                            earth_tool_calls: r.earth_tool_calls.as_ref().and_then(|s| serde_json::from_str(s).ok()),
                         },
                         tianhun: cyber_jianghu_protocol::TianhunReport {
                             result: r.tianhun_result,
@@ -140,9 +141,10 @@ impl super::super::Agent {
                             renhun: cyber_jianghu_protocol::RenhunReport {
                                 narrative: Some("后续意图".to_string()),
                                 thought_log: None,
+                                earth_tool_calls: None,
                             },
                             tianhun: cyber_jianghu_protocol::TianhunReport {
-                                result: Some("通过".to_string()),
+                                result: Some("approved".to_string()),
                                 layers: vec![
                                     cyber_jianghu_protocol::LayerReport {
                                         layer: "layer1".to_string(),

@@ -395,10 +395,25 @@ pub struct SoulCycleAttempt {
     pub final_intent: Option<FinalIntentReport>,
 }
 
+/// 地魂 tool calling 日志条目
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EarthToolCall {
+    /// 工具名称: query_world, get_action_detail, list_skills, skill_view 等
+    pub name: String,
+    /// 调用参数（JSON 序列化后的字符串）
+    pub arguments: String,
+    /// 结果摘要（截断后的原始结果，非 budget 处理后）
+    pub result_summary: String,
+    /// 执行是否成功
+    pub success: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenhunReport {
     pub narrative: Option<String>,
     pub thought_log: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub earth_tool_calls: Option<Vec<EarthToolCall>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
