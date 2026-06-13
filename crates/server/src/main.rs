@@ -337,6 +337,29 @@ async fn main() -> Result<()> {
     game_data::init_registry(game_data_cache.clone());
     info!("统一配置注册表初始化完成");
 
+    // P0-1: 配置完整性校验（warning 模式，不阻断启动）
+    match crate::config_validator::load_rules() {
+        Ok(rules) => {
+            let result = crate::config_validator::run_all_validations(&rules);
+            if !result.violations.is_empty() {
+                warn!("配置完整性检查发现 {} 条违规:", result.violations.len());
+                for v in &result.violations {
+                    warn!(
+                        "  [规则 {}] {}: {} → {}: {}",
+                        v.rule_index, v.source_type, v.source_value, v.target_type, v.message
+                    );
+                }
+            }
+            info!(
+                "配置完整性检查完成: {} passed, {} failed",
+                result.passed, result.failed
+            );
+        }
+        Err(e) => {
+            warn!("加载 validation_rules.yaml 失败，跳过配置完整性检查: {}", e);
+        }
+    }
+
     // 初始化物品系统缓存（物品需要独立的缓存用于快速查询）
     {
         let guard = game_data_cache.get();
@@ -488,7 +511,7 @@ async fn main() -> Result<()> {
     // 10. 启动Tick引擎（后台任务）
     let tick_engine_handle = start_tick_engine(
         game_data_cache.clone(),
-        db_pool,
+        db_pool.clone(),
         connection_manager.clone(),
         agent_to_device_map.clone(),
         worker_tx.clone(),
@@ -500,6 +523,9 @@ async fn main() -> Result<()> {
 
     // 10.1 启动速率限制器清理任务
     let _cleanup_handle = start_rate_limiter_cleanup(rate_limiter.clone());
+
+    // 10.2 启动遥测采集器（后台定时任务，不阻塞主流程）
+    telemetry::start_telemetry_collector(db_pool.clone());
 
     // 11. 构建路由
     let app = Router::new()
@@ -883,13 +909,32 @@ async fn main() -> Result<()> {
                 ),
             ),
         )
-        // Action Evolution — 治理提案提交（agent 内部端点，需 R/RW Token 防外部滥用）
+        // Telemetry API — 行为遥测聚合查询
+        .route(
+            "/api/dashboard/telemetry",
+            get(handlers::dashboard::list_telemetry_aggregations).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/dashboard/telemetry/{aggregation_name}",
+            get(handlers::dashboard::get_telemetry_aggregation).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        // Action Evolution — 治理提案提交（Agent 设备认证）
         .route(
             "/api/v1/action-evolution/propose",
             post(crate::governance::handlers::submit_proposal).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_device_token,
                 ),
             ),
         )

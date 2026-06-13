@@ -2,69 +2,99 @@
 # 配置引用完整性验证规则
 # ============================================================================
 #
-# 每条规则定义：从 source 配置的 source_field 路径提取引用值，
-# 应在 target 配置的 target_key 路径中存在。
+# 数据驱动：新增验证规则只需在此文件追加，无需改代码。
 #
 # 路径语法：
-# - `*`       ：匹配 mapping 的所有值
-# - `[*]`     ：匹配 sequence 的所有元素
-# - `$keys`   ：提取 mapping 的所有 key（仅用于 target_key）
-# - `key`     ：精确匹配 mapping 中的 key
+#   .   = 进入嵌套字段
+#   *   = 遍历 Map 的所有 key
+#   [*] = 遍历 Sequence 的所有元素
 #
-# 基于 2026-06-12 config schema inventory 的 9 条规则。
+# 注意：路径分隔符为 "."。若某 YAML key 本身包含 "."，walker 会错误切割。
+# 当前项目中所有 YAML key（action names、item_ids、attribute names）均不含 "."，
+# 此限制仅需文档注明，不做额外转义处理（KISS）。
 # ============================================================================
 
 rules:
-  # R1: actions.yaml.requirements[*].attribute → attributes.yaml 中必须存在
+  # =====================================================================
+  # Rule 1: actions.yaml → attributes.yaml
+  # actions 中的 requirements[*].attribute 必须引用 attributes.yaml 中定义的属性
+  # attributes.yaml 结构: data.(primary|status|derived).attributes.<name>
+  # *.* 通配符遍历所有 3 个分类（primary/status/derived）
+  # =====================================================================
   - source_type: actions
     source_field: "data.*.requirements[*].attribute"
     target_type: attributes
-    target_key: "data.*.attributes.$keys"
+    target_key: "data.*.attributes"
 
-  # R2: recipes.yaml.materials[*].item_id → items.yaml 中必须存在
+  # =====================================================================
+  # Rule 2: actions.yaml category → skills/ 子目录
+  # actions 中的 category 值必须对应 skills/ 下存在的子目录名
+  # =====================================================================
+  - source_type: actions
+    source_field: "data.*.category"
+    target_type: skills
+    target_key: "categories"
+
+  # =====================================================================
+  # Rule 3: SKILL.md category → 所在父目录名
+  # SKILL.md frontmatter 中的 category 必须等于其文件所在的父目录名
+  # =====================================================================
+  - source_type: skill_md
+    source_field: "category"
+    target_type: skill_md
+    target_key: "parent_directory"
+
+  # =====================================================================
+  # Rule 4: items.yaml → attributes.yaml
+  # 物品的 effects[*].attribute 必须引用 attributes.yaml 中定义的属性
+  # items.yaml 的 data 是 sequence（列表），非 mapping
+  # =====================================================================
+  - source_type: items
+    source_field: "data.[*].effects[*].attribute"
+    target_type: attributes
+    target_key: "data.*.attributes"
+
+  # =====================================================================
+  # Rule 5: recipes.yaml → items.yaml
+  # 配方的 materials[*].item_id 和 tools[*] 必须引用 items.yaml 中定义的物品
+  # =====================================================================
   - source_type: recipes
     source_field: "data.*.materials[*].item_id"
     target_type: items
-    target_key: "data[*].item_id"
+    target_key: "data.[*].item_id"
 
-  # R3: locations.yaml.edges[*].from_node_id → nodes[*].node_id 中必须存在（自引用）
+  - source_type: recipes
+    source_field: "data.*.tools[*]"
+    target_type: items
+    target_key: "data.[*].item_id"
+
+  # =====================================================================
+  # Rule 6: locations.yaml 内部引用完整性
+  # edges[*].from_node_id / to_node_id 必须引用 nodes[*].node_id
+  # =====================================================================
   - source_type: locations
     source_field: "data.edges[*].from_node_id"
     target_type: locations
     target_key: "data.nodes[*].node_id"
 
-  # R4: locations.yaml.edges[*].to_node_id → nodes[*].node_id 中必须存在（自引用）
   - source_type: locations
     source_field: "data.edges[*].to_node_id"
     target_type: locations
     target_key: "data.nodes[*].node_id"
 
-  # R5: initial_inventory.yaml.items.{role}[*].item_id → items.yaml 中必须存在
-  - source_type: initial_inventory
-    source_field: "data.items.*.[*].item_id"
+  # =====================================================================
+  # Rule 7: recipes.yaml result_item → items.yaml
+  # 配方的 result_item 必须引用 items.yaml 中定义的物品
+  # =====================================================================
+  - source_type: recipes
+    source_field: "data.*.result_item"
     target_type: items
-    target_key: "data[*].item_id"
+    target_key: "data.[*].item_id"
 
-  # R6: initial_recipes.yaml.default[*].recipe_id → recipes.yaml 中必须存在
-  - source_type: initial_recipes
-    source_field: "data.default[*].recipe_id"
-    target_type: recipes
-    target_key: "data.$keys"
-
-  # R7: initial_recipes.yaml.roles[*].recipes[*].recipe_id → recipes.yaml 中必须存在
-  - source_type: initial_recipes
-    source_field: "data.roles[*].recipes[*].recipe_id"
-    target_type: recipes
-    target_key: "data.$keys"
-
-  # R8: emotion.yaml.core_affect.attributes[*].attribute → attributes.yaml 中必须存在
-  - source_type: emotion
-    source_field: "core_affect.attributes[*].attribute"
-    target_type: attributes
-    target_key: "data.*.attributes.$keys"
-
-  # R9: game_rules.yaml.data.agent_state.location.spawn_location → locations.yaml 中必须存在
-  - source_type: game_rules
-    source_field: "data.agent_state.location.spawn_location"
-    target_type: locations
-    target_key: "data.nodes[*].node_id"
+  # =====================================================================
+  # Rule 8: action_evolution.yaml capability groups → skills/ 子目录
+  # =====================================================================
+  - source_type: action_evolution
+    source_field: "data.capability_policy.allowed_capability_groups[*]"
+    target_type: skills
+    target_key: "categories"

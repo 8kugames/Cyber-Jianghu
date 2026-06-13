@@ -1,0 +1,73 @@
+# ============================================================================
+# 行为遥测配置
+# ============================================================================
+# P0-3: Agent 行为遥测聚合 (Behavior Telemetry)
+# 所有聚合基于 agent_action_logs、agents 表的真实 schema（2026-06-13审计）
+# ============================================================================
+
+# 全局默认聚合间隔（分钟）
+# 单个 aggregation 可通过 period_minutes 覆盖
+aggregation_interval_minutes: 60
+
+aggregations:
+  # ────────────────────────────────────────────────────────────────────────
+  # 生存时间统计
+  # ────────────────────────────────────────────────────────────────────────
+  # 基于 agents 表 status + birth_tick + retired_at
+  # 无 death_cause/death_at 列 → 仅统计平均存活时间，不按死因分组
+  - name: survival_time
+    description: "Agent 从出生到死亡/归隐的实际存活时间"
+    event_source: agents
+    group_by: []
+    metrics:
+      - count
+      - avg_duration_seconds
+      - p50_duration_seconds
+      - p95_duration_seconds
+
+  # ────────────────────────────────────────────────────────────────────────
+  # 决策分布
+  # ────────────────────────────────────────────────────────────────────────
+  # 使用 agent_action_logs.action_type 统计频率分布
+  - name: decision_distribution
+    description: "Agent 决策类型的频率分布"
+    event_source: agent_action_logs
+    group_by: ["action_type"]
+    metrics:
+      - count
+      - success_rate
+
+  # ────────────────────────────────────────────────────────────────────────
+  # 动作结果分布
+  # ────────────────────────────────────────────────────────────────────────
+  - name: action_outcomes
+    description: "Agent 动作的结果分布（成功/失败/其他）"
+    event_source: agent_action_logs
+    group_by: ["result"]
+    metrics:
+      - count
+
+  # ────────────────────────────────────────────────────────────────────────
+  # 交互活跃度（每日聚合）
+  # ────────────────────────────────────────────────────────────────────────
+  # 基于 agent_action_logs.action_data JSONB 中的 recipient_id 字段
+  - name: interaction_activity
+    description: "Agent 间的交互活跃度（基于 action_data JSONB 解析）"
+    event_source: agent_action_logs
+    period_minutes: 1440
+    group_by: []
+    metrics:
+      - action_count
+      - unique_interacting_agents
+
+  # ────────────────────────────────────────────────────────────────────────
+  # 地点人流量
+  # ────────────────────────────────────────────────────────────────────────
+  # 基于 agent_states.node_id，统计各地点的去重 Agent 数
+  - name: location_traffic
+    description: "各地点的 Agent 访问量"
+    event_source: agent_states
+    group_by: ["node_id"]
+    metrics:
+      - agent_count
+      - state_count
