@@ -395,6 +395,20 @@ impl super::super::Agent {
                             renhun_thought_log,
                         )
                         .await;
+                    // 地魂 tool calling 日志
+                    // [KNOWN-LIMIT] tool_call_log 为单槽设计（Mutex<Option<Vec>>），
+                    // 仅记录最终 approved attempt 的 tool call。
+                    // 前序 rejected attempt 的 tool call 被后续 complete_with_tools 覆写，
+                    // 不可观测。状态：已接受，暂无修改计划。
+                    if let Some(ref engine) = self.cognitive_engine
+                        && let Some(tool_calls) = engine.take_last_tool_call_log()
+                        && !tool_calls.is_empty()
+                        && let Ok(json) = serde_json::to_string(&tool_calls)
+                    {
+                        recorder
+                            .record_earth_tool_calls(world_state.tick_id, attempt, &json)
+                            .await;
+                    }
                     let world_time_str = Self::format_world_time(&world_state.world_time);
                     recorder
                         .record_world_time(world_state.tick_id, attempt, &world_time_str)

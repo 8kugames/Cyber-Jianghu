@@ -29,6 +29,8 @@ struct LayerResultEntry {
 struct RenhunEntry {
     narrative: Option<String>,
     thought_log: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    earth_tool_calls: Option<Vec<cyber_jianghu_protocol::EarthToolCall>>,
 }
 
 /// 天魂审查记录
@@ -137,6 +139,7 @@ fn record_to_attempt_entry(
         renhun: RenhunEntry {
             narrative: r.renhun_narrative,
             thought_log: r.renhun_thought_log,
+            earth_tool_calls: r.earth_tool_calls.as_ref().and_then(|s| serde_json::from_str(s).ok()),
         },
         tianhun: TianhunEntry {
             result: r.tianhun_result,

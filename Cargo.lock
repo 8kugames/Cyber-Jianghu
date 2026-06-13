@@ -677,7 +677,7 @@ dependencies = [
 
 [[package]]
 name = "cyber-jianghu-agent"
-version = "0.1.311"
+version = "0.1.312"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -750,7 +750,7 @@ dependencies = [
 
 [[package]]
 name = "cyber-jianghu-protocol"
-version = "0.1.70"
+version = "0.1.71"
 dependencies = [
  "anyhow",
  "chrono",
@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "cyber-jianghu-server"
-version = "0.1.228"
+version = "0.1.230"
 dependencies = [
  "anyhow",
  "async-trait",

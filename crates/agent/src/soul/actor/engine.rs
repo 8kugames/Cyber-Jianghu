@@ -726,6 +726,10 @@ impl CognitiveEngine {
             .and_then(|mut g| g.take())
     }
 
+    pub fn take_last_tool_call_log(&self) -> Option<Vec<cyber_jianghu_protocol::EarthToolCall>> {
+        self.llm_client.take_last_tool_call_log()
+    }
+
     /// 取回 LLM 构造的情绪（消费式，取后清空）
     pub fn take_constructed_emotion(&self) -> Option<ConstructedEmotion> {
         self.last_constructed_emotion

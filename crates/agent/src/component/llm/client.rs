@@ -202,6 +202,11 @@ pub trait LlmClient: Send + Sync {
         None
     }
 
+    /// 取回最近一次 tool loop 的 tool call 日志
+    fn take_last_tool_call_log(&self) -> Option<Vec<cyber_jianghu_protocol::EarthToolCall>> {
+        None
+    }
+
     /// 使用 tool calling 的多轮对话
     ///
     /// 如果 LLM 返回 tool_calls，调用 executor 执行后继续对话，
@@ -1640,6 +1645,10 @@ impl LlmClient for FallbackLlmClient {
 
     fn take_last_reasoning_content(&self) -> Option<String> {
         self.active_client().take_last_reasoning_content()
+    }
+
+    fn take_last_tool_call_log(&self) -> Option<Vec<cyber_jianghu_protocol::EarthToolCall>> {
+        self.active_client().take_last_tool_call_log()
     }
 
     async fn complete_with_tools(

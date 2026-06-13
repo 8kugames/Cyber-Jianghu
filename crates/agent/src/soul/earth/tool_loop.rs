@@ -20,6 +20,7 @@ use super::budget::ToolResultBudget;
 pub(crate) struct ToolLoopResult {
     pub content: String,
     pub reasoning_content: Option<String>,
+    pub tool_call_log: Vec<cyber_jianghu_protocol::EarthToolCall>,
 }
 
 use super::config::EarthSoulConfig;
@@ -48,6 +49,15 @@ pub(crate) async fn run_tool_loop(
         .filter(|c| c.loop_guard.enabled)
         .map(|c| LoopGuard::new(&c.loop_guard));
 
+    // 地魂 tool call 日志收集
+    let tool_log_cfg = earth_config.and_then(|c| {
+        if c.tool_log.enabled { Some(&c.tool_log) } else { None }
+    });
+    let max_summary = tool_log_cfg.map(|c| c.max_result_summary_chars).unwrap_or(0);
+    let max_calls = tool_log_cfg.map(|c| c.max_calls_per_cycle).unwrap_or(0);
+    let mut tool_call_log: Vec<cyber_jianghu_protocol::EarthToolCall> = Vec::new();
+    let log_enabled = tool_log_cfg.is_some();
+
     for round in 0..max_rounds {
         // Pre-check: budget exhausted
         if let Some(ref b) = budget
@@ -57,7 +67,7 @@ pub(crate) async fn run_tool_loop(
                 "[地魂] Tool result 预算耗尽 ({} chars), 提前退出",
                 b.used_chars()
             );
-            return forced_text_exit(llm, messages, llm_config.clone()).await;
+            return forced_text_exit(llm, messages, llm_config.clone(), tool_call_log).await;
         }
 
         if round == 0 {
@@ -146,7 +156,7 @@ pub(crate) async fn run_tool_loop(
                                     "[已获知足够信息，直接回答]",
                                 ));
                             }
-                            return forced_text_exit(llm, messages, llm_config.clone()).await;
+                            return forced_text_exit(llm, messages, llm_config.clone(), tool_call_log).await;
                         }
                         LoopGuardAction::Warn(_) => {
                             warn!("[地魂] Loop guard 警告: 连续调用 '{}'", tc.function.name);
@@ -163,6 +173,17 @@ pub(crate) async fn run_tool_loop(
                     Ok(val) => val,
                     Err(e) => {
                         warn!("[地魂] Tool '{}' 执行失败: {}", tc.function.name, e);
+                        // 日志记录：失败
+                        if log_enabled && tool_call_log.len() < max_calls {
+                            let args_str = serde_json::to_string(&args).unwrap_or_default();
+                            let error_summary = format!("[失败] {}", e);
+                            tool_call_log.push(cyber_jianghu_protocol::EarthToolCall {
+                                name: tc.function.name.clone(),
+                                arguments: args_str,
+                                result_summary: error_summary.chars().take(max_summary).collect(),
+                                success: false,
+                            });
+                        }
                         let error_str =
                             format!("[工具调用失败] 工具: {} | 原因: {}", tc.function.name, e);
                         messages.push(ChatMessage::tool_result(
@@ -185,6 +206,18 @@ pub(crate) async fn run_tool_loop(
                     }
                     None => raw_result.to_string(),
                 };
+
+                // 日志记录：成功（截断 raw_result，非 budget 处理后的 processed）
+                if log_enabled && tool_call_log.len() < max_calls {
+                    let args_str = serde_json::to_string(&args).unwrap_or_default();
+                    let summary: String = raw_result.to_string().chars().take(max_summary).collect();
+                    tool_call_log.push(cyber_jianghu_protocol::EarthToolCall {
+                        name: tc.function.name.clone(),
+                        arguments: args_str,
+                        result_summary: summary,
+                        success: true,
+                    });
+                }
 
                 // LoopGuard Warn 后置拼接（budget 处理后再 prepend，不破坏 JSON）
                 let final_result = if let Some(ref mut g) = guard
@@ -221,6 +254,7 @@ pub(crate) async fn run_tool_loop(
                 return Ok(ToolLoopResult {
                     content,
                     reasoning_content: response.reasoning_content,
+                    tool_call_log,
                 });
             }
 
@@ -232,6 +266,7 @@ pub(crate) async fn run_tool_loop(
                 return Ok(ToolLoopResult {
                     content: json,
                     reasoning_content: response.reasoning_content,
+                    tool_call_log,
                 });
             }
 
@@ -248,7 +283,7 @@ pub(crate) async fn run_tool_loop(
                 name: None,
                 reasoning_content: response.reasoning_content,
             });
-            return forced_text_exit(llm, messages, llm_config).await;
+            return forced_text_exit(llm, messages, llm_config, tool_call_log).await;
         }
     }
 
@@ -257,7 +292,7 @@ pub(crate) async fn run_tool_loop(
         "[地魂] Tool loop 耗尽 max_rounds ({}), 执行强制文本退出",
         max_rounds
     );
-    forced_text_exit(llm, messages, llm_config).await
+    forced_text_exit(llm, messages, llm_config, tool_call_log).await
 }
 
 /// 强制文本退出：不发送 tool 定义，迫使模型基于已积累上下文输出文本决策
@@ -265,6 +300,7 @@ async fn forced_text_exit(
     llm: &dyn LlmClient,
     mut messages: Vec<ChatMessage>,
     llm_config: ChatExchangeConfig,
+    tool_call_log: Vec<cyber_jianghu_protocol::EarthToolCall>,
 ) -> Result<ToolLoopResult> {
     warn!("[地魂] 执行强制文本退出");
 
@@ -283,6 +319,7 @@ async fn forced_text_exit(
     Ok(ToolLoopResult {
         content,
         reasoning_content: response.reasoning_content,
+        tool_call_log,
     })
 }
 

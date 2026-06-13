@@ -17,6 +17,9 @@ pub struct EarthSoulConfig {
     /// LLM tool-calling 最大轮次（默认 5，确保有足够轮次查询动作详情后再决策）
     #[serde(default = "default_max_tool_rounds")]
     pub max_tool_rounds: usize,
+    /// 地魂 tool calling 日志配置（默认关闭）
+    #[serde(default)]
+    pub tool_log: ToolLogConfig,
 }
 
 fn default_max_tool_rounds() -> usize {
@@ -42,6 +45,13 @@ impl EarthSoulConfig {
                 "earth_soul.tool_budget.per_tool_ratio ({}) 必须 <= aggregate_ratio ({})",
                 self.tool_budget.per_tool_ratio,
                 self.tool_budget.aggregate_ratio,
+            );
+        }
+        if self.tool_log.enabled {
+            anyhow::ensure!(
+                self.tool_log.max_calls_per_cycle >= 1,
+                "earth_soul.tool_log.max_calls_per_cycle 必须 >= 1，当前: {}",
+                self.tool_log.max_calls_per_cycle
             );
         }
         if self.loop_guard.enabled {
@@ -107,6 +117,28 @@ impl Default for LoopGuardConfig {
             enabled: true,
             max_same_tool_consecutive: 2,
             max_total_calls: 6,
+        }
+    }
+}
+
+/// 地魂 tool calling 日志配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ToolLogConfig {
+    /// 是否收集 tool call 日志（默认关闭，显式开启）
+    pub enabled: bool,
+    /// 结果摘要截断长度（截断 raw_result，非 budget 处理后）
+    pub max_result_summary_chars: usize,
+    /// 单 cycle 最多记录条数（上限防护）
+    pub max_calls_per_cycle: usize,
+}
+
+impl Default for ToolLogConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_result_summary_chars: 200,
+            max_calls_per_cycle: 50,
         }
     }
 }
