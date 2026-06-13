@@ -5,6 +5,7 @@
 pub mod actions;
 pub mod chronicle;
 pub mod config;
+pub mod config_validator;
 pub mod db;
 pub mod dialogue;
 pub mod game_data;
@@ -15,6 +16,7 @@ pub mod items;
 pub mod models;
 pub mod paths;
 pub mod state;
+pub mod telemetry;
 pub mod tick;
 pub mod time_utils;
 pub mod websocket;
