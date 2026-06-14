@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "cyber-jianghu-server"
-version = "0.1.249"
+version = "0.1.250"
 dependencies = [
  "anyhow",
  "async-trait",
