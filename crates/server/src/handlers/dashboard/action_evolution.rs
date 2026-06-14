@@ -260,13 +260,10 @@ pub async fn admin_action_on_group(
     // approve 路径：先执行所有副作用（写 yaml / reload registry / reload manifest / broadcast），
     // 全部成功后才更新 group status，确保状态与 actions.yaml 一致。任一步失败返回 5xx，
     // group status 保持 pending_review/under_review，便于管理员重试。
-    let gov = state
-        .governance
-        .as_ref()
-        .ok_or_else(|| {
-            warn!("管理员 approve: governance 模块未初始化");
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let gov = state.governance.as_ref().ok_or_else(|| {
+        warn!("管理员 approve: governance 模块未初始化");
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     let group_row =
         sqlx::query("SELECT proposal_ids FROM action_evolution_proposal_groups WHERE id = $1")
@@ -339,10 +336,11 @@ pub async fn admin_action_on_group(
     gov.engine.reload_manifest().await;
 
     // Step 4: 广播 ConfigUpdate（actions.yaml 读取失败 = 状态不一致，返回错误）
-    let actions_content = std::fs::read_to_string(config_dir.join("actions.yaml")).map_err(|e| {
-        warn!(error = %e, "管理员 approve: 读取 actions.yaml 失败");
-        axum::http::StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let actions_content =
+        std::fs::read_to_string(config_dir.join("actions.yaml")).map_err(|e| {
+            warn!(error = %e, "管理员 approve: 读取 actions.yaml 失败");
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        })?;
     let config_update = cyber_jianghu_protocol::messages::ServerMessage::ConfigUpdate {
         config_type: "actions".to_string(),
         update_type: "full".to_string(),

@@ -2,6 +2,14 @@
 //!
 //! 测试 telemetry_config.yaml 配置解析、数据结构序列化等。
 //! 完整的 DB 端到端测试需要数据库连接和服务状态，在此仅做烟雾测试。
+//!
+//!
+//! ## 测试缺口 (Finding 10)
+//! - Collector SQL 查询无 DB 集成测试（需运行 PostgreSQL）
+//! - API handler 无 HTTP 集成测试
+//! - `get_latest_aggregation_time` / `query_aggregations` 无存储层测试
+//!
+//! 以上需在 CI 有 DB 环境时补充。
 
 #[cfg(test)]
 mod tests {
