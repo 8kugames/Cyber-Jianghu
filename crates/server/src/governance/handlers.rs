@@ -46,11 +46,7 @@ pub async fn submit_proposal(
         gov.classifier
             .classify(&ir, &req.governance_topics, &req.topic_confidence);
 
-    let primary_soul = gov
-        .engine
-        .read()
-        .await
-        .route_for_topics(&classification.topics);
+    let primary_soul = gov.engine.route_for_topics(&classification.topics);
 
     let evidence = super::ProposalEvidence {
         agent_id: req.agent_id,

@@ -160,11 +160,10 @@ async fn init_governance(
     let proposal_store = Arc::new(ProposalStore::new(db_pool.clone()));
 
     // SoulReviewEngine::load 接受 config_dir，内部加载 souls.yaml
-    let engine = Arc::new(tokio::sync::RwLock::new(
-        SoulReviewEngine::load(&config_dir).context("SoulReviewEngine 初始化失败")?,
-    ));
+    // 内部 capability_manifest 已是 Arc<RwLock<...>>，外层无需再加锁
+    let engine = Arc::new(SoulReviewEngine::load(&config_dir).context("SoulReviewEngine 初始化失败")?);
 
-    let review_config = engine.read().await.config().review.clone();
+    let review_config = engine.config().review.clone();
 
     // 创建治理轮询任务的关闭信号通道
     let (poll_shutdown_tx, poll_shutdown_rx) = tokio::sync::watch::channel(false);
@@ -201,12 +200,9 @@ async fn init_governance(
                         tokio::time::timeout(review_timeout, store_clone.get_pending_groups()).await;
                     match pending_result {
                         Ok(Ok(groups)) if !groups.is_empty() => {
-                            let review_result = {
-                                let engine_guard = engine_clone.read().await;
-                                let review_future =
-                                    engine_guard.review_pending(&store_clone, &groups);
-                                tokio::time::timeout(review_timeout, review_future).await
-                            };
+                            let review_future = engine_clone.review_pending(&store_clone, &groups);
+                            let review_result =
+                                tokio::time::timeout(review_timeout, review_future).await;
                             match review_result {
                                 Ok(results) => {
                                     for (group_id, status) in &results {
@@ -227,7 +223,7 @@ async fn init_governance(
                                             }
 
                                             // 刷新 CapabilityManifest（使 LLM 下轮审议看到新 action）
-                                            engine_clone.write().await.reload_manifest().await;
+                                            engine_clone.reload_manifest().await;
 
                                             let actions_content = std::fs::read_to_string(
                                                 crate::paths::get_config_dir().join("actions.yaml")
