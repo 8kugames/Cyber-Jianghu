@@ -2,41 +2,11 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use cyber_jianghu_protocol::{GovernanceTopic, types::governance::ProposedActionIR};
+use cyber_jianghu_protocol::GovernanceTopic;
 use sqlx::{PgPool, Postgres, Row};
 use uuid::Uuid;
 
 use super::types::{ProposalEvidence, ProposalStatus};
-
-// ---------------------------------------------------------------------------
-// DB 字符串 → 枚举 显式转换（DB 中的未知值视为数据损坏，强制报错）
-// ---------------------------------------------------------------------------
-
-fn try_parse_target_arity(
-    s: &str,
-) -> Result<cyber_jianghu_protocol::types::governance::TargetArity> {
-    use cyber_jianghu_protocol::types::governance::TargetArity;
-    Ok(match s {
-        "zero" => TargetArity::Zero,
-        "one" => TargetArity::One,
-        "many" => TargetArity::Many,
-        other => anyhow::bail!("未知 target_arity 数据库值: {other}"),
-    })
-}
-
-fn try_parse_protocol_kind(
-    s: &str,
-) -> Result<cyber_jianghu_protocol::types::governance::ProtocolKind> {
-    use cyber_jianghu_protocol::types::governance::ProtocolKind;
-    Ok(match s {
-        "none" => ProtocolKind::None,
-        "bilateral" => ProtocolKind::Bilateral,
-        "multi_phase" => ProtocolKind::MultiPhase,
-        "composite" => ProtocolKind::Composite,
-        "unknown" => ProtocolKind::Unknown,
-        other => anyhow::bail!("未知 protocol_kind 数据库值: {other}"),
-    })
-}
 
 // ---------------------------------------------------------------------------
 // Row types (sqlx::FromRow)
@@ -48,15 +18,9 @@ struct ProposalRow {
     id: Uuid,
     agent_id: Uuid,
     tick_id: i64,
-    actor_arity: i16,
-    target_arity: String,
-    tick_span: i16,
-    phase_count: i16,
-    protocol_kind: String,
-    effect_refs: serde_json::Value,
-    requirement_refs: serde_json::Value,
     proposed_action_type: String,
     rationale: String,
+    action_data: serde_json::Value,
     governance_topics: serde_json::Value,
     topic_confidence: serde_json::Value,
     created_at: DateTime<Utc>,
@@ -149,26 +113,16 @@ impl ProposalStore {
     pub async fn insert_proposal(&self, evidence: &ProposalEvidence) -> Result<Uuid> {
         let row = sqlx::query_as::<Postgres, ProposalRow>(
             "INSERT INTO action_evolution_proposals \
-             (agent_id, tick_id, actor_arity, target_arity, tick_span, phase_count, \
-              protocol_kind, effect_refs, requirement_refs, \
-              proposed_action_type, rationale, governance_topics, topic_confidence) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) \
+             (agent_id, tick_id, proposed_action_type, rationale, action_data, \
+              governance_topics, topic_confidence) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7) \
              RETURNING *",
         )
         .bind(evidence.agent_id)
         .bind(evidence.tick_id)
-        .bind(evidence.ir.actor_arity as i16)
-        .bind(evidence.ir.target_arity.as_str())
-        .bind(evidence.ir.tick_span as i16)
-        .bind(evidence.ir.phase_count as i16)
-        .bind(evidence.ir.protocol_kind.as_str())
-        .bind(serde_json::to_value(&evidence.ir.effect_refs).context("serialize effect_refs")?)
-        .bind(
-            serde_json::to_value(&evidence.ir.requirement_refs)
-                .context("serialize requirement_refs")?,
-        )
         .bind(&evidence.proposed_action_type)
         .bind(&evidence.rationale)
+        .bind(&evidence.action_data)
         .bind(
             serde_json::to_value(&evidence.governance_topics)
                 .context("serialize governance_topics")?,
@@ -192,7 +146,6 @@ impl ProposalStore {
         primary_soul: Option<&str>,
     ) -> Result<Uuid> {
         let topics_val = serde_json::to_value(governance_topics).context("serialize topics")?;
-        // proposal_id 序列化为 JSON string，用 jsonb_array_elements 构造单元素 jsonb 数组
         let pid_json = serde_json::to_value(proposal_id).context("serialize proposal_id")?;
 
         let row = sqlx::query_as::<Postgres, GroupRow>(
@@ -320,10 +273,7 @@ impl ProposalStore {
 
     pub async fn get_proposal(&self, proposal_id: Uuid) -> Result<Option<ProposalEvidence>> {
         let row = sqlx::query(
-            r"SELECT agent_id, tick_id, proposed_action_type, rationale,
-                      actor_arity, target_arity, tick_span, phase_count,
-                      protocol_kind,
-                      effect_refs, requirement_refs,
+            r"SELECT agent_id, tick_id, proposed_action_type, rationale, action_data,
                       governance_topics, topic_confidence
                FROM action_evolution_proposals WHERE id = $1",
         )
@@ -333,44 +283,20 @@ impl ProposalStore {
 
         let Some(r) = row else { return Ok(None) };
 
-        let target_arity_str: String = r.get(5);
-        let target_arity = try_parse_target_arity(&target_arity_str)
-            .with_context(|| format!("反序列化 target_arity 失败: {}", target_arity_str))?;
-
-        let protocol_kind_str: String = r.get(8);
-        let protocol_kind = try_parse_protocol_kind(&protocol_kind_str)
-            .with_context(|| format!("反序列化 protocol_kind 失败: {}", protocol_kind_str))?;
-
-        let effect_refs: Vec<String> = serde_json::from_value(r.get::<serde_json::Value, _>(9))
-            .context("反序列化 effect_refs 失败")?;
-        let requirement_refs: Vec<String> =
-            serde_json::from_value(r.get::<serde_json::Value, _>(10))
-                .context("反序列化 requirement_refs 失败")?;
+        let action_data: serde_json::Value = r.get(4);
         let governance_topics: Vec<GovernanceTopic> =
-            serde_json::from_value(r.get::<serde_json::Value, _>(11))
+            serde_json::from_value(r.get::<serde_json::Value, _>(5))
                 .context("反序列化 governance_topics 失败")?;
         let topic_confidence: HashMap<GovernanceTopic, f64> =
-            serde_json::from_value(r.get::<serde_json::Value, _>(12))
+            serde_json::from_value(r.get::<serde_json::Value, _>(6))
                 .context("反序列化 topic_confidence 失败")?;
 
-        // NOTE: source / atomic_kind 在 DB schema 中无对应列（migration 012 仅删除 state_transition_count）。
-        // Phase 0 伏羲审议不消费这两个字段，硬编码占位；Phase 2 多 soul 上线时需补 schema 列。
         Ok(Some(ProposalEvidence {
             agent_id: r.get(0),
             tick_id: r.get(1),
             proposed_action_type: r.get(2),
             rationale: r.get(3),
-            ir: ProposedActionIR {
-                source: cyber_jianghu_protocol::types::governance::IRSource::FromAgentIntent,
-                atomic_kind: cyber_jianghu_protocol::types::governance::AtomicKind::Unknown,
-                actor_arity: r.get::<i16, _>(4) as u8,
-                target_arity,
-                tick_span: r.get::<i16, _>(6) as u8,
-                phase_count: r.get::<i16, _>(7) as u8,
-                protocol_kind,
-                effect_refs,
-                requirement_refs,
-            },
+            action_data,
             governance_topics,
             topic_confidence,
         }))

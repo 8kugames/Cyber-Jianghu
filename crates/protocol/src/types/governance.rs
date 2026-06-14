@@ -32,7 +32,7 @@ pub enum GovernanceCode {
     NonGovernanceReject,
 }
 
-/// 原子行为类型
+/// 原子行为类型（用于 ActionConfigEntry.atomic_kind 与伏羲 LLM 推断输出）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AtomicKind {
@@ -56,7 +56,7 @@ impl AtomicKind {
     }
 }
 
-/// 目标数量范围
+/// 目标数量范围（用于 ActionConfigEntry.target_arity 与伏羲 LLM 推断输出）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TargetArity {
@@ -76,7 +76,7 @@ impl TargetArity {
     }
 }
 
-/// 协议编排类型
+/// 协议编排类型（用于 ActionConfigEntry.protocol_kind 与伏羲 LLM 推断输出）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ProtocolKind {
@@ -100,74 +100,9 @@ impl ProtocolKind {
     }
 }
 
-/// IR 来源
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum IRSource {
-    FromManifest,
-    FromAgentIntent,
-}
-
-/// 提案 IR（Agent + Server 共享）
-///
-/// 描述行为的执行特征，用于原子行为判定和治理分类。
-/// 闸门职责已迁出 IR，原子性判定由 Server 端 Capability Manifest 承担。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProposedActionIR {
-    pub source: IRSource,
-    pub atomic_kind: AtomicKind,
-    pub actor_arity: u8,
-    pub target_arity: TargetArity,
-    pub tick_span: u8,
-    pub phase_count: u8,
-    pub protocol_kind: ProtocolKind,
-    pub effect_refs: Vec<String>,
-    pub requirement_refs: Vec<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_proposed_action_ir_atomic_serialization() {
-        let ir = ProposedActionIR {
-            source: IRSource::FromAgentIntent,
-            atomic_kind: AtomicKind::Atomic,
-            actor_arity: 1,
-            target_arity: TargetArity::One,
-            tick_span: 0,
-            phase_count: 1,
-            protocol_kind: ProtocolKind::None,
-            effect_refs: vec![],
-            requirement_refs: vec![],
-        };
-        let json = serde_json::to_string(&ir).unwrap();
-        assert!(json.contains("\"source\":\"from_agent_intent\""));
-        assert!(json.contains("\"atomic_kind\":\"atomic\""));
-        assert!(json.contains("\"target_arity\":\"one\""));
-        assert!(json.contains("\"protocol_kind\":\"none\""));
-    }
-
-    #[test]
-    fn test_proposed_action_ir_composite_serialization() {
-        let ir = ProposedActionIR {
-            source: IRSource::FromManifest,
-            atomic_kind: AtomicKind::Composite,
-            actor_arity: 2,
-            target_arity: TargetArity::Many,
-            tick_span: 1,
-            phase_count: 2,
-            protocol_kind: ProtocolKind::Bilateral,
-            effect_refs: vec![],
-            requirement_refs: vec![],
-        };
-        let json = serde_json::to_string(&ir).unwrap();
-        assert!(json.contains("\"source\":\"from_manifest\""));
-        assert!(json.contains("\"atomic_kind\":\"composite\""));
-        assert!(json.contains("\"target_arity\":\"many\""));
-        assert!(json.contains("\"protocol_kind\":\"bilateral\""));
-    }
 
     #[test]
     fn test_governance_topic_priority() {

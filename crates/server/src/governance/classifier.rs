@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use cyber_jianghu_protocol::types::governance::{GovernanceTopic, ProposedActionIR};
+use cyber_jianghu_protocol::types::governance::GovernanceTopic;
 
 use super::types::{ClassificationResult, TopicClassifierConfig};
 
@@ -13,9 +13,14 @@ impl TopicClassifier {
         Self { config }
     }
 
+    /// 基于 effect_refs 做规则匹配
+    ///
+    /// Phase 0：agent 提议时 effect_refs 为空（agent 无可信数据源），
+    /// 走 fallback topic = evolution → 伏羲路由。Phase 2 多 soul 上线时
+    /// 由 LLM 推断后回填 effect_refs 做实际分类。
     pub fn classify(
         &self,
-        ir: &ProposedActionIR,
+        effect_refs: &[String],
         agent_topics: &[GovernanceTopic],
         agent_confidence: &HashMap<GovernanceTopic, f64>,
     ) -> ClassificationResult {
@@ -37,7 +42,7 @@ impl TopicClassifier {
 
         // Rule-based matching on effect_refs
         let mut matched_topics: Vec<GovernanceTopic> = Vec::new();
-        for effect_ref in &ir.effect_refs {
+        for effect_ref in effect_refs {
             for rule in &self.config.rules {
                 for prefix in &rule.matcher.effect_refs_prefix {
                     if effect_ref.starts_with(prefix) {
@@ -98,25 +103,10 @@ mod tests {
         }
     }
 
-    fn test_ir(effect_ref: &str) -> ProposedActionIR {
-        ProposedActionIR {
-            source: cyber_jianghu_protocol::types::governance::IRSource::FromAgentIntent,
-            atomic_kind: cyber_jianghu_protocol::types::governance::AtomicKind::Unknown,
-            actor_arity: 1,
-            target_arity: cyber_jianghu_protocol::types::governance::TargetArity::Many,
-            tick_span: 0,
-            phase_count: 1,
-            protocol_kind: cyber_jianghu_protocol::types::governance::ProtocolKind::None,
-            effect_refs: vec![effect_ref.into()],
-            requirement_refs: vec![],
-        }
-    }
-
     #[test]
     fn test_classify_fallback() {
         let classifier = TopicClassifier::new(test_config());
-        let ir = test_ir("unknown.action");
-        let result = classifier.classify(&ir, &[], &HashMap::new());
+        let result = classifier.classify(&[], &[], &HashMap::new());
         assert!(result.fallback_used);
         assert_eq!(result.topics, vec![GovernanceTopic::Evolution]);
     }
@@ -124,8 +114,8 @@ mod tests {
     #[test]
     fn test_classify_rule_match() {
         let classifier = TopicClassifier::new(test_config());
-        let ir = test_ir("combat.slash");
-        let result = classifier.classify(&ir, &[], &HashMap::new());
+        let effect_refs = vec!["combat.slash".to_string()];
+        let result = classifier.classify(&effect_refs, &[], &HashMap::new());
         assert!(!result.fallback_used);
         assert!(result.topics.contains(&GovernanceTopic::Order));
     }
@@ -133,11 +123,10 @@ mod tests {
     #[test]
     fn test_classify_agent_topics_trusted() {
         let classifier = TopicClassifier::new(test_config());
-        let ir = test_ir("unknown.action");
         let agent_topics = vec![GovernanceTopic::Resource];
         let confidence: HashMap<GovernanceTopic, f64> =
             [(GovernanceTopic::Resource, 0.8)].into_iter().collect();
-        let result = classifier.classify(&ir, &agent_topics, &confidence);
+        let result = classifier.classify(&[], &agent_topics, &confidence);
         assert!(!result.fallback_used);
         assert_eq!(result.topics, vec![GovernanceTopic::Resource]);
     }
