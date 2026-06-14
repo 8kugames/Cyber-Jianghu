@@ -326,8 +326,16 @@ pub async fn admin_action_on_group(
             gov.engine.reload_manifest().await;
 
             // 广播 ConfigUpdate
-            let actions_content =
-                std::fs::read_to_string(config_dir.join("actions.yaml")).unwrap_or_default();
+            // 注：actions.yaml 读取失败时跳过广播，避免空内容破坏 agent 端缓存
+            let actions_content = match std::fs::read_to_string(config_dir.join("actions.yaml")) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("管理员 approve: 读取 actions.yaml 失败，跳过广播: {}", e);
+                    return Ok(Json(
+                        serde_json::json!({"status": "ok", "new_status": new_status, "broadcast": "skipped", "reason": e.to_string()}),
+                    ));
+                }
+            };
             let config_update = cyber_jianghu_protocol::messages::ServerMessage::ConfigUpdate {
                 config_type: "actions".to_string(),
                 update_type: "full".to_string(),

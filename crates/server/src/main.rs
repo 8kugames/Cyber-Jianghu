@@ -226,9 +226,17 @@ async fn init_governance(
                                             // 刷新 CapabilityManifest（使 LLM 下轮审议看到新 action）
                                             engine_clone.reload_manifest().await;
 
-                                            let actions_content = std::fs::read_to_string(
-                                                crate::paths::get_config_dir().join("actions.yaml")
-                                            ).unwrap_or_default();
+                                            let actions_path = crate::paths::get_config_dir().join("actions.yaml");
+                                            let actions_content = match std::fs::read_to_string(&actions_path) {
+                                                Ok(c) => c,
+                                                Err(e) => {
+                                                    error!(
+                                                        "Approved group {}: 读取 actions.yaml 失败，跳过广播避免破坏 agent 端缓存: {}",
+                                                        group_id, e
+                                                    );
+                                                    continue;
+                                                }
+                                            };
                                             let config_update = cyber_jianghu_protocol::messages::ServerMessage::ConfigUpdate {
                                                 config_type: "actions".to_string(),
                                                 update_type: "full".to_string(),
