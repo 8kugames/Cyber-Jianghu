@@ -123,6 +123,15 @@ function showGroupDetail(groupId) {
             html += '<tr><th>创建时间</th><td>' + (data.created_at ? new Date(data.created_at).toLocaleString('zh-CN') : '-') + '</td></tr>';
             html += '<tr><th>更新时间</th><td>' + (data.updated_at ? new Date(data.updated_at).toLocaleString('zh-CN') : '-') + '</td></tr>';
             html += '</table>';
+
+            // 审批操作按钮（仅 pending_review / under_review 状态可操作）
+            if (data.status === 'pending_review' || data.status === 'under_review') {
+                html += '<div class="ae-action-bar" style="margin-top:16px;display:flex;gap:8px">';
+                html += '<button class="btn btn-success" onclick="adminGroupAction(\'' + groupId + '\', \'approve\')">通过</button>';
+                html += '<button class="btn btn-danger" onclick="adminGroupAction(\'' + groupId + '\', \'reject\')">驳回</button>';
+                html += '</div>';
+            }
+
             el.innerHTML = html;
         })
         .catch(err => {
@@ -139,4 +148,32 @@ function formatJsonField(val) {
     if (val === null || val === undefined) return '-';
     if (typeof val === 'string') return val;
     return '<pre class="json-pre">' + JSON.stringify(val, null, 2) + '</pre>';
+}
+
+function adminGroupAction(groupId, action) {
+    const reason = action === 'approve'
+        ? prompt('通过理由（可选）：', '管理员手动通过')
+        : prompt('驳回理由（必填）：', '');
+    if (reason === null) return;
+    if (action === 'reject' && !reason.trim()) {
+        alert('驳回理由不能为空');
+        return;
+    }
+
+    apiFetch('/api/dashboard/action-evolution/groups/' + groupId + '/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action, reason: reason })
+    })
+    .then(r => r.json())
+    .then(data => {
+        alert('操作成功: ' + (data.new_status || action));
+        hideGroupDetail();
+        loadGroups(currentGroupFilter);
+        loadAEStats();
+    })
+    .catch(err => {
+        if (err.status === 401) return; // apiFetch 已处理
+        alert('操作失败: ' + err.message);
+    });
 }

@@ -11,23 +11,9 @@ impl CombatActionExecutor {
     /// 攻击
     pub(super) fn execute_attack(
         intent: &Intent,
-        action_data: &Option<serde_json::Value>,
+        data: &AttackData,
         agent_state: &AgentState,
     ) -> ActionExecutionResult {
-        let data: AttackData = match action_data
-            .as_ref()
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-        {
-            Some(d) => d,
-            None => {
-                return ActionExecutionResult::failure(
-                    "缺少攻击数据".to_string(),
-                    intent.action_type.to_string(),
-                    Some(intent.intent_id),
-                );
-            }
-        };
-
         let target_id = match Uuid::parse_str(&data.target_agent_id) {
             Ok(id) => id,
             Err(_) => {

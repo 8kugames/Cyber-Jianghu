@@ -342,17 +342,6 @@ impl WebSocketClient {
         })
     }
 
-    /// 设置动作配置更新回调
-    pub fn set_action_update_callback(&self, callback: Arc<dyn Fn(ServerMessage) + Send + Sync>) {
-        tokio::task::block_in_place(|| {
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(async {
-                let mut state = self.state.write().await;
-                state.action_update_callback = Some(callback);
-            });
-        });
-    }
-
     /// 设置技能配置更新回调（ConfigUpdate with config_type="skills"）
     /// 参数: (skills, removed_items)
     pub fn set_skill_update_callback(&self, callback: SkillUpdateCallback) {

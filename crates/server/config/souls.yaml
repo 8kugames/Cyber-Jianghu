@@ -71,6 +71,6 @@ data:
   review:
     timeout_secs: 1800
     dissent_log_threshold: 3
-    approve_threshold: 2
-    reject_threshold: 2
+    approve_threshold: 1
+    reject_threshold: 1
     poll_interval_secs: 60

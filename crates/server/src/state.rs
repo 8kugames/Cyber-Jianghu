@@ -8,9 +8,7 @@ use tracing::info;
 use crate::db::DbPool;
 use crate::dialogue;
 use crate::game_data;
-use crate::governance::{
-    CapabilityManifest, ProposalStore, SoulReviewEngine, SoulsReviewConfig, TopicClassifier,
-};
+use crate::governance::{ProposalStore, SoulReviewEngine, SoulsReviewConfig, TopicClassifier};
 use crate::models::AgentState;
 use crate::tick::WorkerMessage;
 use crate::websocket;
@@ -144,10 +142,9 @@ pub async fn populate_agent_state_cache(
 
 /// 治理状态 — 跨 handler 和 worker 共享
 pub struct GovernanceState {
-    pub manifest: Arc<RwLock<CapabilityManifest>>,
     pub classifier: Arc<TopicClassifier>,
     pub proposal_store: Arc<ProposalStore>,
-    pub engine: Arc<SoulReviewEngine>,
+    pub engine: Arc<RwLock<SoulReviewEngine>>,
     pub connection_manager: websocket::ConnectionManager,
     pub review_config: SoulsReviewConfig,
 }

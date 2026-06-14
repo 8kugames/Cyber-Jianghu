@@ -23,7 +23,6 @@ struct ProposalRow {
     tick_span: i16,
     phase_count: i16,
     protocol_kind: String,
-    state_transition_count: i16,
     effect_refs: serde_json::Value,
     requirement_refs: serde_json::Value,
     proposed_action_type: String,
@@ -121,19 +120,18 @@ impl ProposalStore {
         let row = sqlx::query_as::<Postgres, ProposalRow>(
             "INSERT INTO action_evolution_proposals \
              (agent_id, tick_id, actor_arity, target_arity, tick_span, phase_count, \
-              protocol_kind, state_transition_count, effect_refs, requirement_refs, \
+              protocol_kind, effect_refs, requirement_refs, \
               proposed_action_type, rationale, governance_topics, topic_confidence) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) \
              RETURNING *",
         )
         .bind(evidence.agent_id)
         .bind(evidence.tick_id)
         .bind(evidence.ir.actor_arity as i16)
-        .bind(&evidence.ir.target_arity)
+        .bind(evidence.ir.target_arity.as_str())
         .bind(evidence.ir.tick_span as i16)
         .bind(evidence.ir.phase_count as i16)
-        .bind(&evidence.ir.protocol_kind)
-        .bind(evidence.ir.state_transition_count as i16)
+        .bind(evidence.ir.protocol_kind.as_str())
         .bind(serde_json::to_value(&evidence.ir.effect_refs).context("serialize effect_refs")?)
         .bind(
             serde_json::to_value(&evidence.ir.requirement_refs)
@@ -164,11 +162,13 @@ impl ProposalStore {
         primary_soul: Option<&str>,
     ) -> Result<Uuid> {
         let topics_val = serde_json::to_value(governance_topics).context("serialize topics")?;
+        // proposal_id 序列化为 JSON string，用 jsonb_array_elements 构造单元素 jsonb 数组
+        let pid_json = serde_json::to_value(proposal_id).context("serialize proposal_id")?;
 
         let row = sqlx::query_as::<Postgres, GroupRow>(
             "INSERT INTO action_evolution_proposal_groups \
              (similarity_key, proposal_ids, governance_topics, primary_soul) \
-             VALUES ($1, ARRAY[$2]::jsonb, $3, $4) \
+             VALUES ($1, jsonb_build_array($2), $3, $4) \
              ON CONFLICT (similarity_key) DO UPDATE SET \
              proposal_ids = action_evolution_proposal_groups.proposal_ids || EXCLUDED.proposal_ids, \
              governance_topics = ( \
@@ -181,7 +181,7 @@ impl ProposalStore {
              RETURNING *",
         )
         .bind(similarity_key)
-        .bind(serde_json::to_value(proposal_id).context("serialize proposal_id")?)
+        .bind(pid_json)
         .bind(topics_val)
         .bind(primary_soul)
         .fetch_one(&self.pool)
@@ -194,7 +194,7 @@ impl ProposalStore {
     pub async fn get_pending_groups(&self) -> Result<Vec<PendingGroup>> {
         let rows = sqlx::query_as::<Postgres, GroupRow>(
             "SELECT * FROM action_evolution_proposal_groups \
-             WHERE status = 'pending_review' ORDER BY created_at ASC",
+             WHERE status IN ('pending_review', 'under_review') ORDER BY created_at ASC",
         )
         .fetch_all(&self.pool)
         .await
@@ -292,7 +292,7 @@ impl ProposalStore {
         let row = sqlx::query(
             r"SELECT agent_id, tick_id, proposed_action_type, rationale,
                       actor_arity, target_arity, tick_span, phase_count,
-                      protocol_kind, state_transition_count,
+                      protocol_kind,
                       effect_refs, requirement_refs,
                       governance_topics, topic_confidence
                FROM action_evolution_proposals WHERE id = $1",
@@ -302,14 +302,30 @@ impl ProposalStore {
         .await?;
 
         Ok(row.map(|r| {
+            let target_arity_str: String = r.get(5);
+            let target_arity = match target_arity_str.as_str() {
+                "zero" => cyber_jianghu_protocol::types::governance::TargetArity::Zero,
+                "many" => cyber_jianghu_protocol::types::governance::TargetArity::Many,
+                _ => cyber_jianghu_protocol::types::governance::TargetArity::One,
+            };
+            let protocol_kind_str: String = r.get(8);
+            let protocol_kind = match protocol_kind_str.as_str() {
+                "bilateral" => cyber_jianghu_protocol::types::governance::ProtocolKind::Bilateral,
+                "multi_phase" => {
+                    cyber_jianghu_protocol::types::governance::ProtocolKind::MultiPhase
+                }
+                "composite" => cyber_jianghu_protocol::types::governance::ProtocolKind::Composite,
+                "unknown" => cyber_jianghu_protocol::types::governance::ProtocolKind::Unknown,
+                _ => cyber_jianghu_protocol::types::governance::ProtocolKind::None,
+            };
             let effect_refs: Vec<String> =
-                serde_json::from_value(r.get::<serde_json::Value, _>(10)).unwrap_or_default();
+                serde_json::from_value(r.get::<serde_json::Value, _>(9)).unwrap_or_default();
             let requirement_refs: Vec<String> =
-                serde_json::from_value(r.get::<serde_json::Value, _>(11)).unwrap_or_default();
+                serde_json::from_value(r.get::<serde_json::Value, _>(10)).unwrap_or_default();
             let governance_topics: Vec<GovernanceTopic> =
-                serde_json::from_value(r.get::<serde_json::Value, _>(12)).unwrap_or_default();
+                serde_json::from_value(r.get::<serde_json::Value, _>(11)).unwrap_or_default();
             let topic_confidence: HashMap<GovernanceTopic, f64> =
-                serde_json::from_value(r.get::<serde_json::Value, _>(13)).unwrap_or_default();
+                serde_json::from_value(r.get::<serde_json::Value, _>(12)).unwrap_or_default();
 
             ProposalEvidence {
                 agent_id: r.get(0),
@@ -317,12 +333,13 @@ impl ProposalStore {
                 proposed_action_type: r.get(2),
                 rationale: r.get(3),
                 ir: ProposedActionIR {
+                    source: cyber_jianghu_protocol::types::governance::IRSource::FromAgentIntent,
+                    atomic_kind: cyber_jianghu_protocol::types::governance::AtomicKind::Unknown,
                     actor_arity: r.get::<i16, _>(4) as u8,
-                    target_arity: r.get(5),
+                    target_arity,
                     tick_span: r.get::<i16, _>(6) as u8,
                     phase_count: r.get::<i16, _>(7) as u8,
-                    protocol_kind: r.get(8),
-                    state_transition_count: r.get::<i16, _>(9) as u8,
+                    protocol_kind,
                     effect_refs,
                     requirement_refs,
                 },
@@ -346,6 +363,23 @@ impl ProposalStore {
         Ok(())
     }
 
+    /// 强制关闭超时的 pending/under_review group（防止无限轮询）
+    pub async fn close_stale_groups(&self, timeout_secs: u64) -> Result<u64> {
+        let timeout_i64 = timeout_secs as i64;
+        let result = sqlx::query(
+            "UPDATE action_evolution_proposal_groups \
+             SET status = 'closed_rejected', final_decision = 'timeout', updated_at = NOW() \
+             WHERE status IN ('pending_review', 'under_review') \
+             AND created_at < NOW() - make_interval(secs => $1)",
+        )
+        .bind(timeout_i64)
+        .execute(&self.pool)
+        .await
+        .context("close stale groups")?;
+
+        Ok(result.rows_affected())
+    }
+
     pub async fn write_dissent_log(
         &self,
         group_id: Uuid,
@@ -361,6 +395,34 @@ impl ProposalStore {
         .execute(&self.pool)
         .await
         .context("append dissent log")?;
+
+        Ok(())
+    }
+
+    /// 持久化单条投票记录到 soul_review_votes 表
+    pub async fn write_vote(
+        &self,
+        proposal_group_id: Uuid,
+        soul: &str,
+        role: &str,
+        vote: &str,
+        rationale: &str,
+        evidence_refs: &[String],
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO soul_review_votes \
+             (proposal_group_id, soul, role, vote, rationale, evidence_refs) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(proposal_group_id)
+        .bind(soul)
+        .bind(role)
+        .bind(vote)
+        .bind(rationale)
+        .bind(serde_json::to_value(evidence_refs).context("serialize evidence_refs")?)
+        .execute(&self.pool)
+        .await
+        .context("insert vote")?;
 
         Ok(())
     }

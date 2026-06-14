@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::{info, warn};
 
 use crate::state::AppState;
 
@@ -245,6 +246,105 @@ pub async fn admin_action_on_group(
     .execute(pool)
     .await
     .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // 管理员 approve 触发完整 auto-evolve 流水线
+    if new_status == "approved" {
+        let Some(ref gov) = state.governance else {
+            return Ok(Json(
+                serde_json::json!({"status": "ok", "new_status": new_status}),
+            ));
+        };
+
+        // 读取 group 的 proposal_ids
+        let group_row =
+            sqlx::query("SELECT proposal_ids FROM action_evolution_proposal_groups WHERE id = $1")
+                .bind(group_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        if let Some(row) = group_row {
+            let proposal_ids: Vec<uuid::Uuid> =
+                serde_json::from_value(row.get::<serde_json::Value, _>(0)).unwrap_or_default();
+
+            let config_dir = crate::paths::get_config_dir();
+
+            // 逐个 proposal 生成 action config 并写入 actions.yaml
+            for pid in &proposal_ids {
+                match gov.proposal_store.get_proposal(*pid).await {
+                    Ok(Some(evidence)) => {
+                        match crate::governance::auto_evolve::generate_action_config(&evidence) {
+                            Ok((action_name, entry)) => {
+                                if let Err(e) =
+                                    crate::governance::action_writer::append_action_to_yaml(
+                                        &config_dir,
+                                        &action_name,
+                                        &entry,
+                                    )
+                                {
+                                    warn!(
+                                        action_name = %action_name,
+                                        error = %e,
+                                        "管理员 approve: 写入 actions.yaml 失败"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                warn!(
+                                    proposal_id = %pid,
+                                    error = %e,
+                                    "管理员 approve: 生成 action config 失败"
+                                );
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        warn!(proposal_id = %pid, "管理员 approve: proposal 不存在");
+                    }
+                    Err(e) => {
+                        warn!(
+                            proposal_id = %pid,
+                            error = %e,
+                            "管理员 approve: 获取 proposal 失败"
+                        );
+                    }
+                }
+            }
+
+            // 重载 ActionRegistry
+            match crate::game_data::loaders::load_actions(&config_dir) {
+                Ok(new_actions) => {
+                    state.game_data.update_actions(new_actions);
+                    info!("管理员 approve: ActionRegistry 已更新");
+                }
+                Err(e) => {
+                    warn!("管理员 approve: ActionRegistry 重载失败: {}", e);
+                }
+            }
+
+            // 刷新 CapabilityManifest
+            gov.engine.write().await.reload_manifest().await;
+
+            // 广播 ConfigUpdate
+            let actions_content =
+                std::fs::read_to_string(config_dir.join("actions.yaml")).unwrap_or_default();
+            let config_update = cyber_jianghu_protocol::messages::ServerMessage::ConfigUpdate {
+                config_type: "actions".to_string(),
+                update_type: "full".to_string(),
+                version: chrono::Utc::now().to_rfc3339(),
+                content: serde_json::json!({"yaml": actions_content}),
+                content_hash: None,
+                updated_items: vec![],
+                removed_items: vec![],
+            };
+            if let Err(e) =
+                crate::websocket::broadcast_config_update(config_update, &gov.connection_manager)
+                    .await
+            {
+                warn!("管理员 approve: broadcast 失败: {}", e);
+            }
+        }
+    }
 
     Ok(Json(
         serde_json::json!({"status": "ok", "new_status": new_status}),

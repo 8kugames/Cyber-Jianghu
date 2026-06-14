@@ -315,12 +315,7 @@ impl SoulCycleRecorder {
     }
 
     /// 记录地魂 tool calling 日志
-    pub async fn record_earth_tool_calls(
-        &self,
-        tick_id: i64,
-        attempt: i32,
-        tool_calls_json: &str,
-    ) {
+    pub async fn record_earth_tool_calls(&self, tick_id: i64, attempt: i32, tool_calls_json: &str) {
         let conn = self
             .conn
             .lock()

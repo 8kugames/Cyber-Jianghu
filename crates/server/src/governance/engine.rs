@@ -55,7 +55,7 @@ pub struct SoulReviewEngine {
     config: SoulsConfig,
     sources: HashMap<String, Box<dyn SourceProvider>>,
     llm_client: Arc<GovernanceLlmClient>,
-    capability_manifest: CapabilityManifest,
+    capability_manifest: Arc<tokio::sync::RwLock<CapabilityManifest>>,
 }
 
 impl SoulReviewEngine {
@@ -69,7 +69,7 @@ impl SoulReviewEngine {
             serde_json::from_value(data.clone()).context("反序列化 SoulsConfig 失败")?;
 
         let llm_client = Arc::new(GovernanceLlmClient::load());
-        let capability_manifest = CapabilityManifest::load();
+        let capability_manifest = Arc::new(tokio::sync::RwLock::new(CapabilityManifest::load()));
 
         info!(
             "SoulReviewEngine 加载完成: {} souls, {} topic mappings, LLM enabled={}",
@@ -87,6 +87,14 @@ impl SoulReviewEngine {
 
     pub fn register_source(&mut self, soul_id: &str, provider: Box<dyn SourceProvider>) {
         self.sources.insert(soul_id.to_string(), provider);
+    }
+
+    /// 重新加载 CapabilityManifest（auto-evolve 写入新 action 后调用）
+    pub async fn reload_manifest(&self) {
+        let new_manifest = CapabilityManifest::load();
+        let count = new_manifest.entries().len();
+        *self.capability_manifest.write().await = new_manifest;
+        info!("SoulReviewEngine CapabilityManifest 已刷新: {} 条目", count);
     }
 
     pub fn config(&self) -> &SoulsConfig {
@@ -256,10 +264,11 @@ impl SoulReviewEngine {
             }
             ReviewRole::CoReviewer => "你是复审官，基于各自真源对齐，输出简洁 rationale。",
         };
+        let manifest_guard = self.capability_manifest.read().await;
         let system_prompt = match build_soul_prompt(
             soul_id,
             &soul_config.system_prompt_template,
-            &self.capability_manifest,
+            &manifest_guard,
             evidence,
         ) {
             Ok(p) => p,
@@ -273,6 +282,7 @@ impl SoulReviewEngine {
                 };
             }
         };
+        drop(manifest_guard);
         let user_message = build_review_message(evidence);
         let user_message = format!("{}\n\n{}", role_instruction, user_message);
 
@@ -372,6 +382,30 @@ impl SoulReviewEngine {
             let verdict = self
                 .review(&primary_soul, &evidence, ReviewRole::Primary)
                 .await;
+            let role_str = "primary";
+            let vote_str = match verdict.vote {
+                VoteChoice::Approve => "approve",
+                VoteChoice::Reject => "reject",
+                VoteChoice::Abstain => "abstain",
+            };
+            if let Err(e) = store
+                .write_vote(
+                    group.id,
+                    &verdict.soul,
+                    role_str,
+                    vote_str,
+                    &verdict.rationale,
+                    &verdict.evidence_refs,
+                )
+                .await
+            {
+                warn!(
+                    group_id = %group.id,
+                    soul = %verdict.soul,
+                    error = %e,
+                    "写入投票记录失败"
+                );
+            }
             if !matches!(verdict.vote, VoteChoice::Abstain) {
                 votes.push(verdict);
             }
@@ -384,6 +418,30 @@ impl SoulReviewEngine {
                 let verdict = self
                     .review(co_soul, &evidence, ReviewRole::CoReviewer)
                     .await;
+                let role_str = "co_reviewer";
+                let vote_str = match verdict.vote {
+                    VoteChoice::Approve => "approve",
+                    VoteChoice::Reject => "reject",
+                    VoteChoice::Abstain => "abstain",
+                };
+                if let Err(e) = store
+                    .write_vote(
+                        group.id,
+                        &verdict.soul,
+                        role_str,
+                        vote_str,
+                        &verdict.rationale,
+                        &verdict.evidence_refs,
+                    )
+                    .await
+                {
+                    warn!(
+                        group_id = %group.id,
+                        soul = %verdict.soul,
+                        error = %e,
+                        "写入投票记录失败"
+                    );
+                }
                 if !matches!(verdict.vote, VoteChoice::Abstain) {
                     votes.push(verdict);
                 }
@@ -525,7 +583,7 @@ mod tests {
                 enabled: false,
                 config: None,
             }),
-            capability_manifest: CapabilityManifest::default(),
+            capability_manifest: Arc::new(tokio::sync::RwLock::new(CapabilityManifest::default())),
         }
     }
 

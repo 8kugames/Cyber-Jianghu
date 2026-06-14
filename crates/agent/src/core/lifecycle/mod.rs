@@ -787,52 +787,48 @@ impl super::Agent {
                                         }
                                     }
 
-                                    // SelfEvaluator: 失败 intent 触发治理提案评估
+                                    // v6 简化：失败 intent 触发治理提案，跳过 SelfEvaluator
+                                    // IR 由 Server 端从 proposed_action_type 查表生成
                                     for result in &results {
                                         if !result.success {
                                             let governance_code = result.governance_code
                                                 .unwrap_or(cyber_jianghu_protocol::GovernanceCode::NonGovernanceReject);
+
+                                            // NonGovernanceReject 不提交（普通参数错误）
+                                            if matches!(governance_code,
+                                                cyber_jianghu_protocol::GovernanceCode::NonGovernanceReject)
+                                            {
+                                                continue;
+                                            }
 
                                             let (action_type_str, _) = intent_map
                                                 .get(&result.intent_id)
                                                 .map(|(at, ad)| (at.to_string(), (*ad).clone()))
                                                 .unwrap_or_else(|| ("unknown".to_string(), None));
 
-                                            let eval = crate::soul::reflector::SelfEvaluator::evaluate(&action_type_str, governance_code);
-                                            if eval.decision == crate::soul::reflector::EvaluatorDecision::Propose
-                                                && let Some(ref ir) = eval.ir
-                                            {
-                                                let mut decision = eval.decision.clone();
-                                                crate::soul::reflector::check_atomicity(ir, &mut decision);
-                                                if decision == crate::soul::reflector::EvaluatorDecision::Propose {
-                                                    let proposal = serde_json::json!({
-                                                        "agent_id": agent_id,
-                                                        "tick_id": result.tick_id,
-                                                        "proposed_action_type": action_type_str,
-                                                        "ir": ir,
-                                                        "governance_topics": eval.governance_topics,
-                                                        "topic_confidence": eval.topic_confidence,
-                                                        "rationale": eval.rationale,
-                                                    });
-                                                    let url = format!("{}/api/v1/action-evolution/propose", self.config.server.http_url);
-                                                    let auth_token = self
-                                                        .device_config
-                                                        .as_ref()
-                                                        .map(|d| d.auth_token.clone())
-                                                        .unwrap_or_default();
-                                                    tokio::spawn(async move {
-                                                        let _ = reqwest::Client::new()
-                                                            .post(&url)
-                                                            .header(
-                                                                reqwest::header::AUTHORIZATION,
-                                                                format!("Bearer {}", auth_token),
-                                                            )
-                                                            .json(&proposal)
-                                                            .send()
-                                                            .await;
-                                                    });
-                                                }
-                                            }
+                                            let proposal = serde_json::json!({
+                                                "agent_id": agent_id,
+                                                "tick_id": result.tick_id,
+                                                "proposed_action_type": action_type_str,
+                                                "rationale": result.error.clone().unwrap_or_default(),
+                                            });
+                                            let url = format!("{}/api/v1/action-evolution/propose", self.config.server.http_url);
+                                            let auth_token = self
+                                                .device_config
+                                                .as_ref()
+                                                .map(|d| d.auth_token.clone())
+                                                .unwrap_or_default();
+                                            tokio::spawn(async move {
+                                                let _ = reqwest::Client::new()
+                                                    .post(&url)
+                                                    .header(
+                                                        reqwest::header::AUTHORIZATION,
+                                                        format!("Bearer {}", auth_token),
+                                                    )
+                                                    .json(&proposal)
+                                                    .send()
+                                                    .await;
+                                            });
                                         }
                                     }
 

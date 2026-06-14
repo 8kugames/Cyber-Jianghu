@@ -432,7 +432,11 @@ used_chaos_fallback = true;
                             layer1.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             layer2.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             layer3.map(|l| l.detail.as_deref().unwrap_or("通过")),
-                            if used_chaos_fallback { Some("天魂审查未通过，使用 chaos fallback") } else { None },
+                            if used_chaos_fallback {
+                                Some("天魂审查未通过，使用 chaos fallback")
+                            } else {
+                                None
+                            },
                         )
                         .await;
                     let pipeline = Self::assemble_pipeline(approved_intents.clone());

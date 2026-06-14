@@ -20,7 +20,7 @@
 
 // 引入 library crate
 use cyber_jianghu_server::governance::{
-    ActionEvolutionConfig, CapabilityManifest, ProposalStore, SoulReviewEngine, TopicClassifier,
+    ActionEvolutionConfig, ProposalStore, SoulReviewEngine, TopicClassifier,
 };
 use cyber_jianghu_server::state::{
     GovernanceState, create_agent_state_cache, populate_agent_state_cache,
@@ -156,20 +156,15 @@ async fn init_governance(
         serde_json::from_value(ae_data.clone()).context("反序列化 ActionEvolutionConfig 失败")?;
     info!("action_evolution.yaml 加载完成");
 
-    let manifest = CapabilityManifest::load();
-    info!(
-        "CapabilityManifest 加载完成: {} 条目",
-        manifest.entries().len()
-    );
-
     let classifier = Arc::new(TopicClassifier::new(action_evo_config.topic_classifier));
     let proposal_store = Arc::new(ProposalStore::new(db_pool.clone()));
 
     // SoulReviewEngine::load 接受 config_dir，内部加载 souls.yaml
-    let engine =
-        Arc::new(SoulReviewEngine::load(&config_dir).context("SoulReviewEngine 初始化失败")?);
+    let engine = Arc::new(tokio::sync::RwLock::new(
+        SoulReviewEngine::load(&config_dir).context("SoulReviewEngine 初始化失败")?,
+    ));
 
-    let review_config = engine.config().review.clone();
+    let review_config = engine.read().await.config().review.clone();
 
     // 创建治理轮询任务的关闭信号通道
     let (poll_shutdown_tx, poll_shutdown_rx) = tokio::sync::watch::channel(false);
@@ -193,13 +188,26 @@ async fn init_governance(
                 }
                 _ = interval.tick() => {
                     let review_timeout = std::time::Duration::from_secs(30);
+
+                    // 超时清理：关闭超过 timeout_secs 仍未闭环的 group
+                    let timeout_secs = review_config.timeout_secs;
+                    if let Ok(closed) = store_clone.close_stale_groups(timeout_secs).await {
+                        if closed > 0 {
+                            info!("治理轮询: 强制关闭 {} 个超时 group", closed);
+                        }
+                    }
+
                     let pending_result =
                         tokio::time::timeout(review_timeout, store_clone.get_pending_groups()).await;
                     match pending_result {
                         Ok(Ok(groups)) if !groups.is_empty() => {
-                            let review_future =
-                                engine_clone.review_pending(&store_clone, &groups);
-                            match tokio::time::timeout(review_timeout, review_future).await {
+                            let review_result = {
+                                let engine_guard = engine_clone.read().await;
+                                let review_future =
+                                    engine_guard.review_pending(&store_clone, &groups);
+                                tokio::time::timeout(review_timeout, review_future).await
+                            };
+                            match review_result {
                                 Ok(results) => {
                                     for (group_id, status) in &results {
                                         info!("Group {} 审议完成: {}", group_id, status);
@@ -217,6 +225,9 @@ async fn init_governance(
                                                     warn!("ActionRegistry 重载失败: {}", e);
                                                 }
                                             }
+
+                                            // 刷新 CapabilityManifest（使 LLM 下轮审议看到新 action）
+                                            engine_clone.write().await.reload_manifest().await;
 
                                             let actions_content = std::fs::read_to_string(
                                                 crate::paths::get_config_dir().join("actions.yaml")
@@ -262,7 +273,6 @@ async fn init_governance(
     });
 
     let state = GovernanceState {
-        manifest: Arc::new(tokio::sync::RwLock::new(manifest)),
         classifier,
         proposal_store,
         engine,
@@ -891,7 +901,7 @@ async fn main() -> Result<()> {
         )
         // Action Evolution — 提案组详情
         .route(
-            "/api/dashboard/action-evolution/groups/:id",
+            "/api/dashboard/action-evolution/groups/{id}",
             get(handlers::dashboard::get_proposal_group_detail).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
@@ -901,7 +911,7 @@ async fn main() -> Result<()> {
         )
         // Action Evolution — 管理员审批/驳回提案组
         .route(
-            "/api/dashboard/action-evolution/groups/:id/action",
+            "/api/dashboard/action-evolution/groups/{id}/action",
             post(handlers::dashboard::admin_action_on_group).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),

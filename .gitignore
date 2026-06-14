@@ -135,3 +135,9 @@ flamegraph.svg
 *.dylib
 .superpowers/
 doc/
+
+# Middleware audit docs — only enter git with explicit authorization
+docs/audit/
+
+# LLM 配置含明文 API key —— web 端首次保存自动生成，不入库
+crates/server/config/llm.yaml

@@ -39,7 +39,10 @@ impl super::super::Agent {
                         renhun: cyber_jianghu_protocol::RenhunReport {
                             narrative: r.renhun_narrative,
                             thought_log: r.renhun_thought_log,
-                            earth_tool_calls: r.earth_tool_calls.as_ref().and_then(|s| serde_json::from_str(s).ok()),
+                            earth_tool_calls: r
+                                .earth_tool_calls
+                                .as_ref()
+                                .and_then(|s| serde_json::from_str(s).ok()),
                         },
                         tianhun: cyber_jianghu_protocol::TianhunReport {
                             result: r.tianhun_result,

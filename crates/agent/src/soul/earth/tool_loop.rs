@@ -51,9 +51,15 @@ pub(crate) async fn run_tool_loop(
 
     // 地魂 tool call 日志收集
     let tool_log_cfg = earth_config.and_then(|c| {
-        if c.tool_log.enabled { Some(&c.tool_log) } else { None }
+        if c.tool_log.enabled {
+            Some(&c.tool_log)
+        } else {
+            None
+        }
     });
-    let max_summary = tool_log_cfg.map(|c| c.max_result_summary_chars).unwrap_or(0);
+    let max_summary = tool_log_cfg
+        .map(|c| c.max_result_summary_chars)
+        .unwrap_or(0);
     let max_calls = tool_log_cfg.map(|c| c.max_calls_per_cycle).unwrap_or(0);
     let mut tool_call_log: Vec<cyber_jianghu_protocol::EarthToolCall> = Vec::new();
     let log_enabled = tool_log_cfg.is_some();
@@ -156,7 +162,13 @@ pub(crate) async fn run_tool_loop(
                                     "[已获知足够信息，直接回答]",
                                 ));
                             }
-                            return forced_text_exit(llm, messages, llm_config.clone(), tool_call_log).await;
+                            return forced_text_exit(
+                                llm,
+                                messages,
+                                llm_config.clone(),
+                                tool_call_log,
+                            )
+                            .await;
                         }
                         LoopGuardAction::Warn(_) => {
                             warn!("[地魂] Loop guard 警告: 连续调用 '{}'", tc.function.name);
@@ -210,7 +222,8 @@ pub(crate) async fn run_tool_loop(
                 // 日志记录：成功（截断 raw_result，非 budget 处理后的 processed）
                 if log_enabled && tool_call_log.len() < max_calls {
                     let args_str = serde_json::to_string(&args).unwrap_or_default();
-                    let summary: String = raw_result.to_string().chars().take(max_summary).collect();
+                    let summary: String =
+                        raw_result.to_string().chars().take(max_summary).collect();
                     tool_call_log.push(cyber_jianghu_protocol::EarthToolCall {
                         name: tc.function.name.clone(),
                         arguments: args_str,

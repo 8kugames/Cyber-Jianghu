@@ -8,6 +8,7 @@ use sqlx::PgPool;
 use cyber_jianghu_protocol::AttributeValue;
 
 use super::ActionExecutionResult;
+use super::ParsedActionData;
 use super::types::StateChange;
 use crate::game_data::{ActionEffect, ActionRegistry, ActionRequirement};
 use crate::models::{AgentState, Intent};
@@ -23,9 +24,12 @@ impl ActionExecutor {
     }
 
     /// 执行动作
+    ///
+    /// 接收验证层已解析的 [`ParsedActionData`]，消除执行层的重复反序列化。
     pub fn execute(
         &self,
         intent: &Intent,
+        parsed_data: &ParsedActionData,
         agent_state: &mut AgentState,
         all_states: &[AgentState],
     ) -> ActionExecutionResult {
@@ -48,35 +52,29 @@ impl ActionExecutor {
             }
         };
 
-        let action_data = intent.action_data.clone();
         let current_loc = agent_state.node_id.clone();
 
-        let mut result = match intent.action_type.as_str() {
-            "予" => BasicActionExecutor::execute_yu(intent, action_data, &current_loc),
-            "取" => BasicActionExecutor::execute_qu(intent, action_data, &current_loc),
-            "用" | "吃" | "喝" => BasicActionExecutor::execute_yong(intent, action_data),
-            "说话" => BasicActionExecutor::execute_speak(intent, action_data),
-            "移动" => BasicActionExecutor::execute_move(intent, action_data, &current_loc),
-            "观察" => BasicActionExecutor::execute_observe(intent, action_data, all_states),
-            "攻击" => CombatActionExecutor::execute_attack(intent, &action_data, agent_state),
-            "休整" => BasicActionExecutor::execute_halt(intent),
-            "制造" => BasicActionExecutor::execute_craft(intent, action_data),
-            "教导" => BasicActionExecutor::execute_teach(intent, action_data),
-            _ => {
-                if let Some(config) = ActionRegistry::get(intent.action_type.as_str()) {
-                    ActionExecutionResult::success(
-                        config.description.clone(),
-                        intent.action_type.to_string(),
-                        Some(intent.intent_id),
-                    )
-                } else {
-                    ActionExecutionResult::failure(
-                        format!("未知的动作类型: {}", intent.action_type.as_str()),
-                        intent.action_type.to_string(),
-                        Some(intent.intent_id),
-                    )
-                }
+        let mut result = match parsed_data {
+            ParsedActionData::Yu(data) => {
+                BasicActionExecutor::execute_yu(intent, data, &current_loc)
             }
+            ParsedActionData::Qu(data) => {
+                BasicActionExecutor::execute_qu(intent, data, &current_loc)
+            }
+            ParsedActionData::Yong(data) => BasicActionExecutor::execute_yong(intent, data),
+            ParsedActionData::Speak(data) => BasicActionExecutor::execute_speak(intent, data),
+            ParsedActionData::Move(data) => {
+                BasicActionExecutor::execute_move(intent, data, &current_loc)
+            }
+            ParsedActionData::Observe(data) => {
+                BasicActionExecutor::execute_observe(intent, data, all_states)
+            }
+            ParsedActionData::Attack(data) => {
+                CombatActionExecutor::execute_attack(intent, data, agent_state)
+            }
+            ParsedActionData::Craft(data) => BasicActionExecutor::execute_craft(intent, data),
+            ParsedActionData::Teach(data) => BasicActionExecutor::execute_teach(intent, data),
+            ParsedActionData::None => BasicActionExecutor::execute_halt(intent),
         };
 
         if result.success {

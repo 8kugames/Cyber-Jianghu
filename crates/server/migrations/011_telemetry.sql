@@ -27,11 +27,11 @@ CREATE TABLE IF NOT EXISTS telemetry_aggregations (
 );
 
 -- 按聚合类型 + 时间范围过滤（主要查询模式）
-CREATE INDEX idx_telemetry_agg_name_period
+CREATE INDEX IF NOT EXISTS idx_telemetry_agg_name_period
     ON telemetry_aggregations(aggregation_name, period_start DESC);
 
 -- JSONB GIN 索引（支持指标值过滤）
-CREATE INDEX idx_telemetry_agg_gin
+CREATE INDEX IF NOT EXISTS idx_telemetry_agg_gin
     ON telemetry_aggregations USING GIN (metrics);
 
 COMMENT ON TABLE  telemetry_aggregations IS '行为遥测聚合数据';

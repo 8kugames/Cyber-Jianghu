@@ -204,6 +204,18 @@ pub async fn verify_device_token(pool: &PgPool, device_id: Uuid, auth_token: &st
     Ok(result.is_some())
 }
 
+/// 仅通过 auth_token 查找设备（proposal 提交端点使用，无需 device_id）
+pub async fn find_device_by_auth_token(pool: &PgPool, auth_token: &str) -> Result<Option<Uuid>> {
+    let result: Option<(Uuid,)> =
+        sqlx::query_as(r#"SELECT device_id FROM devices WHERE auth_token = $1"#)
+            .bind(auth_token)
+            .fetch_optional(pool)
+            .await
+            .context("按 auth_token 查找设备失败")?;
+
+    Ok(result.map(|(id,)| id))
+}
+
 /// 更新设备最后在线时间
 pub async fn update_device_last_seen(pool: &PgPool, device_id: Uuid) -> Result<()> {
     sqlx::query(

@@ -136,3 +136,43 @@ fn check_token_value(state: &AppState, token: &str, require_write: bool) -> bool
     );
     false
 }
+
+/// 验证设备令牌（Agent 提交 proposal 使用）
+///
+/// 从 Authorization: Bearer <token> 提取 auth_token，
+/// 按 auth_token 查库校验设备身份。
+pub async fn require_device_token(
+    State(state): State<Arc<AppState>>,
+    req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let token = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .map(|s| s.to_string());
+
+    let token = match token {
+        Some(t) => t,
+        None => {
+            warn!("Device auth failed: missing Bearer token");
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    };
+
+    match crate::db::find_device_by_auth_token(&state.db_pool, &token).await {
+        Ok(Some(_device_id)) => {
+            info!("Device authenticated: token={}", mask_token(&token));
+            Ok(next.run(req).await)
+        }
+        Ok(None) => {
+            warn!("Device auth failed: invalid token");
+            Err(StatusCode::UNAUTHORIZED)
+        }
+        Err(e) => {
+            warn!("Device auth error: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
