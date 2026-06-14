@@ -100,12 +100,13 @@ mod tests {
 
     fn test_ir(effect_ref: &str) -> ProposedActionIR {
         ProposedActionIR {
+            source: cyber_jianghu_protocol::types::governance::IRSource::FromAgentIntent,
+            atomic_kind: cyber_jianghu_protocol::types::governance::AtomicKind::Unknown,
             actor_arity: 1,
-            target_arity: "zero_to_many".into(),
+            target_arity: cyber_jianghu_protocol::types::governance::TargetArity::Many,
             tick_span: 0,
             phase_count: 1,
-            protocol_kind: "none".into(),
-            state_transition_count: 1,
+            protocol_kind: cyber_jianghu_protocol::types::governance::ProtocolKind::None,
             effect_refs: vec![effect_ref.into()],
             requirement_refs: vec![],
         }

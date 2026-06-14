@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use cyber_jianghu_protocol::types::governance::{GovernanceTopic, ProposedActionIR};
 
+use crate::governance::IRGenerator;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -16,8 +17,12 @@ pub struct ProposalRequest {
     pub agent_id: Uuid,
     pub tick_id: i64,
     pub proposed_action_type: String,
-    pub ir: ProposedActionIR,
+    /// Agent 端可不传，server 端由 IRGenerator 从 proposed_action_type 查表生成
+    pub ir: Option<ProposedActionIR>,
+    /// Agent 端可不传，server 端由 TopicClassifier 根据 IR 自动分类
+    #[serde(default)]
     pub governance_topics: Vec<GovernanceTopic>,
+    #[serde(default)]
     pub topic_confidence: HashMap<GovernanceTopic, f64>,
     pub rationale: String,
 }
@@ -31,17 +36,27 @@ pub async fn submit_proposal(
         .as_ref()
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    // IR 缺省时由 server 端从 proposed_action_type 查表生成
+    let ir = match req.ir {
+        Some(ir) => ir,
+        None => IRGenerator::generate(&req.proposed_action_type),
+    };
+
     let classification =
         gov.classifier
-            .classify(&req.ir, &req.governance_topics, &req.topic_confidence);
+            .classify(&ir, &req.governance_topics, &req.topic_confidence);
 
-    let primary_soul = gov.engine.route_for_topics(&classification.topics);
+    let primary_soul = gov
+        .engine
+        .read()
+        .await
+        .route_for_topics(&classification.topics);
 
     let evidence = super::ProposalEvidence {
         agent_id: req.agent_id,
         tick_id: req.tick_id,
         proposed_action_type: req.proposed_action_type,
-        ir: req.ir,
+        ir,
         governance_topics: classification.topics.clone(),
         topic_confidence: classification.confidence.clone(),
         rationale: req.rationale,

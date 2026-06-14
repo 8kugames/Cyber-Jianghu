@@ -7,30 +7,6 @@ use crate::models::Intent;
 
 pub(super) struct BasicActionExecutor;
 
-macro_rules! deserialize_action_data {
-    ($action_data:expr, $intent:expr, $type:ty, $action_type_str:expr) => {{
-        match $action_data {
-            Some(v) => match serde_json::from_value::<$type>(v) {
-                Ok(data) => data,
-                Err(e) => {
-                    return ActionExecutionResult::failure(
-                        format!("action_data 格式错误: {}", e),
-                        $action_type_str.to_string(),
-                        Some($intent.intent_id),
-                    );
-                }
-            },
-            None => {
-                return ActionExecutionResult::failure(
-                    format!("缺少 {} 数据", $action_type_str),
-                    $action_type_str.to_string(),
-                    Some($intent.intent_id),
-                );
-            }
-        }
-    }};
-}
-
 impl BasicActionExecutor {
     /// 予：物品从 actor 向外流动
     /// recipient_type = "agent" → ItemTransferred
@@ -38,10 +14,9 @@ impl BasicActionExecutor {
     /// 予是纯物理输出，不携带赠予/丢弃的社会语义
     pub(super) fn execute_yu(
         intent: &Intent,
-        action_data: Option<serde_json::Value>,
+        data: &YuData,
         current_location: &str,
     ) -> ActionExecutionResult {
-        let data: YuData = deserialize_action_data!(action_data, intent, YuData, "予");
         let rtype = data.recipient_type.as_str();
 
         match rtype {
@@ -74,7 +49,7 @@ impl BasicActionExecutor {
                 result.add_change(StateChange::ItemTransferred {
                     from: intent.agent_id,
                     to: target_id,
-                    item_id: data.item_id,
+                    item_id: data.item_id.clone(),
                     quantity: data.quantity,
                 });
                 result
@@ -87,7 +62,7 @@ impl BasicActionExecutor {
                 );
                 result.add_change(StateChange::ItemDisposed {
                     agent_id: intent.agent_id,
-                    item_id: data.item_id,
+                    item_id: data.item_id.clone(),
                     quantity: data.quantity,
                     location: current_location.to_string(),
                 });
@@ -107,10 +82,9 @@ impl BasicActionExecutor {
     /// source_type = "resource" → ItemAcquired(source=resource)
     pub(super) fn execute_qu(
         intent: &Intent,
-        action_data: Option<serde_json::Value>,
+        data: &QuData,
         current_location: &str,
     ) -> ActionExecutionResult {
-        let data: QuData = deserialize_action_data!(action_data, intent, QuData, "取");
         let stype = data.source_type.as_str();
 
         match stype {
@@ -122,7 +96,7 @@ impl BasicActionExecutor {
                 );
                 result.add_change(StateChange::ItemAcquired {
                     agent_id: intent.agent_id,
-                    item_id: data.item_id,
+                    item_id: data.item_id.clone(),
                     quantity: data.quantity,
                     source: "ground".to_string(),
                 });
@@ -157,7 +131,7 @@ impl BasicActionExecutor {
                 result.add_change(StateChange::ItemTransferred {
                     from: source_id,
                     to: intent.agent_id,
-                    item_id: data.item_id,
+                    item_id: data.item_id.clone(),
                     quantity: data.quantity,
                 });
                 result
@@ -207,7 +181,7 @@ impl BasicActionExecutor {
                 );
                 result.add_change(StateChange::ItemAcquired {
                     agent_id: intent.agent_id,
-                    item_id: data.item_id,
+                    item_id: data.item_id.clone(),
                     quantity,
                     source: "resource".to_string(),
                 });
@@ -226,12 +200,7 @@ impl BasicActionExecutor {
 
     /// 用：消耗或激活物品
     /// 不做语义过滤——物品效果由 item 定义中的 effects 决定
-    pub(super) fn execute_yong(
-        intent: &Intent,
-        action_data: Option<serde_json::Value>,
-    ) -> ActionExecutionResult {
-        let data: YongData = deserialize_action_data!(action_data, intent, YongData, "用");
-
+    pub(super) fn execute_yong(intent: &Intent, data: &YongData) -> ActionExecutionResult {
         let item = match crate::items::get_item_definition(&data.item_id) {
             Some(item) => item,
             None => {
@@ -278,7 +247,7 @@ impl BasicActionExecutor {
 
         result.add_change(StateChange::ItemUsed {
             agent_id: intent.agent_id,
-            item_id: data.item_id,
+            item_id: data.item_id.clone(),
             effects,
         });
 
@@ -289,12 +258,7 @@ impl BasicActionExecutor {
     /// channel = "public" → 本地广播（默认）
     /// channel = "private" → 私密会话（Dialogue Session）
     /// channel = "broadcast" → 大范围广播
-    pub(super) fn execute_speak(
-        intent: &Intent,
-        action_data: Option<serde_json::Value>,
-    ) -> ActionExecutionResult {
-        let data: SpeakData = deserialize_action_data!(action_data, intent, SpeakData, "说话");
-
+    pub(super) fn execute_speak(intent: &Intent, data: &SpeakData) -> ActionExecutionResult {
         let channel = data.channel.as_str();
 
         if channel == "private" && data.target_agent_id.is_none() {
@@ -313,8 +277,8 @@ impl BasicActionExecutor {
 
         result.add_change(StateChange::MessageSpoken {
             agent_id: intent.agent_id,
-            content: data.content,
-            channel: data.channel,
+            content: data.content.clone(),
+            channel: data.channel.clone(),
             target_agent_id: data.target_agent_id,
             already_broadcast: intent.already_broadcast,
         });
@@ -325,11 +289,9 @@ impl BasicActionExecutor {
     /// 移动
     pub(super) fn execute_move(
         intent: &Intent,
-        action_data: Option<serde_json::Value>,
+        data: &MoveData,
         current_location: &str,
     ) -> ActionExecutionResult {
-        let data: MoveData = deserialize_action_data!(action_data, intent, MoveData, "移动");
-
         let registry = match registry_or_error() {
             Ok(r) => r,
             Err(e) => {
@@ -400,12 +362,10 @@ impl BasicActionExecutor {
     /// 观察
     pub(super) fn execute_observe(
         intent: &Intent,
-        action_data: Option<serde_json::Value>,
+        data: &ObserveData,
         all_states: &[crate::models::AgentState],
     ) -> ActionExecutionResult {
-        let data: ObserveData = deserialize_action_data!(action_data, intent, ObserveData, "观察");
-
-        match data.target_agent_id {
+        match &data.target_agent_id {
             Some(target_str) => {
                 let target_id = match target_str.parse::<uuid::Uuid>() {
                     Ok(id) => id,
@@ -583,12 +543,7 @@ impl BasicActionExecutor {
     }
 
     /// 制造
-    pub(super) fn execute_craft(
-        intent: &Intent,
-        action_data: Option<serde_json::Value>,
-    ) -> ActionExecutionResult {
-        let data: CraftData = deserialize_action_data!(action_data, intent, CraftData, "制造");
-
+    pub(super) fn execute_craft(intent: &Intent, data: &CraftData) -> ActionExecutionResult {
         let recipe = match crate::game_data::registry::RecipeRegistry::get(&data.recipe_id) {
             Some(r) => r,
             None => {
@@ -616,12 +571,7 @@ impl BasicActionExecutor {
     }
 
     /// 教导
-    pub(super) fn execute_teach(
-        intent: &Intent,
-        action_data: Option<serde_json::Value>,
-    ) -> ActionExecutionResult {
-        let data: TeachData = deserialize_action_data!(action_data, intent, TeachData, "教导");
-
+    pub(super) fn execute_teach(intent: &Intent, data: &TeachData) -> ActionExecutionResult {
         let student_id = match uuid::Uuid::parse_str(&data.target_agent_id) {
             Ok(id) => id,
             Err(_) => {

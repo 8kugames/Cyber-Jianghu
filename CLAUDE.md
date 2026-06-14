@@ -413,6 +413,7 @@ Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env v
 
 **Events & Config**:
 - `GET /api/v1/events` - Death events SSE stream
+- `GET /api/v1/state/stream` - WorldState + IntentSnapshot composite SSE stream (桌面窗口消费)
 - `GET/POST /api/v1/config/llm-disabled` - LLM disable toggle
 - `GET/POST /api/v1/config/auto-rebirth` - Auto-rebirth toggle
 - `GET/POST /api/v1/config/llm` - Get/update LLM config

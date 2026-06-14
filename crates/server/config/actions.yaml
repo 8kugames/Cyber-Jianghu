@@ -25,6 +25,12 @@ data:
     category: survival
     ooc_risk: low
     transmission: silent
+    atomic_kind: atomic
+    actor_arity: 1
+    target_arity: zero
+    tick_span: 0
+    phase_count: 1
+    protocol_kind: none
     validation:
       required_fields:
         - recipient_type
@@ -48,6 +54,12 @@ data:
     category: survival
     ooc_risk: medium
     transmission: silent
+    atomic_kind: atomic
+    actor_arity: 1
+    target_arity: zero
+    tick_span: 0
+    phase_count: 1
+    protocol_kind: none
     validation:
       required_fields:
         - source_type
@@ -71,6 +83,12 @@ data:
     category: survival
     ooc_risk: low
     transmission: silent
+    atomic_kind: atomic
+    actor_arity: 1
+    target_arity: zero
+    tick_span: 0
+    phase_count: 1
+    protocol_kind: none
     validation:
       required_fields:
         - item_id
@@ -87,6 +105,12 @@ data:
     category: survival
     ooc_risk: low
     transmission: silent
+    atomic_kind: atomic
+    actor_arity: 1
+    target_arity: zero
+    tick_span: 0
+    phase_count: 1
+    protocol_kind: none
     validation:
       required_fields:
         - item_id
@@ -103,6 +127,12 @@ data:
     category: survival
     ooc_risk: low
     transmission: silent
+    atomic_kind: atomic
+    actor_arity: 1
+    target_arity: zero
+    tick_span: 0
+    phase_count: 1
+    protocol_kind: none
     validation:
       required_fields:
         - item_id
@@ -122,6 +152,12 @@ data:
     category: survival
     ooc_risk: low
     transmission: silent
+    atomic_kind: atomic
+    actor_arity: 1
+    target_arity: zero
+    tick_span: 0
+    phase_count: 1
+    protocol_kind: none
     validation:
       required_fields:
         - target_location
@@ -140,6 +176,12 @@ data:
     transmission: broadcast
     highlight_kind: dialogue
     max_content_length: 500
+    atomic_kind: atomic
+    actor_arity: 1
+    target_arity: one
+    tick_span: 0
+    phase_count: 1
+    protocol_kind: none
     validation:
       required_fields:
         - content
@@ -166,6 +208,12 @@ data:
     category: survival
     ooc_risk: low
     transmission: silent
+    atomic_kind: atomic
+    actor_arity: 1
+    target_arity: one
+    tick_span: 0
+    phase_count: 1
+    protocol_kind: none
     validation:
       optional_fields:
         - target_agent_id
@@ -185,6 +233,12 @@ data:
     highlight_kind: combat
     base_damage: 10
     damage_formula: "10 + strength * 0.5 + weapon_bonus"
+    atomic_kind: atomic
+    actor_arity: 1
+    target_arity: one
+    tick_span: 0
+    phase_count: 1
+    protocol_kind: none
     validation:
       requires_target: true
       requires_target_alive: true
@@ -204,6 +258,12 @@ data:
     category: survival
     ooc_risk: low
     transmission: silent
+    atomic_kind: atomic
+    actor_arity: 1
+    target_arity: zero
+    tick_span: 0
+    phase_count: 1
+    protocol_kind: none
     validation: {}
     requirements:
       - requirement_type: attribute
@@ -235,6 +295,12 @@ data:
     transmission: silent
     validator_kind: recipe_knowledge
     quality_formula: "craft_skill * 0.5 + luck * 0.1"
+    atomic_kind: atomic
+    actor_arity: 1
+    target_arity: zero
+    tick_span: 0
+    phase_count: 1
+    protocol_kind: none
     validation:
       required_fields:
         - recipe_id
@@ -251,6 +317,12 @@ data:
     ooc_risk: low
     transmission: silent
     validator_kind: teach_recipe
+    atomic_kind: atomic
+    actor_arity: 1
+    target_arity: one
+    tick_span: 0
+    phase_count: 1
+    protocol_kind: none
     validation:
       requires_target: true
       requires_target_alive: true

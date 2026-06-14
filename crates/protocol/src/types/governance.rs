@@ -1,8 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/// protocol_kind 常量：无协议编排（原子行为）
-pub const PROTOCOL_KIND_NONE: &str = "none";
-
 /// 治理议题类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -35,39 +32,97 @@ pub enum GovernanceCode {
     NonGovernanceReject,
 }
 
+/// 原子行为类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AtomicKind {
+    Atomic,
+    Bilateral,
+    MultiPhase,
+    Composite,
+    #[default]
+    Unknown,
+}
+
+impl AtomicKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Atomic => "atomic",
+            Self::Bilateral => "bilateral",
+            Self::MultiPhase => "multi_phase",
+            Self::Composite => "composite",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// 目标数量范围
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetArity {
+    Zero,
+    #[default]
+    One,
+    Many,
+}
+
+impl TargetArity {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Zero => "zero",
+            Self::One => "one",
+            Self::Many => "many",
+        }
+    }
+}
+
+/// 协议编排类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtocolKind {
+    #[default]
+    None,
+    Bilateral,
+    MultiPhase,
+    Composite,
+    Unknown,
+}
+
+impl ProtocolKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Bilateral => "bilateral",
+            Self::MultiPhase => "multi_phase",
+            Self::Composite => "composite",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// IR 来源
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IRSource {
+    FromManifest,
+    FromAgentIntent,
+}
+
 /// 提案 IR（Agent + Server 共享）
 ///
 /// 描述行为的执行特征，用于原子行为判定和治理分类。
-/// `target_arity` 使用 String 而非 u8，因为它表示目标数量范围
-/// （如 "zero_to_many"、"one"、"many"），而非简单计数。
+/// 闸门职责已迁出 IR，原子性判定由 Server 端 Capability Manifest 承担。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProposedActionIR {
-    /// 发起者数量（1 = 单一发起者，原子行为必须为 1）
+    pub source: IRSource,
+    pub atomic_kind: AtomicKind,
     pub actor_arity: u8,
-    /// 目标数量范围（"zero_to_many" | "one" | "many"）
-    pub target_arity: String,
-    /// 跨 tick 结算跨度（0 = 单 tick 结算，原子行为必须为 0）
+    pub target_arity: TargetArity,
     pub tick_span: u8,
-    /// 阶段数（1 = 无多阶段协议，原子行为必须为 1）
     pub phase_count: u8,
-    /// 协议编排类型（"none" | "two_party" | "multi_party" | "staged"）
-    pub protocol_kind: String,
-    /// 状态转换次数
-    pub state_transition_count: u8,
-    /// 效果引用（如 "combat.slash"、"mining.dig"）
+    pub protocol_kind: ProtocolKind,
     pub effect_refs: Vec<String>,
-    /// 前置条件引用（如 "tool.pickaxe"）
     pub requirement_refs: Vec<String>,
-}
-
-impl ProposedActionIR {
-    /// 原子行为判定：单一发起者 + 单 tick 结算 + 无多阶段 + 无协议编排
-    pub fn is_atomic(&self) -> bool {
-        self.actor_arity == 1
-            && self.tick_span == 0
-            && self.phase_count == 1
-            && self.protocol_kind == PROTOCOL_KIND_NONE
-    }
 }
 
 #[cfg(test)]
@@ -75,33 +130,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_proposed_action_ir_is_atomic() {
+    fn test_proposed_action_ir_atomic_serialization() {
         let ir = ProposedActionIR {
+            source: IRSource::FromAgentIntent,
+            atomic_kind: AtomicKind::Atomic,
             actor_arity: 1,
-            target_arity: "zero_to_many".into(),
+            target_arity: TargetArity::One,
             tick_span: 0,
             phase_count: 1,
-            protocol_kind: PROTOCOL_KIND_NONE.into(),
-            state_transition_count: 1,
+            protocol_kind: ProtocolKind::None,
             effect_refs: vec![],
             requirement_refs: vec![],
         };
-        assert!(ir.is_atomic());
+        let json = serde_json::to_string(&ir).unwrap();
+        assert!(json.contains("\"source\":\"from_agent_intent\""));
+        assert!(json.contains("\"atomic_kind\":\"atomic\""));
+        assert!(json.contains("\"target_arity\":\"one\""));
+        assert!(json.contains("\"protocol_kind\":\"none\""));
     }
 
     #[test]
-    fn test_proposed_action_ir_not_atomic_composite() {
+    fn test_proposed_action_ir_composite_serialization() {
         let ir = ProposedActionIR {
+            source: IRSource::FromManifest,
+            atomic_kind: AtomicKind::Composite,
             actor_arity: 2,
-            target_arity: "one".into(),
+            target_arity: TargetArity::Many,
             tick_span: 1,
             phase_count: 2,
-            protocol_kind: "two_party".into(),
-            state_transition_count: 3,
+            protocol_kind: ProtocolKind::Bilateral,
             effect_refs: vec![],
             requirement_refs: vec![],
         };
-        assert!(!ir.is_atomic());
+        let json = serde_json::to_string(&ir).unwrap();
+        assert!(json.contains("\"source\":\"from_manifest\""));
+        assert!(json.contains("\"atomic_kind\":\"composite\""));
+        assert!(json.contains("\"target_arity\":\"many\""));
+        assert!(json.contains("\"protocol_kind\":\"bilateral\""));
     }
 
     #[test]
@@ -116,5 +181,30 @@ mod tests {
         let code = GovernanceCode::UnknownAction;
         let json = serde_json::to_string(&code).unwrap();
         assert_eq!(json, "\"unknown_action\"");
+    }
+
+    #[test]
+    fn test_atomic_kind_as_str() {
+        assert_eq!(AtomicKind::Atomic.as_str(), "atomic");
+        assert_eq!(AtomicKind::Bilateral.as_str(), "bilateral");
+        assert_eq!(AtomicKind::MultiPhase.as_str(), "multi_phase");
+        assert_eq!(AtomicKind::Composite.as_str(), "composite");
+        assert_eq!(AtomicKind::Unknown.as_str(), "unknown");
+    }
+
+    #[test]
+    fn test_target_arity_as_str() {
+        assert_eq!(TargetArity::Zero.as_str(), "zero");
+        assert_eq!(TargetArity::One.as_str(), "one");
+        assert_eq!(TargetArity::Many.as_str(), "many");
+    }
+
+    #[test]
+    fn test_protocol_kind_as_str() {
+        assert_eq!(ProtocolKind::None.as_str(), "none");
+        assert_eq!(ProtocolKind::Bilateral.as_str(), "bilateral");
+        assert_eq!(ProtocolKind::MultiPhase.as_str(), "multi_phase");
+        assert_eq!(ProtocolKind::Composite.as_str(), "composite");
+        assert_eq!(ProtocolKind::Unknown.as_str(), "unknown");
     }
 }

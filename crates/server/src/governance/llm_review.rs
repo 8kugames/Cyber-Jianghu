@@ -213,10 +213,11 @@ impl GovernanceLlmClient {
                 }
             }
             Err(e) => {
+                let preview: String = content.chars().take(200).collect();
                 warn!(
                     "Governance LLM 输出无法解析为结构化 JSON ({}), 原始内容: {}",
                     e,
-                    &content[..content.len().min(200)]
+                    preview
                 );
                 ReviewVerdict {
                     soul: String::new(),
@@ -324,12 +325,13 @@ mod tests {
             tick_id: 1,
             proposed_action_type: "combat.slash".to_string(),
             ir: ProposedActionIR {
+                source: cyber_jianghu_protocol::types::governance::IRSource::FromAgentIntent,
+                atomic_kind: cyber_jianghu_protocol::types::governance::AtomicKind::Unknown,
                 actor_arity: 1,
-                target_arity: "one".into(),
+                target_arity: cyber_jianghu_protocol::types::governance::TargetArity::One,
                 tick_span: 0,
                 phase_count: 1,
-                protocol_kind: "none".into(),
-                state_transition_count: 1,
+                protocol_kind: cyber_jianghu_protocol::types::governance::ProtocolKind::None,
                 effect_refs: vec!["combat.slash".into()],
                 requirement_refs: vec!["tool.sword".into()],
             },

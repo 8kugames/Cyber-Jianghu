@@ -3,6 +3,7 @@ pub mod auto_evolve;
 pub mod classifier;
 pub mod engine;
 pub mod handlers;
+pub mod ir_generator;
 pub mod llm_review;
 pub mod manifest;
 pub mod mapper;
@@ -11,6 +12,7 @@ pub mod types;
 
 pub use classifier::TopicClassifier;
 pub use engine::SoulReviewEngine;
+pub use ir_generator::IRGenerator;
 pub use llm_review::{GovernanceLlmClient, build_review_message, build_soul_prompt};
 pub use manifest::CapabilityManifest;
 pub use mapper::ServerGovernanceMapper;

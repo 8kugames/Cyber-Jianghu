@@ -1,3 +1,7 @@
+use crate::actions::{
+    AttackData, CraftData, MoveData, ObserveData, ParsedActionData, QuData, SpeakData, TeachData,
+    YongData, YuData, parse_action_data,
+};
 use crate::db::DbPool;
 use crate::game_data::types::actions::ValidatorKind;
 use crate::game_data::types::{ActionValidation, FieldValidation};
@@ -6,13 +10,66 @@ use crate::models::{AgentState, Intent};
 use cyber_jianghu_protocol::GameError;
 use uuid::Uuid;
 
-/// 验证动作是否可以执行（完全数据驱动）
+/// 将 intent.action_data 反序列化为对应 typed struct
+fn parse_action_data_by_type(intent: &Intent) -> Result<ParsedActionData, GameError> {
+    // 吃/喝 归一化为 用（共享同一数据结构和执行器）
+    let normalized = match intent.action_type.as_str() {
+        "吃" | "喝" => "用",
+        s => s,
+    };
+    match normalized {
+        "予" => Ok(ParsedActionData::Yu(parse_action_data::<YuData>(
+            &intent.action_data,
+            "予",
+        )?)),
+        "取" => Ok(ParsedActionData::Qu(parse_action_data::<QuData>(
+            &intent.action_data,
+            "取",
+        )?)),
+        "用" => Ok(ParsedActionData::Yong(parse_action_data::<YongData>(
+            &intent.action_data,
+            "用",
+        )?)),
+        "说话" => Ok(ParsedActionData::Speak(parse_action_data::<SpeakData>(
+            &intent.action_data,
+            "说话",
+        )?)),
+        "移动" => Ok(ParsedActionData::Move(parse_action_data::<MoveData>(
+            &intent.action_data,
+            "移动",
+        )?)),
+        "观察" => Ok(ParsedActionData::Observe(parse_action_data::<ObserveData>(
+            &intent.action_data,
+            "观察",
+        )?)),
+        "攻击" => Ok(ParsedActionData::Attack(parse_action_data::<AttackData>(
+            &intent.action_data,
+            "攻击",
+        )?)),
+        "制造" => Ok(ParsedActionData::Craft(parse_action_data::<CraftData>(
+            &intent.action_data,
+            "制造",
+        )?)),
+        "教导" => Ok(ParsedActionData::Teach(parse_action_data::<TeachData>(
+            &intent.action_data,
+            "教导",
+        )?)),
+        "休整" => Ok(ParsedActionData::None),
+        other => Err(GameError::InvalidActionData {
+            reason: format!("未知的动作类型: {}", other),
+        }),
+    }
+}
+
+/// 验证动作是否可以执行
+///
+/// 返回类型安全的 [`ParsedActionData`] 供执行层直接使用，消除双重解析。
 pub async fn validate_action(
     intent: &Intent,
     agent_state: &AgentState,
     all_states: &[AgentState],
     db_pool: &DbPool,
-) -> Result<(), GameError> {
+) -> Result<ParsedActionData, GameError> {
     if !agent_state.is_alive {
         return Err(GameError::AgentDead {
             agent_id: agent_state.agent_id,
@@ -26,65 +83,36 @@ pub async fn validate_action(
 
     validate_generic_requirements(intent, agent_state, db_pool).await?;
 
+    // 先反序列化到 typed struct —— 类型验证本身即为字段存在性/类型校验
+    let parsed = parse_action_data_by_type(intent)?;
+
+    // ValidatorKind 校验（在 typed 数据上执行）
     match config.validator_kind {
         Some(ValidatorKind::RecipeKnowledge) => {
-            validate_recipe_knowledge(intent, agent_state, db_pool).await?;
+            validate_recipe_knowledge_typed(&parsed, agent_state, db_pool).await?;
         }
         Some(ValidatorKind::TeachRecipe) => {
-            validate_teach_recipe(intent, agent_state, all_states, db_pool).await?;
+            validate_teach_recipe_typed(&parsed, agent_state, all_states, db_pool).await?;
         }
         None => {}
     }
 
+    // field_validations（在 typed 数据上执行，不再需要 has_field/get_field_string）
     if let Some(validation) = &config.validation {
-        validate_by_rules(intent, agent_state, all_states, validation)?;
-    }
+        apply_field_validations(&parsed, validation)?;
 
-    Ok(())
-}
-
-fn validate_by_rules(
-    intent: &Intent,
-    agent_state: &AgentState,
-    all_states: &[AgentState],
-    validation: &ActionValidation,
-) -> Result<(), GameError> {
-    let action_data = intent.action_data.clone();
-
-    for field in &validation.required_fields {
-        if !has_field(&action_data, field) {
-            if field == "target_id" && has_field(&action_data, "item_id") {
-                continue;
-            }
-            tracing::warn!(
-                "动作验证缺少字段: action={}, field={}, action_data={:?}",
-                intent.action_type,
-                field,
-                intent.action_data
-            );
-            return Err(GameError::InvalidActionData {
-                reason: format!("缺少必需字段: {}", field),
-            });
+        if validation.requires_target.unwrap_or(false) {
+            validate_target_exists_typed(&parsed, all_states)?;
+        }
+        if validation.requires_target_alive.unwrap_or(false) {
+            validate_target_alive_typed(&parsed, all_states)?;
+        }
+        if validation.requires_target_colocated.unwrap_or(false) {
+            validate_target_colocated_typed(&parsed, agent_state, all_states)?;
         }
     }
 
-    for field_validation in &validation.field_validations {
-        validate_field(intent, field_validation)?;
-    }
-
-    if validation.requires_target.unwrap_or(false) {
-        validate_target_exists(intent, all_states)?;
-    }
-
-    if validation.requires_target_alive.unwrap_or(false) {
-        validate_target_alive(intent, all_states)?;
-    }
-
-    if validation.requires_target_colocated.unwrap_or(false) {
-        validate_target_colocated(intent, agent_state, all_states)?;
-    }
-
-    Ok(())
+    Ok(parsed)
 }
 
 async fn validate_generic_requirements(
@@ -128,38 +156,6 @@ async fn validate_generic_requirements(
     Ok(())
 }
 
-fn has_field(action_data: &Option<serde_json::Value>, field: &str) -> bool {
-    if let Some(data) = action_data
-        && let Some(obj) = data.as_object()
-    {
-        return obj.contains_key(field);
-    }
-    false
-}
-
-fn get_field_string(action_data: &Option<serde_json::Value>, field: &str) -> Option<String> {
-    action_data
-        .as_ref()
-        .and_then(|d| d.get(field))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-}
-
-fn get_field_i32(action_data: &Option<serde_json::Value>, field: &str) -> Option<i32> {
-    action_data
-        .as_ref()
-        .and_then(|d| d.get(field))
-        .and_then(|v| {
-            if v.is_i64() {
-                v.as_i64().map(|v| v as i32)
-            } else if v.is_f64() {
-                v.as_f64().map(|v| v as i32)
-            } else {
-                None
-            }
-        })
-}
-
 pub async fn get_inventory_item_quantity(
     db_pool: &DbPool,
     agent_id: uuid::Uuid,
@@ -179,126 +175,119 @@ fn is_placeholder_content(s: &str) -> bool {
     matches!(s, "..." | "…" | "。。。" | ".." | "。" | "-" | "--" | "---")
 }
 
-fn validate_field(intent: &Intent, field_validation: &FieldValidation) -> Result<(), GameError> {
-    let field = &field_validation.field;
-    let validation_type = &field_validation.validation_type;
-
-    match validation_type.as_str() {
-        FieldValidation::TYPE_NOT_EMPTY => {
-            let value = get_field_string(&intent.action_data, field).ok_or_else(|| {
-                GameError::InvalidActionData {
-                    reason: format!("字段 {} 缺失", field),
+/// 在 typed [`ParsedActionData`] 上执行 field_validations
+fn apply_field_validations(
+    parsed: &ParsedActionData,
+    validation: &ActionValidation,
+) -> Result<(), GameError> {
+    for fv in &validation.field_validations {
+        let field = &fv.field;
+        match fv.validation_type.as_str() {
+            FieldValidation::TYPE_NOT_EMPTY => {
+                let value =
+                    parsed
+                        .get_field_str(field)
+                        .ok_or_else(|| GameError::InvalidActionData {
+                            reason: format!("字段 {} 缺失", field),
+                        })?;
+                let trimmed = value.trim();
+                if trimmed.is_empty() || is_placeholder_content(trimmed) {
+                    return Err(GameError::InvalidActionData {
+                        reason: format!("字段 {} 不能为空或占位符", field),
+                    });
                 }
-            })?;
-
-            let trimmed = value.trim();
-            if trimmed.is_empty() || is_placeholder_content(trimmed) {
-                return Err(GameError::InvalidActionData {
-                    reason: format!("字段 {} 不能为空或占位符", field),
-                });
             }
-        }
-        FieldValidation::TYPE_MIN_VALUE => {
-            let min_value = field_validation.get_i32("min_value").ok_or_else(|| {
-                GameError::InvalidActionData {
-                    reason: format!("字段 {} 的 min_value 验证参数缺失", field),
+            FieldValidation::TYPE_MIN_VALUE => {
+                let min_value =
+                    fv.get_i32("min_value")
+                        .ok_or_else(|| GameError::InvalidActionData {
+                            reason: format!("字段 {} 的 min_value 验证参数缺失", field),
+                        })?;
+                let value =
+                    parsed
+                        .get_field_i32(field)
+                        .ok_or_else(|| GameError::InvalidActionData {
+                            reason: format!("字段 {} 缺失或不是数字", field),
+                        })?;
+                if value < min_value {
+                    return Err(GameError::InvalidActionData {
+                        reason: format!("字段 {} 的值必须 >= {}", field, min_value),
+                    });
                 }
-            })?;
-
-            let value = get_field_i32(&intent.action_data, field).ok_or_else(|| {
-                GameError::InvalidActionData {
-                    reason: format!("字段 {} 缺失或不是数字", field),
-                }
-            })?;
-
-            if value < min_value {
-                return Err(GameError::InvalidActionData {
-                    reason: format!("字段 {} 的值必须 >= {}", field, min_value),
-                });
             }
-        }
-        FieldValidation::TYPE_MAX_VALUE => {
-            let max_value = field_validation.get_i32("max_value").ok_or_else(|| {
-                GameError::InvalidActionData {
-                    reason: format!("字段 {} 的 max_value 验证参数缺失", field),
+            FieldValidation::TYPE_MAX_VALUE => {
+                let max_value =
+                    fv.get_i32("max_value")
+                        .ok_or_else(|| GameError::InvalidActionData {
+                            reason: format!("字段 {} 的 max_value 验证参数缺失", field),
+                        })?;
+                let value =
+                    parsed
+                        .get_field_i32(field)
+                        .ok_or_else(|| GameError::InvalidActionData {
+                            reason: format!("字段 {} 缺失或不是数字", field),
+                        })?;
+                if value > max_value {
+                    return Err(GameError::InvalidActionData {
+                        reason: format!("字段 {} 的值必须 <= {}", field, max_value),
+                    });
                 }
-            })?;
-
-            let value = get_field_i32(&intent.action_data, field).ok_or_else(|| {
-                GameError::InvalidActionData {
-                    reason: format!("字段 {} 缺失或不是数字", field),
-                }
-            })?;
-
-            if value > max_value {
-                return Err(GameError::InvalidActionData {
-                    reason: format!("字段 {} 的值必须 <= {}", field, max_value),
-                });
             }
-        }
-        FieldValidation::TYPE_MIN_LENGTH => {
-            let min_length = field_validation.get_i32("min_length").ok_or_else(|| {
-                GameError::InvalidActionData {
-                    reason: format!("字段 {} 的 min_length 验证参数缺失", field),
+            FieldValidation::TYPE_MIN_LENGTH => {
+                let min_length =
+                    fv.get_i32("min_length")
+                        .ok_or_else(|| GameError::InvalidActionData {
+                            reason: format!("字段 {} 的 min_length 验证参数缺失", field),
+                        })?;
+                let value =
+                    parsed
+                        .get_field_str(field)
+                        .ok_or_else(|| GameError::InvalidActionData {
+                            reason: format!("字段 {} 缺失", field),
+                        })?;
+                if value.len() < min_length as usize {
+                    return Err(GameError::InvalidActionData {
+                        reason: format!("字段 {} 的长度必须 >= {}", field, min_length),
+                    });
                 }
-            })?;
-
-            let value = get_field_string(&intent.action_data, field).ok_or_else(|| {
-                GameError::InvalidActionData {
-                    reason: format!("字段 {} 缺失", field),
-                }
-            })?;
-
-            if value.len() < min_length as usize {
-                return Err(GameError::InvalidActionData {
-                    reason: format!("字段 {} 的长度必须 >= {}", field, min_length),
-                });
             }
-        }
-        FieldValidation::TYPE_MAX_LENGTH => {
-            let max_length = field_validation.get_i32("max_length").ok_or_else(|| {
-                GameError::InvalidActionData {
-                    reason: format!("字段 {} 的 max_length 验证参数缺失", field),
+            FieldValidation::TYPE_MAX_LENGTH => {
+                let max_length =
+                    fv.get_i32("max_length")
+                        .ok_or_else(|| GameError::InvalidActionData {
+                            reason: format!("字段 {} 的 max_length 验证参数缺失", field),
+                        })?;
+                let value =
+                    parsed
+                        .get_field_str(field)
+                        .ok_or_else(|| GameError::InvalidActionData {
+                            reason: format!("字段 {} 缺失", field),
+                        })?;
+                if value.len() > max_length as usize {
+                    return Err(GameError::InvalidActionData {
+                        reason: format!("字段 {} 的长度必须 <= {}", field, max_length),
+                    });
                 }
-            })?;
-
-            let value = get_field_string(&intent.action_data, field).ok_or_else(|| {
-                GameError::InvalidActionData {
-                    reason: format!("字段 {} 缺失", field),
-                }
-            })?;
-
-            if value.len() > max_length as usize {
-                return Err(GameError::InvalidActionData {
-                    reason: format!("字段 {} 的长度必须 <= {}", field, max_length),
-                });
             }
+            _ => {}
         }
-        _ => {}
     }
-
     Ok(())
 }
 
-/// 校验制造动作的配方知晓度
-async fn validate_recipe_knowledge(
-    intent: &Intent,
+/// 校验制造动作的配方知晓度（基于 typed CraftData）
+async fn validate_recipe_knowledge_typed(
+    parsed: &ParsedActionData,
     agent_state: &AgentState,
     db_pool: &DbPool,
 ) -> Result<(), GameError> {
-    let recipe_id = intent
-        .action_data
-        .as_ref()
-        .and_then(|d| d.get("recipe_id"))
-        .and_then(|v| v.as_str())
-        .or_else(|| {
-            intent
-                .action_data
-                .as_ref()
-                .and_then(|d| d.get("item_id"))
-                .and_then(|v| v.as_str())
-        })
-        .unwrap_or("");
+    let recipe_id = match parsed {
+        ParsedActionData::Craft(data) => Some(data.recipe_id.as_str()),
+        _ => None,
+    };
+    let Some(recipe_id) = recipe_id else {
+        return Ok(());
+    };
 
     if recipe_id.is_empty() {
         return Ok(());
@@ -324,19 +313,21 @@ async fn validate_recipe_knowledge(
     Ok(())
 }
 
-/// 校验传授动作
-async fn validate_teach_recipe(
-    intent: &Intent,
+/// 校验传授动作（基于 typed TeachData）
+async fn validate_teach_recipe_typed(
+    parsed: &ParsedActionData,
     agent_state: &AgentState,
     _all_states: &[AgentState],
     db_pool: &DbPool,
 ) -> Result<(), GameError> {
-    let action_data = &intent.action_data;
-    let recipe_id = action_data
-        .as_ref()
-        .and_then(|d| d.get("recipe_id"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let (recipe_id, target_agent_id) = match parsed {
+        ParsedActionData::Teach(data) => (data.recipe_id.as_str(), data.target_agent_id.as_str()),
+        _ => {
+            return Err(GameError::InvalidActionData {
+                reason: "教导需要指定配方 ID（recipe_id）".to_string(),
+            });
+        }
+    };
 
     if recipe_id.is_empty() {
         return Err(GameError::InvalidActionData {
@@ -344,12 +335,7 @@ async fn validate_teach_recipe(
         });
     }
 
-    let target_id_str = action_data
-        .as_ref()
-        .and_then(|d| d.get("target_agent_id"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    if let Ok(target_uuid) = uuid::Uuid::parse_str(target_id_str)
+    if let Ok(target_uuid) = uuid::Uuid::parse_str(target_agent_id)
         && target_uuid == agent_state.agent_id
     {
         return Err(GameError::InvalidActionData {
@@ -358,7 +344,7 @@ async fn validate_teach_recipe(
     }
     let candidates = vec![agent_state.agent_id];
     if let Some(target_uuid) =
-        cyber_jianghu_protocol::resolve_agent_id_lenient(target_id_str, &candidates)
+        cyber_jianghu_protocol::resolve_agent_id_lenient(target_agent_id, &candidates)
         && target_uuid == agent_state.agent_id
     {
         return Err(GameError::InvalidActionData {
@@ -378,13 +364,16 @@ async fn validate_teach_recipe(
     Ok(())
 }
 
-fn validate_target_exists(intent: &Intent, all_states: &[AgentState]) -> Result<(), GameError> {
+fn validate_target_exists_typed(
+    parsed: &ParsedActionData,
+    all_states: &[AgentState],
+) -> Result<(), GameError> {
     let target_id_str =
-        get_field_string(&intent.action_data, "target_agent_id").ok_or_else(|| {
-            GameError::InvalidActionData {
+        parsed
+            .get_target_agent_id()
+            .ok_or_else(|| GameError::InvalidActionData {
                 reason: "缺少 target_agent_id 字段".to_string(),
-            }
-        })?;
+            })?;
 
     let candidates: Vec<Uuid> = all_states.iter().map(|s| s.agent_id).collect();
     let target_id =
@@ -401,13 +390,16 @@ fn validate_target_exists(intent: &Intent, all_states: &[AgentState]) -> Result<
     Ok(())
 }
 
-fn validate_target_alive(intent: &Intent, all_states: &[AgentState]) -> Result<(), GameError> {
+fn validate_target_alive_typed(
+    parsed: &ParsedActionData,
+    all_states: &[AgentState],
+) -> Result<(), GameError> {
     let target_id_str =
-        get_field_string(&intent.action_data, "target_agent_id").ok_or_else(|| {
-            GameError::InvalidActionData {
+        parsed
+            .get_target_agent_id()
+            .ok_or_else(|| GameError::InvalidActionData {
                 reason: "缺少 target_agent_id 字段".to_string(),
-            }
-        })?;
+            })?;
 
     let candidates: Vec<Uuid> = all_states.iter().map(|s| s.agent_id).collect();
     let target_id =
@@ -429,17 +421,17 @@ fn validate_target_alive(intent: &Intent, all_states: &[AgentState]) -> Result<(
     Ok(())
 }
 
-fn validate_target_colocated(
-    intent: &Intent,
+fn validate_target_colocated_typed(
+    parsed: &ParsedActionData,
     agent_state: &AgentState,
     all_states: &[AgentState],
 ) -> Result<(), GameError> {
     let target_id_str =
-        get_field_string(&intent.action_data, "target_agent_id").ok_or_else(|| {
-            GameError::InvalidActionData {
+        parsed
+            .get_target_agent_id()
+            .ok_or_else(|| GameError::InvalidActionData {
                 reason: "缺少 target_agent_id 字段".to_string(),
-            }
-        })?;
+            })?;
 
     let candidates: Vec<Uuid> = all_states.iter().map(|s| s.agent_id).collect();
     let target_id =
