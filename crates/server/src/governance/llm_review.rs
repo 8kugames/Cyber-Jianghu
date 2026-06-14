@@ -26,6 +26,24 @@ struct LlmReviewResponse {
     inferred_action_config: Option<InferredActionConfig>,
 }
 
+/// 构造系统强制 Reject（LLM 超时/失败时使用，符合管道"不允许弃权、超时视作拒绝"约束）
+///
+/// # 为什么不允许 abstain
+///
+/// 管道设计要求三皇必须给出 approve / reject 明确态度——弃权会让 stage 推进逻辑
+/// 无法判定（同辈审议全部 abstain 时既无法关单也无法推进）。
+/// LLM 调用失败时由系统强制注入 reject（reject_reason = Other），保证管道可继续推进。
+fn system_reject(soul: &str, rationale: impl Into<String>) -> ReviewVerdict {
+    ReviewVerdict {
+        soul: soul.to_string(),
+        vote: VoteChoice::Reject,
+        rationale: rationale.into(),
+        evidence_refs: vec![],
+        reject_reason: Some(RejectReason::Other),
+        inferred_action_config: None,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // GovernanceLlmClient
 // ---------------------------------------------------------------------------
@@ -71,7 +89,7 @@ impl GovernanceLlmClient {
 
     pub async fn review_with_llm(&self, system_prompt: &str, user_message: &str) -> ReviewVerdict {
         if !self.enabled {
-            return ReviewVerdict::abstain("", "LLM 未启用，无法执行软裁决");
+            return system_reject("", "LLM 未启用，按管道约束视作拒绝");
         }
 
         let config = self.config.as_ref().unwrap();
@@ -101,7 +119,7 @@ impl GovernanceLlmClient {
             Ok(c) => c,
             Err(e) => {
                 error!("Governance LLM 构建 HTTP 客户端失败: {}", e);
-                return ReviewVerdict::abstain("", format!("LLM 客户端构建失败: {}", e));
+                return system_reject("", format!("LLM 客户端构建失败: {}", e));
             }
         };
 
@@ -123,7 +141,7 @@ impl GovernanceLlmClient {
             Ok(r) => r,
             Err(e) => {
                 error!("Governance LLM 请求失败: {}", e);
-                return ReviewVerdict::abstain("", format!("LLM 请求失败: {}", e));
+                return system_reject("", format!("LLM 请求失败（超时/网络）: {}", e));
             }
         };
 
@@ -132,7 +150,7 @@ impl GovernanceLlmClient {
 
         if !status.is_success() {
             error!("Governance LLM 返回错误状态 {}: {}", status, body);
-            return ReviewVerdict::abstain("", format!("LLM 返回错误 {}: {}", status, body));
+            return system_reject("", format!("LLM 返回错误 {}: {}", status, body));
         }
 
         // Parse LLM response envelope
@@ -155,7 +173,7 @@ impl GovernanceLlmClient {
             Ok(e) => e,
             Err(e) => {
                 error!("Governance LLM 解析响应信封失败: {}", e);
-                return ReviewVerdict::abstain("", format!("LLM 响应解析失败: {}", e));
+                return system_reject("", format!("LLM 响应解析失败: {}", e));
             }
         };
 
@@ -167,7 +185,7 @@ impl GovernanceLlmClient {
 
         if content.trim().is_empty() {
             error!("Governance LLM 返回空内容");
-            return ReviewVerdict::abstain("", "LLM 返回空内容");
+            return system_reject("", "LLM 返回空内容");
         }
 
         // Parse structured JSON from LLM output
@@ -175,8 +193,8 @@ impl GovernanceLlmClient {
             Ok(parsed) => {
                 let vote = match parsed.vote.as_str() {
                     "approve" => VoteChoice::Approve,
-                    "reject" => VoteChoice::Reject,
-                    _ => VoteChoice::Abstain,
+                    // 管道不允许弃权：LLM 输出非 approve 一律视作 reject
+                    _ => VoteChoice::Reject,
                 };
                 let reject_reason = parsed.reject_reason.as_deref().and_then(|s| match s {
                     "non_atomic" => Some(RejectReason::NonAtomic),
@@ -205,7 +223,7 @@ impl GovernanceLlmClient {
                     "Governance LLM 输出无法解析为结构化 JSON ({}), 原始内容: {}",
                     e, preview
                 );
-                ReviewVerdict::abstain("", format!("LLM 输出格式异常: {}", e))
+                system_reject("", format!("LLM 输出格式异常: {}", e))
             }
         }
     }
@@ -274,6 +292,63 @@ pub fn build_review_message(evidence: &ProposalEvidence) -> String {
     )
 }
 
+/// 构建伏羲终审 user message（追加神农/轩辕的反馈）
+///
+/// # 终审阶段语义
+///
+/// 伏羲初审已 approve（含 inferred_action_config），神农/轩辕并行审议后达成 2/3 多数。
+/// 伏羲需要根据同辈反馈做最终决定：
+/// - 同辈反馈中有附条件批准（approve 但 rationale 中明示条件）→ 调整 inferred_action_config
+/// - 同辈反馈无实质调整需求 → 沿用初审 config
+///
+/// # 附条件过审表达
+///
+/// 不通过新增 VoteChoice 实现，而是在 approve 的 rationale 中明示条件
+/// （由伏羲 LLM 在终审时解读）。这是 D1=C 决策：保持枚举简洁，依赖 LLM 理解力。
+pub fn build_final_review_message(
+    evidence: &ProposalEvidence,
+    peer_verdicts: &[ReviewVerdict],
+) -> String {
+    let peer_feedback: String = peer_verdicts
+        .iter()
+        .map(|v| {
+            format!(
+                "## {} 的反馈\n- 投票: {}\n- 理由: {}",
+                v.soul,
+                match v.vote {
+                    VoteChoice::Approve => "批准",
+                    VoteChoice::Reject => "拒绝",
+                    VoteChoice::Abstain => "弃权",
+                },
+                v.rationale
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    format!(
+        "你已在初审中批准此提案。现在需要根据同辈反馈做最终决定。\n\n\
+         ## 原提案\n\
+         提案 ID: {}\n\
+         提出者 Agent: {}\n\
+         动作类型: {}\n\
+         Intent 参数:\n{}\n\
+         提案理由: {}\n\n\
+         ## 同辈反馈\n{}\n\n\
+         ## 终审要求\n\
+         1. 阅读同辈反馈，判断是否有需要调整的合理顾虑\n\
+         2. 若同辈反馈中有附条件批准（approve 但 rationale 中明示条件），需调整 inferred_action_config 以满足合理条件\n\
+         3. 若同辈反馈无实质调整需求，沿用初审 config\n\
+         4. 输出最终 inferred_action_config（用于写入 actions.yaml）",
+        evidence.tick_id,
+        evidence.agent_id,
+        evidence.proposed_action_type,
+        serde_yaml::to_string(&evidence.action_data).unwrap_or_default(),
+        evidence.rationale,
+        peer_feedback,
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -315,7 +390,7 @@ mod tests {
         };
         let rt = tokio::runtime::Runtime::new().unwrap();
         let verdict = rt.block_on(client.review_with_llm("system", "user"));
-        assert_eq!(verdict.vote, VoteChoice::Abstain);
+        assert_eq!(verdict.vote, VoteChoice::Reject);
         assert!(verdict.rationale.contains("未启用"));
     }
 
