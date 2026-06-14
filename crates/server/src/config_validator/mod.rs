@@ -106,7 +106,13 @@ fn resolve_target_set(
         "recipes" => load_yaml(&config_dir.join("recipes.yaml"))?,
         "locations" => load_yaml(&config_dir.join("locations.yaml"))?,
         "action_evolution" => load_yaml(&config_dir.join("action_evolution.yaml"))?,
+        // NOTE: target_key ("categories") 在此路径下被忽略 — skills 分类
+        // 来自文件系统枚举 skills/{category}/**/SKILL.md，非 YAML key 查询。
         "skills" => return list_skill_categories(config_dir),
+        // NOTE: target_key ("parent_directory") 在此路径下被忽略 —
+        // skill_md 的验证在 validate_single_rule 的独立分支中实现，
+        // 通过文件系统遍历 SKILL.md frontmatter 对比父目录名完成。
+        // target_key 在 YAML 配置中仅作文档声明，不参与代码逻辑。
         "skill_md" => return Ok(HashSet::new()),
         _ => return Err(format!("未知 target_type: {}", target_type)),
     };

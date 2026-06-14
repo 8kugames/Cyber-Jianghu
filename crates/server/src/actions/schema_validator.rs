@@ -9,6 +9,10 @@
 // - warning 模式：校验失败不阻断执行，violation 写入 soul_cycle_metadata
 // - 无额外依赖：复用 serde_json::Value，无需新 crate
 // - 数据驱动：schema 来源是 actions.yaml（非硬编码）
+//
+// ## 测试缺口 (Finding 10)
+// - processor.rs 集成点无独立测试 (schema → soul_cycle_metadata 链路)
+// - 大量字段 / 嵌套 JSON 边界情况无覆盖率
 // ============================================================================
 
 use crate::game_data::registry::ActionRegistry;
@@ -56,18 +60,18 @@ pub fn validate_action_data_schema(
     let Some(ref validation) = config.validation else {
         return Vec::new();
     };
-    validate_against_schema(action_type, action_data, validation)
+    validate_against_schema(action_type, action_data.as_ref(), validation)
 }
 
 /// 针对给定的 validation schema 校验 action_data（可测试）
 pub fn validate_against_schema(
     action_type: &str,
-    action_data: &Option<Value>,
+    action_data: Option<&Value>,
     validation: &ActionValidation,
 ) -> Vec<SchemaViolation> {
     let mut violations = Vec::new();
 
-    let Some(data) = action_data.as_ref() else {
+    let Some(data) = action_data else {
         return violations;
     };
 
@@ -131,7 +135,7 @@ mod tests {
     fn test_missing_required_fields() {
         let validation = sample_validation();
         let action_data = Some(serde_json::json!({"quantity": 1}));
-        let violations = validate_against_schema("用", &action_data, &validation);
+        let violations = validate_against_schema("用", action_data.as_ref(), &validation);
         let missing: Vec<&SchemaViolation> = violations
             .iter()
             .filter(|v| matches!(v.violation_type, ViolationType::MissingRequired))
@@ -153,7 +157,7 @@ mod tests {
             "channel": "public",
             "gadget": "magic"
         }));
-        let violations = validate_against_schema("说话", &action_data, &validation);
+        let violations = validate_against_schema("说话", action_data.as_ref(), &validation);
         let unknown: Vec<&SchemaViolation> = violations
             .iter()
             .filter(|v| matches!(v.violation_type, ViolationType::UnknownField))
@@ -174,7 +178,7 @@ mod tests {
             "item_id": "mantou",
             "quantity": 1
         }));
-        let violations = validate_against_schema("予", &action_data, &validation);
+        let violations = validate_against_schema("予", action_data.as_ref(), &validation);
         assert!(
             violations.is_empty(),
             "有效的 action_data 不应有违规: {:?}",
@@ -185,7 +189,7 @@ mod tests {
     #[test]
     fn test_none_action_data_skipped() {
         let validation = sample_validation();
-        let violations = validate_against_schema("移动", &None, &validation);
+        let violations = validate_against_schema("移动", None, &validation);
         assert!(
             violations.is_empty(),
             "None action_data 不应校验: {:?}",
@@ -199,7 +203,7 @@ mod tests {
         let action_data = Some(serde_json::json!({
             "content": "你好"
         }));
-        let violations = validate_against_schema("说话", &action_data, &validation);
+        let violations = validate_against_schema("说话", action_data.as_ref(), &validation);
         assert!(
             violations.is_empty(),
             "仅传 required field 应无违规: {:?}",
@@ -214,7 +218,7 @@ mod tests {
             "content": "你好",
             "magic_field": "xyz"
         }));
-        let violations = validate_against_schema("说话", &action_data, &validation);
+        let violations = validate_against_schema("说话", action_data.as_ref(), &validation);
         assert_eq!(violations.len(), 1, "应只有 1 个 unknown field 违规");
         assert!(
             matches!(violations[0].violation_type, ViolationType::UnknownField),

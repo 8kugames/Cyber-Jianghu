@@ -92,6 +92,14 @@ pub async fn list_aggregation_names(db_pool: &DbPool) -> Result<Vec<String>> {
 }
 
 /// 获取最近的聚合时间（用于增量模式）
+///
+/// ## Dead Code 说明
+/// 当前所有聚合使用全量窗口扫描（WHERE BETWEEN NOW()-period AND NOW()），
+/// 无需增量模式。数据量增长后需启用：
+/// 1. 移除 `#[allow(dead_code)]`
+/// 2. 各 collector 改为增量查询（WHERE created_at > last_aggregation_time）
+/// 3. 首个周期仍为全量，后续增量
+#[allow(dead_code)]
 pub async fn get_latest_aggregation_time(
     db_pool: &DbPool,
     aggregation_name: &str,

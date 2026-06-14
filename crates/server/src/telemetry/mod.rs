@@ -81,15 +81,17 @@ pub fn load_config() -> Result<TelemetryConfig, String> {
 
 /// 启动遥测采集器（异步定时任务）
 /// 每个聚合定义各自启动一个独立 tokio task，按配置间隔运行
-pub fn start_telemetry_collector(db_pool: DbPool) {
+/// 返回所有 handle，调用方应加入 select! 以支持 graceful shutdown
+pub fn start_telemetry_collector(db_pool: DbPool) -> Vec<tokio::task::JoinHandle<()>> {
     let config = match load_config() {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!("遥测配置加载失败，遥测功能不可用: {}", e);
-            return;
+            return Vec::new();
         }
     };
 
+    let mut handles = Vec::with_capacity(config.aggregations.len());
     for agg in config.aggregations {
         let interval_minutes = agg
             .period_minutes
@@ -102,7 +104,7 @@ pub fn start_telemetry_collector(db_pool: DbPool) {
         let partner_fields = agg.jsonb_partner_fields.clone();
 
         let period_minutes = interval_minutes;
-        tokio::spawn(async move {
+        handles.push(tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(interval_minutes * 60));
             // 推迟首个周期，给 server 启动留出缓冲
             interval.tick().await;
@@ -123,6 +125,7 @@ pub fn start_telemetry_collector(db_pool: DbPool) {
                     tracing::warn!("遥测聚合 {} 失败: {}", agg_name, e);
                 }
             }
-        });
+        }));
     }
+    handles
 }

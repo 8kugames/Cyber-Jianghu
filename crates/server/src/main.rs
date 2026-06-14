@@ -161,7 +161,8 @@ async fn init_governance(
 
     // SoulReviewEngine::load 接受 config_dir，内部加载 souls.yaml
     // 内部 capability_manifest 已是 Arc<RwLock<...>>，外层无需再加锁
-    let engine = Arc::new(SoulReviewEngine::load(&config_dir).context("SoulReviewEngine 初始化失败")?);
+    let engine =
+        Arc::new(SoulReviewEngine::load(&config_dir).context("SoulReviewEngine 初始化失败")?);
 
     let review_config = engine.config().review.clone();
 
@@ -191,10 +192,10 @@ async fn init_governance(
                     // 超时清理：关闭超过 group_stale_secs 仍未闭环的 group
                     // 注：与 timeout_secs（LLM 调用超时）独立配置
                     let stale_secs = review_config.group_stale_secs;
-                    if let Ok(closed) = store_clone.close_stale_groups(stale_secs).await {
-                        if closed > 0 {
-                            info!("治理轮询: 强制关闭 {} 个超时 group", closed);
-                        }
+                    if let Ok(closed) = store_clone.close_stale_groups(stale_secs).await
+                        && closed > 0
+                    {
+                        info!("治理轮询: 强制关闭 {} 个超时 group", closed);
                     }
 
                     let pending_result =
@@ -540,7 +541,7 @@ async fn main() -> Result<()> {
     let _cleanup_handle = start_rate_limiter_cleanup(rate_limiter.clone());
 
     // 10.2 启动遥测采集器（后台定时任务，不阻塞主流程）
-    telemetry::start_telemetry_collector(db_pool.clone());
+    let telemetry_handles = telemetry::start_telemetry_collector(db_pool.clone());
 
     // 11. 构建路由
     let app = Router::new()
@@ -1026,6 +1027,15 @@ async fn main() -> Result<()> {
             if let Err(e) = result {
                 error!("Tick引擎任务失败: {}", e);
             }
+        }
+
+        // 遥测采集器（意外退出也算失败路径）
+        _ = async {
+            for h in telemetry_handles {
+                let _ = h.await;
+            }
+        } => {
+            info!("遥测采集器已退出");
         }
 
         // 治理轮询任务（意外退出也算失败路径）

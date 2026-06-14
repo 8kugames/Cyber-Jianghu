@@ -216,8 +216,7 @@ impl GovernanceLlmClient {
                 let preview: String = content.chars().take(200).collect();
                 warn!(
                     "Governance LLM 输出无法解析为结构化 JSON ({}), 原始内容: {}",
-                    e,
-                    preview
+                    e, preview
                 );
                 ReviewVerdict {
                     soul: String::new(),

@@ -52,25 +52,27 @@ async fn collect_from_agents(
     let period_start = chrono::Utc::now() - chrono::Duration::minutes(period_minutes as i64);
     let period_end = chrono::Utc::now();
 
+    // CTE 将 duration 计算定义在一处，避免 AVG 和两个 PERCENTILE 中重复三遍
     let rows = sqlx::query(
         r#"
+        WITH agent_durations AS (
+            SELECT
+                a.retired_at,
+                EXTRACT(EPOCH FROM (a.retired_at - d.deployment_time + a.birth_tick * t.real_seconds_per_tick * interval '1 second')) as duration
+            FROM agents a
+            CROSS JOIN server_deployment d
+            CROSS JOIN (SELECT real_seconds_per_tick FROM game_rules_config LIMIT 1) t
+            WHERE (a.status = 'dead' OR a.status = 'retired')
+            AND a.retired_at IS NOT NULL
+            AND a.birth_tick IS NOT NULL
+            AND a.retired_at BETWEEN $1 AND $2
+        )
         SELECT
             COUNT(*) as count,
-            AVG(EXTRACT(EPOCH FROM (a.retired_at - d.deployment_time + a.birth_tick * t.real_seconds_per_tick * interval '1 second')))
-            as avg_duration,
-            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY
-                EXTRACT(EPOCH FROM (a.retired_at - d.deployment_time + a.birth_tick * t.real_seconds_per_tick * interval '1 second'))
-            ) as p50_duration,
-            PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY
-                EXTRACT(EPOCH FROM (a.retired_at - d.deployment_time + a.birth_tick * t.real_seconds_per_tick * interval '1 second'))
-            ) as p95_duration
-        FROM agents a
-        CROSS JOIN server_deployment d
-        CROSS JOIN (SELECT real_seconds_per_tick FROM game_rules_config LIMIT 1) t
-        WHERE (a.status = 'dead' OR a.status = 'retired')
-        AND a.retired_at IS NOT NULL
-        AND a.birth_tick IS NOT NULL
-        AND a.retired_at BETWEEN $1 AND $2
+            AVG(duration) as avg_duration,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration) as p50_duration,
+            PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration) as p95_duration
+        FROM agent_durations
         "#,
     )
     .bind(period_start)
@@ -124,7 +126,7 @@ async fn collect_from_agents(
 async fn collect_from_action_logs(
     db_pool: &DbPool,
     agg_name: &str,
-    _group_by: &[String],
+    group_by: &[String],
     metrics: &[String],
     jsonb_partner_fields: &[String],
     period_minutes: u64,
@@ -141,11 +143,12 @@ async fn collect_from_action_logs(
                 period_start,
                 period_end,
                 has_success_rate,
+                group_by,
             )
             .await?;
         }
         "action_outcomes" => {
-            collect_action_outcomes(db_pool, agg_name, period_start, period_end).await?;
+            collect_action_outcomes(db_pool, agg_name, period_start, period_end, group_by).await?;
         }
         "interaction_activity" => {
             collect_interaction_activity(
@@ -172,6 +175,7 @@ async fn collect_decision_distribution(
     period_start: chrono::DateTime<chrono::Utc>,
     period_end: chrono::DateTime<chrono::Utc>,
     has_success_rate: bool,
+    group_by: &[String],
 ) -> Result<()> {
     // 按 action_type 分组统计
     let rows = sqlx::query(
@@ -209,12 +213,13 @@ async fn collect_decision_distribution(
             metrics_map.insert("success_rate".to_string(), serde_json::json!(success_rate));
         }
 
+        let group_key = group_by.first().map(|s| s.as_str());
         storage::store_aggregation(
             db_pool,
             agg_name,
             period_start,
             period_end,
-            Some("action_type"),
+            group_key,
             Some(&action_type),
             &serde_json::Value::Object(metrics_map),
         )
@@ -230,6 +235,7 @@ async fn collect_action_outcomes(
     agg_name: &str,
     period_start: chrono::DateTime<chrono::Utc>,
     period_end: chrono::DateTime<chrono::Utc>,
+    group_by: &[String],
 ) -> Result<()> {
     let rows = sqlx::query(
         r#"
@@ -252,12 +258,13 @@ async fn collect_action_outcomes(
         let mut metrics_map = serde_json::Map::new();
         metrics_map.insert("count".to_string(), serde_json::json!(count));
 
+        let group_key = group_by.first().map(|s| s.as_str());
         storage::store_aggregation(
             db_pool,
             agg_name,
             period_start,
             period_end,
-            Some("result"),
+            group_key,
             Some(&result),
             &serde_json::Value::Object(metrics_map),
         )
@@ -279,6 +286,9 @@ async fn collect_interaction_activity(
     // 通过 JSONB 字段提取（如 recipient_id）
     let mut partner_conditions: Vec<String> = Vec::new();
     for field in jsonb_partner_fields {
+        // SAFETY: field 来自 telemetry_config.yaml 的 jsonb_partner_fields 配置，
+        // 非外部输入。PostgreSQL JSONB ->' 操作符需要字段名在 SQL 文本中，
+        // 无法参数化，因此使用 format! 拼接是必要妥协。
         partner_conditions.push(format!("action_data->>'{}' IS NOT NULL", field));
     }
 
@@ -372,7 +382,7 @@ async fn collect_interaction_activity(
 async fn collect_from_agent_states(
     db_pool: &DbPool,
     agg_name: &str,
-    _group_by: &[String],
+    group_by: &[String],
     metrics: &[String],
     period_minutes: u64,
 ) -> Result<()> {
@@ -406,6 +416,8 @@ async fn collect_from_agent_states(
         ""
     };
 
+    // SAFETY: select_clause 和 order_clause 来自受控 metrics 配置（telemetry_config.yaml），
+    // 非外部输入。字段名（COUNT(DISTINCT agent_id) / COUNT(*)）是固定 SQL 片段，不含用户可控值。
     let query_str = format!(
         r#"
         SELECT node_id, {}
@@ -437,12 +449,13 @@ async fn collect_from_agent_states(
             metrics_map.insert("state_count".to_string(), serde_json::json!(state_count));
         }
 
+        let group_key = group_by.first().map(|s| s.as_str());
         storage::store_aggregation(
             db_pool,
             agg_name,
             period_start,
             period_end,
-            Some("node_id"),
+            group_key,
             Some(&node_id),
             &serde_json::Value::Object(metrics_map),
         )
