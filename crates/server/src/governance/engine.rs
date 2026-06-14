@@ -1,3 +1,35 @@
+//! 三皇共审引擎 —— 火云洞天宏观治理智能的动作演化治理管道
+//!
+//! # 管道流程
+//!
+//! ```text
+//! proposal_group 创建（stage = awaiting_fuxi_initial）
+//!         ↓
+//! 阶段 1：伏羲初审（stage_fuxi_initial）
+//!   ├─ 拒绝 → update(AwaitingFuxiInitial→Done, Rejected) → 整组关单
+//!   └─ 批准（含 inferred_action_config）→ stage = awaiting_peer
+//!         ↓
+//! 阶段 2：神农 ‖ 轩辕并行（stage_peer_review，tokio::join!）
+//!   ├─ 全部拒绝 → update(Done, Rejected) → 整组关单
+//!   └─ ≥1 票批准（total ≥ approve_threshold）→ stage = awaiting_fuxi_final
+//!         ↓
+//! 阶段 3：伏羲终审（stage_fuxi_final，注入同辈反馈）
+//!   ├─ dissent_log 阈值检查 → 升级 EscalatedAdmin
+//!   ├─ 写入 actions.yaml 失败 → return Err，stage 保持 awaiting_fuxi_final 等下轮重试
+//!   └─ 写入成功 → update(Done, Approved)
+//! ```
+//!
+//! # 设计约束
+//!
+//! - **不允许弃权**：LLM 超时/失败由系统强制注入 Reject（`llm_review::system_reject`）
+//! - **同 similarity_key 多 proposal 共享 fate**：每 group 取首个 proposal 作为审议样本，
+//!   通过则整组批准，actions.yaml 按 action_type 去重写入
+//! - **stage 持久化**：管道阶段进度存 DB，重启后从断点继续
+//! - **close_stale_groups 阶段感知**：仅关闭 `awaiting_fuxi_initial` 超时 group，
+//!   已进入审议管道的 group 由轮询任务自动重试
+//! - **写入失败保护**：阶段 3 写入 actions.yaml 失败时不标记 Approved，
+//!   避免状态分裂（group 标 Approved 但 actions.yaml 实际未写入）
+
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -7,17 +39,28 @@ use tracing::{error, info, warn};
 
 use cyber_jianghu_protocol::GovernanceTopic;
 
-use super::llm_review::{GovernanceLlmClient, build_review_message, build_soul_prompt};
+use super::llm_review::{
+    GovernanceLlmClient, build_final_review_message, build_review_message, build_soul_prompt,
+};
 use super::manifest::CapabilityManifest;
 use super::proposal_store::{PendingGroup, ProposalStore};
 use super::types::{
-    PolicyRule, ProposalEvidence, ProposalStatus, ReviewRole, ReviewVerdict, SoulsConfig,
-    VoteChoice,
+    PolicyRule, ProposalEvidence, ProposalStage, ProposalStatus, ReviewRole, ReviewVerdict,
+    SoulsConfig, VoteChoice,
 };
 
 // ---------------------------------------------------------------------------
 // SourceProvider trait
 // ---------------------------------------------------------------------------
+
+/// 三皇 soul_id 常量（与 souls.yaml 中的 key 一致）
+///
+/// 管道硬编码这三个 ID 而非从 souls.yaml 动态读取：
+/// - 管道语义绑定三皇角色（伏羲初审/终审 + 神农轩辕同辈），动态读取会破坏语义
+/// - souls.yaml 启用/禁用三皇是配置层职责，管道层假设三皇完整
+const FUXI_SOUL_ID: &str = "fuxi";
+const SHENNONG_SOUL_ID: &str = "shennong";
+const XUANYUAN_SOUL_ID: &str = "xuanyuan";
 
 /// 数据源提供者 — 为 Soul 审议提供外部指标数据
 #[async_trait::async_trait]
@@ -295,28 +338,6 @@ impl SoulReviewEngine {
         verdict
     }
 
-    // ----- vote resolution -----
-
-    /// 根据配置阈值解析投票结果
-    pub fn resolve_votes(&self, votes: &[ReviewVerdict]) -> ProposalStatus {
-        let approve_count = votes
-            .iter()
-            .filter(|v| v.vote == VoteChoice::Approve)
-            .count() as u8;
-        let reject_count = votes
-            .iter()
-            .filter(|v| v.vote == VoteChoice::Reject)
-            .count() as u8;
-
-        if approve_count >= self.config.review.approve_threshold {
-            ProposalStatus::Approved
-        } else if reject_count >= self.config.review.reject_threshold {
-            ProposalStatus::Rejected
-        } else {
-            ProposalStatus::UnderReview
-        }
-    }
-
     // ----- batch review -----
 
     /// 批量审核待处理的 proposal groups
@@ -343,7 +364,13 @@ impl SoulReviewEngine {
         results
     }
 
-    /// 审核单个 proposal group
+    /// 审核单个 proposal group（三阶段管道）
+    ///
+    /// 阶段 1：伏羲初审 → 拒绝直接关单
+    /// 阶段 2：神农 + 轩辕并行 → 全部拒绝关单 / ≥1 票批准进阶段 3
+    /// 阶段 3：伏羲终审调整 + 写入 actions.yaml
+    ///
+    /// 同 similarity_key 的多个 proposal 共享 fate，取首个作为审议样本。
     async fn review_group(
         &self,
         store: &ProposalStore,
@@ -355,177 +382,338 @@ impl SoulReviewEngine {
             .context("获取 group 详情失败")?
             .context("Group 不存在")?;
 
-        // 确定 primary soul
-        let primary_soul = match &group_full.primary_soul {
-            Some(s) => s.clone(),
-            None => match self.route_for_topics(&group_full.governance_topics) {
-                Some(soul) => soul,
-                None => {
-                    warn!("Group {} 无法路由到 primary soul，使用 fallback", group.id);
-                    self.config.classifier.default_fallback_topic.clone()
-                }
-            },
+        info!(
+            group_id = %group.id,
+            stage = ?group_full.stage,
+            proposal_count = group_full.proposal_ids.len(),
+            "review_group 进入阶段"
+        );
+
+        match group_full.stage {
+            ProposalStage::AwaitingFuxiInitial => self.stage_fuxi_initial(store, &group_full).await,
+            ProposalStage::AwaitingPeer => self.stage_peer_review(store, &group_full).await,
+            ProposalStage::AwaitingFuxiFinal => self.stage_fuxi_final(store, &group_full).await,
+            ProposalStage::Done => Ok(group_full.status),
+        }
+    }
+
+    /// 阶段 1：伏羲初审
+    ///
+    /// 输入：演化池中的提案（action_type + action_data + rationale）。
+    /// 输出：approve（含 inferred_action_config）→ 推进到阶段 2；
+    ///       reject / 超时 → 整组关单，神农与轩辕不再介入。
+    ///
+    /// 同 similarity_key 多 proposal 共享 fate——取首个 proposal 作为审议样本，
+    /// 伏羲拒绝则整组关单（同名 action 的其他 proposal 一并标记 Rejected）。
+    async fn stage_fuxi_initial(
+        &self,
+        store: &ProposalStore,
+        group_full: &super::proposal_store::GroupFull,
+    ) -> Result<ProposalStatus> {
+        let Some(sample_proposal_id) = group_full.proposal_ids.first().copied() else {
+            warn!(group_id = %group_full.id, "group 无 proposal，直接关单");
+            store
+                .update_group_status_and_stage(
+                    group_full.id,
+                    ProposalStatus::Rejected,
+                    ProposalStage::Done,
+                )
+                .await?;
+            return Ok(ProposalStatus::Rejected);
         };
 
-        // 收集投票（含 proposal_id → verdict 映射，供 auto-evolve 索引推断字段）
-        let mut votes: Vec<(uuid::Uuid, ReviewVerdict)> = Vec::new();
+        let evidence = self
+            .build_evidence_from_group(store, sample_proposal_id)
+            .await?;
+        let verdict = self
+            .review(FUXI_SOUL_ID, &evidence, ReviewRole::Primary)
+            .await;
 
-        // Primary soul 评估
-        for proposal_id in &group_full.proposal_ids {
-            let evidence = self.build_evidence_from_group(store, *proposal_id).await?;
-            let verdict = self
-                .review(&primary_soul, &evidence, ReviewRole::Primary)
-                .await;
-            let role_str = "primary";
-            let vote_str = match verdict.vote {
-                VoteChoice::Approve => "approve",
-                VoteChoice::Reject => "reject",
-                VoteChoice::Abstain => "abstain",
-            };
-            if let Err(e) = store
-                .write_vote(
-                    group.id,
-                    &verdict.soul,
-                    role_str,
-                    vote_str,
-                    &verdict.rationale,
-                    &verdict.evidence_refs,
+        self.persist_vote(store, group_full.id, &verdict, "primary")
+            .await;
+
+        if verdict.vote != VoteChoice::Approve {
+            info!(
+                group_id = %group_full.id,
+                vote = ?verdict.vote,
+                reject_reason = ?verdict.reject_reason,
+                "伏羲初审未通过，整组关单"
+            );
+            store
+                .update_group_status_and_stage(
+                    group_full.id,
+                    ProposalStatus::Rejected,
+                    ProposalStage::Done,
                 )
-                .await
-            {
-                warn!(
-                    group_id = %group.id,
-                    soul = %verdict.soul,
-                    error = %e,
-                    "写入投票记录失败"
-                );
-            }
-            if !matches!(verdict.vote, VoteChoice::Abstain) {
-                votes.push((*proposal_id, verdict));
-            }
+                .await?;
+            return Ok(ProposalStatus::Rejected);
         }
 
-        // Co-reviewers 评估
-        for co_soul in &group_full.co_reviewers {
-            for proposal_id in &group_full.proposal_ids {
-                let evidence = self.build_evidence_from_group(store, *proposal_id).await?;
-                let verdict = self
-                    .review(co_soul, &evidence, ReviewRole::CoReviewer)
-                    .await;
-                let role_str = "co_reviewer";
-                let vote_str = match verdict.vote {
-                    VoteChoice::Approve => "approve",
-                    VoteChoice::Reject => "reject",
-                    VoteChoice::Abstain => "abstain",
-                };
-                if let Err(e) = store
-                    .write_vote(
-                        group.id,
-                        &verdict.soul,
-                        role_str,
-                        vote_str,
-                        &verdict.rationale,
-                        &verdict.evidence_refs,
-                    )
-                    .await
-                {
-                    warn!(
-                        group_id = %group.id,
-                        soul = %verdict.soul,
-                        error = %e,
-                        "写入投票记录失败"
-                    );
-                }
-                if !matches!(verdict.vote, VoteChoice::Abstain) {
-                    votes.push((*proposal_id, verdict));
-                }
-            }
+        info!(group_id = %group_full.id, "伏羲初审通过，进入同辈审议");
+        store
+            .update_group_stage(group_full.id, ProposalStage::AwaitingPeer)
+            .await?;
+        Ok(ProposalStatus::UnderReview)
+    }
+
+    /// 阶段 2：神农 + 轩辕并行审议
+    ///
+    /// 输入：伏羲初审已 approve 的 proposal（伏羲准备的完整 action 配置）。
+    /// 并行调用神农 + 轩辕（`tokio::join!`），延迟减半。
+    ///
+    /// 判定逻辑：
+    /// - total_approve = 伏羲初审（1 票）+ 同辈批准数
+    /// - total_approve ≥ approve_threshold（默认 2）→ 进入阶段 3
+    /// - 否则 → 整组关单
+    ///
+    /// 即"两票全 reject 才关单"等价于"伏羲初审 + 至少一票同辈批准才通过"。
+    async fn stage_peer_review(
+        &self,
+        store: &ProposalStore,
+        group_full: &super::proposal_store::GroupFull,
+    ) -> Result<ProposalStatus> {
+        let Some(sample_proposal_id) = group_full.proposal_ids.first().copied() else {
+            warn!(group_id = %group_full.id, "group 无 proposal，直接关单");
+            store
+                .update_group_status_and_stage(
+                    group_full.id,
+                    ProposalStatus::Rejected,
+                    ProposalStage::Done,
+                )
+                .await?;
+            return Ok(ProposalStatus::Rejected);
+        };
+
+        let evidence = self
+            .build_evidence_from_group(store, sample_proposal_id)
+            .await?;
+
+        // 神农 + 轩辕并行审议
+        let (shennong_v, xuanyuan_v) = tokio::join!(
+            self.review(SHENNONG_SOUL_ID, &evidence, ReviewRole::CoReviewer),
+            self.review(XUANYUAN_SOUL_ID, &evidence, ReviewRole::CoReviewer),
+        );
+
+        self.persist_vote(store, group_full.id, &shennong_v, "co_reviewer")
+            .await;
+        self.persist_vote(store, group_full.id, &xuanyuan_v, "co_reviewer")
+            .await;
+
+        // 判定（伏羲初审已 approve，需要至少一票同辈 approve 才达 approve_threshold=2）
+        // approve_threshold 来自 souls.yaml，默认 2（伏羲初审 + 至少一票同辈）
+        let peer_approve_count = [shennong_v.vote, xuanyuan_v.vote]
+            .iter()
+            .filter(|v| **v == VoteChoice::Approve)
+            .count();
+        let total_approve = 1u8 + peer_approve_count as u8; // 伏羲初审 + 同辈批准数
+
+        if total_approve < self.config.review.approve_threshold {
+            info!(
+                group_id = %group_full.id,
+                shennong = ?shennong_v.vote,
+                xuanyuan = ?xuanyuan_v.vote,
+                total_approve,
+                approve_threshold = self.config.review.approve_threshold,
+                "同辈审议未达 approve_threshold，整组关单"
+            );
+            store
+                .update_group_status_and_stage(
+                    group_full.id,
+                    ProposalStatus::Rejected,
+                    ProposalStage::Done,
+                )
+                .await?;
+            return Ok(ProposalStatus::Rejected);
         }
 
-        let status = self.resolve_votes(&votes.iter().map(|(_, v)| v.clone()).collect::<Vec<_>>());
+        info!(
+            group_id = %group_full.id,
+            total_approve,
+            approve_threshold = self.config.review.approve_threshold,
+            "同辈审议达 approve_threshold，进入伏羲终审"
+        );
+        store
+            .update_group_stage(group_full.id, ProposalStage::AwaitingFuxiFinal)
+            .await?;
+        Ok(ProposalStatus::UnderReview)
+    }
 
-        // 检查 dissent log 阈值
+    /// 阶段 3：伏羲终审调整 + 写入 actions.yaml
+    ///
+    /// 输入：伏羲初审 verdict（已在 votes 表）+ 神农/轩辕 peer verdicts（从 votes 表读）。
+    /// 流程：
+    /// 1. dissent_log 阈值检查（分歧过多 → EscalatedAdmin）
+    /// 2. 构造终审 user_message：附加 peer verdicts 摘要
+    /// 3. 伏羲 LLM 终审 → final_verdict（可能反转，但少见）
+    /// 4. 写入 actions.yaml：失败时 return Err，stage 保持 awaiting_fuxi_final 等下轮重试，
+    ///    避免状态分裂（group 标 Approved 但 actions.yaml 未写入）
+    /// 5. 成功 → update(Done, Approved)
+    async fn stage_fuxi_final(
+        &self,
+        store: &ProposalStore,
+        group_full: &super::proposal_store::GroupFull,
+    ) -> Result<ProposalStatus> {
+        let Some(sample_proposal_id) = group_full.proposal_ids.first().copied() else {
+            warn!(group_id = %group_full.id, "group 无 proposal，直接关单");
+            store
+                .update_group_status_and_stage(
+                    group_full.id,
+                    ProposalStatus::Rejected,
+                    ProposalStage::Done,
+                )
+                .await?;
+            return Ok(ProposalStatus::Rejected);
+        };
+
+        let evidence = self
+            .build_evidence_from_group(store, sample_proposal_id)
+            .await?;
+
+        // dissent_log 阈值检查：分歧过多则升级管理员人工审批
         let dissent_count = group_full.dissent_log.len() as u32;
         if dissent_count >= self.config.review.dissent_log_threshold {
+            warn!(
+                group_id = %group_full.id,
+                dissent_count,
+                threshold = self.config.review.dissent_log_threshold,
+                "dissent_log 达阈值，升级管理员审批"
+            );
+            store
+                .update_group_status_and_stage(
+                    group_full.id,
+                    ProposalStatus::EscalatedAdmin,
+                    ProposalStage::Done,
+                )
+                .await?;
             return Ok(ProposalStatus::EscalatedAdmin);
         }
 
-        // 更新 group 状态
-        store
-            .update_group_status(group.id, status)
-            .await
-            .context("更新 group 状态失败")?;
+        // 取神农 + 轩辕的 verdict 作为终审输入
+        let peer_verdicts: Vec<ReviewVerdict> = group_full
+            .votes
+            .iter()
+            .filter(|v| v.soul == SHENNONG_SOUL_ID || v.soul == XUANYUAN_SOUL_ID)
+            .map(|v| ReviewVerdict {
+                soul: v.soul.clone(),
+                vote: v.vote,
+                rationale: v.rationale.clone(),
+                evidence_refs: v.evidence_refs.clone(),
+                reject_reason: None,
+                inferred_action_config: None,
+            })
+            .collect();
 
-        if status == ProposalStatus::Approved {
-            let approve_count = votes
-                .iter()
-                .filter(|(_, v)| v.vote == VoteChoice::Approve)
-                .count();
-            let total_votes = votes.len();
-            info!(
-                group_id = %group.id,
-                primary_soul = %primary_soul,
-                approve_count = approve_count,
-                total_votes = total_votes,
-                proposal_count = group_full.proposal_ids.len(),
-                "Proposal group approved — auto-evolving action configs"
+        // 伏羲终审：注入 peer_verdicts 到 user_message
+        let fuxi_config = self
+            .config
+            .souls
+            .get(FUXI_SOUL_ID)
+            .ok_or_else(|| anyhow::anyhow!("伏羲配置缺失，管道阶段 3 无法继续"))?;
+        let manifest_guard = self.capability_manifest.read().await;
+        let system_prompt = build_soul_prompt(
+            FUXI_SOUL_ID,
+            &fuxi_config.system_prompt_template,
+            &manifest_guard,
+            &evidence,
+        )?;
+        drop(manifest_guard);
+        let user_message = build_final_review_message(&evidence, &peer_verdicts);
+
+        let mut final_verdict = self
+            .llm_client
+            .review_with_llm(&system_prompt, &user_message)
+            .await;
+        final_verdict.soul = FUXI_SOUL_ID.to_string();
+
+        self.persist_vote(store, group_full.id, &final_verdict, "primary_final")
+            .await;
+
+        if final_verdict.vote != VoteChoice::Approve {
+            // 终审反转（罕见，伏羲基于同辈反馈改变判断）
+            warn!(
+                group_id = %group_full.id,
+                "伏羲终审反转，整组关单"
             );
-
-            // Auto-evolve: 从每个 proposal + 其对应的 verdict（含 LLM 推断字段）生成 actions.yaml 条目
-            let config_dir = crate::paths::get_config_dir();
-            for proposal_id in &group_full.proposal_ids {
-                let evidence = match self.build_evidence_from_group(store, *proposal_id).await {
-                    Ok(e) => e,
-                    Err(e) => {
-                        warn!(
-                            proposal_id = %proposal_id,
-                            error = %e,
-                            "auto-evolve: 获取 proposal evidence 失败"
-                        );
-                        continue;
-                    }
-                };
-                // 找到该 proposal 对应的 verdict（取首个 approve 即可，单 soul Phase 0 唯一）
-                let verdict = votes.iter().find_map(|(pid, v)| {
-                    if pid == proposal_id && v.vote == VoteChoice::Approve {
-                        Some(v)
-                    } else {
-                        None
-                    }
-                });
-                let Some(verdict) = verdict else {
-                    warn!(
-                        proposal_id = %proposal_id,
-                        "auto-evolve: 未找到 approve verdict，跳过 action 写入"
-                    );
-                    continue;
-                };
-                match super::auto_evolve::generate_action_config(&evidence, verdict) {
-                    Ok((action_name, entry)) => {
-                        if let Err(e) = super::action_writer::append_action_to_yaml(
-                            &config_dir,
-                            &action_name,
-                            &entry,
-                        ) {
-                            error!(
-                                action_name = %action_name,
-                                error = %e,
-                                "auto-evolve: 写入 actions.yaml 失败"
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        warn!(
-                            proposal_id = %proposal_id,
-                            error = %e,
-                            "auto-evolve: 生成 action config 失败"
-                        );
-                    }
-                }
-            }
+            store
+                .update_group_status_and_stage(
+                    group_full.id,
+                    ProposalStatus::Rejected,
+                    ProposalStage::Done,
+                )
+                .await?;
+            return Ok(ProposalStatus::Rejected);
         }
 
-        Ok(status)
+        // 写入 actions.yaml（同名 action 只写一次，但所有 proposal 标记 approved）
+        // 失败时返回 Err，review_pending 中 catch 后标记 Error，stage 保持 awaiting_fuxi_final
+        // 等下轮重试，避免 group 标 Approved 但 actions.yaml 实际未写入的状态分裂
+        let config_dir = crate::paths::get_config_dir();
+        let (action_name, entry) =
+            super::auto_evolve::generate_action_config(&evidence, &final_verdict).map_err(|e| {
+                error!(
+                    group_id = %group_full.id,
+                    error = %e,
+                    "auto-evolve: 生成 action config 失败，标记 Error 等待重试"
+                );
+                anyhow::anyhow!("auto-evolve 生成失败: {}", e)
+            })?;
+
+        super::action_writer::append_action_to_yaml(&config_dir, &action_name, &entry).map_err(
+            |e| {
+                error!(
+                    action_name = %action_name,
+                    error = %e,
+                    "auto-evolve: 写入 actions.yaml 失败，标记 Error 等待重试"
+                );
+                anyhow::anyhow!("actions.yaml 写入失败: {}", e)
+            },
+        )?;
+
+        info!(group_id = %group_full.id, "三皇共审完成，整组批准");
+        store
+            .update_group_status_and_stage(
+                group_full.id,
+                ProposalStatus::Approved,
+                ProposalStage::Done,
+            )
+            .await?;
+        Ok(ProposalStatus::Approved)
+    }
+
+    /// 持久化单条 vote 到 soul_review_votes 表
+    ///
+    /// 写入失败仅 warn 日志，不阻塞管道（vote 表用于审计，缺失一条不影响主流程）。
+    /// role_str 取值："primary"（伏羲初审）/ "co_reviewer"（神农轩辕）/ "primary_final"（伏羲终审）。
+    async fn persist_vote(
+        &self,
+        store: &ProposalStore,
+        group_id: uuid::Uuid,
+        verdict: &ReviewVerdict,
+        role_str: &str,
+    ) {
+        let vote_str = match verdict.vote {
+            VoteChoice::Approve => "approve",
+            VoteChoice::Reject => "reject",
+            VoteChoice::Abstain => "abstain",
+        };
+        if let Err(e) = store
+            .write_vote(
+                group_id,
+                &verdict.soul,
+                role_str,
+                vote_str,
+                &verdict.rationale,
+                &verdict.evidence_refs,
+            )
+            .await
+        {
+            warn!(
+                group_id = %group_id,
+                soul = %verdict.soul,
+                error = %e,
+                "写入投票记录失败"
+            );
+        }
     }
 
     async fn build_evidence_from_group(
@@ -580,7 +768,6 @@ mod tests {
                 timeout_secs: 1800,
                 dissent_log_threshold: 3,
                 approve_threshold: 2,
-                reject_threshold: 2,
                 poll_interval_secs: 60,
                 group_stale_secs: 1800,
             },
@@ -616,73 +803,5 @@ mod tests {
         // Phase 0: 仅 evolution → fuxi
         let result = engine.route_for_topics(&[GovernanceTopic::Evolution]);
         assert_eq!(result, Some("fuxi".to_string()));
-    }
-
-    #[test]
-    fn test_resolve_votes_approved() {
-        let engine = test_engine();
-        let votes = vec![
-            ReviewVerdict {
-                soul: "fuxi".to_string(),
-                vote: VoteChoice::Approve,
-                rationale: String::new(),
-                evidence_refs: vec![],
-                reject_reason: None,
-                inferred_action_config: None,
-            },
-            ReviewVerdict {
-                soul: "fuxi".to_string(),
-                vote: VoteChoice::Approve,
-                rationale: String::new(),
-                evidence_refs: vec![],
-                reject_reason: None,
-                inferred_action_config: None,
-            },
-        ];
-        assert_eq!(engine.resolve_votes(&votes), ProposalStatus::Approved);
-    }
-
-    #[test]
-    fn test_resolve_votes_rejected() {
-        let engine = test_engine();
-        let votes = vec![
-            ReviewVerdict {
-                soul: "fuxi".to_string(),
-                vote: VoteChoice::Reject,
-                rationale: String::new(),
-                evidence_refs: vec![],
-                reject_reason: None,
-                inferred_action_config: None,
-            },
-            ReviewVerdict {
-                soul: "fuxi".to_string(),
-                vote: VoteChoice::Reject,
-                rationale: String::new(),
-                evidence_refs: vec![],
-                reject_reason: None,
-                inferred_action_config: None,
-            },
-        ];
-        assert_eq!(engine.resolve_votes(&votes), ProposalStatus::Rejected);
-    }
-
-    #[test]
-    fn test_resolve_votes_under_review() {
-        let engine = test_engine();
-        let votes = vec![ReviewVerdict {
-            soul: "fuxi".to_string(),
-            vote: VoteChoice::Approve,
-            rationale: String::new(),
-            evidence_refs: vec![],
-            reject_reason: None,
-            inferred_action_config: None,
-        }];
-        assert_eq!(engine.resolve_votes(&votes), ProposalStatus::UnderReview);
-    }
-
-    #[test]
-    fn test_resolve_votes_empty() {
-        let engine = test_engine();
-        assert_eq!(engine.resolve_votes(&[]), ProposalStatus::UnderReview);
     }
 }

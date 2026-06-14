@@ -6,7 +6,7 @@ use cyber_jianghu_protocol::GovernanceTopic;
 use sqlx::{PgPool, Postgres, Row};
 use uuid::Uuid;
 
-use super::types::{ProposalEvidence, ProposalStatus};
+use super::types::{ProposalEvidence, ProposalStage, ProposalStatus, VoteChoice};
 
 // ---------------------------------------------------------------------------
 // Row types (sqlx::FromRow)
@@ -35,6 +35,7 @@ struct GroupRow {
     co_reviewers: serde_json::Value,
     governance_topics: serde_json::Value,
     status: String,
+    stage: Option<String>,
     votes: serde_json::Value,
     final_decision: Option<String>,
     dissent_log: serde_json::Value,
@@ -66,14 +67,24 @@ pub struct PendingGroup {
     pub primary_soul: Option<String>,
     pub governance_topics: Vec<GovernanceTopic>,
     pub proposal_count: usize,
+    pub stage: ProposalStage,
     pub created_at: DateTime<Utc>,
 }
 
+/// soul_review_votes 表的行映射
+///
+/// 每条记录表示某 soul 在管道某阶段对某 group 的裁决。
+/// role 取值："primary"（伏羲初审）/ "co_reviewer"（神农轩辕）/ "primary_final"（伏羲终审）。
 #[derive(Debug, Clone)]
 pub struct GroupVote {
     pub soul: String,
     pub role: String,
-    pub vote: ProposalStatus,
+    /// 投票选择（与 votes 表 vote 字符串 "approve"/"reject"/"abstain" 对齐）
+    ///
+    /// 注：类型必须为 VoteChoice（而非 ProposalStatus）。
+    /// votes 表存的是 "approve"/"reject" 字符串，与 VoteChoice serde 对齐；
+    /// 若误用 ProposalStatus，反序列化会全部 fallback 到 Error，破坏阶段 3 终审输入。
+    pub vote: VoteChoice,
     pub rationale: String,
     pub evidence_refs: Vec<String>,
     pub created_at: DateTime<Utc>,
@@ -87,6 +98,7 @@ pub struct GroupFull {
     pub co_reviewers: Vec<String>,
     pub governance_topics: Vec<GovernanceTopic>,
     pub status: ProposalStatus,
+    pub stage: ProposalStage,
     pub votes: Vec<GroupVote>,
     pub final_decision: Option<String>,
     pub dissent_log: Vec<serde_json::Value>,
@@ -138,6 +150,15 @@ impl ProposalStore {
         Ok(row.id)
     }
 
+    /// 创建或追加 proposal_group（按 similarity_key = `action:{action_type}` 去重）
+    ///
+    /// # ON CONFLICT 重置语义
+    ///
+    /// 已 `stage=done` 的 group 接收新 proposal 时（同名 action 重新提议），
+    /// CASE 表达式重置 stage='awaiting_fuxi_initial' + status='pending_review'，
+    /// 重启审议管道。否则新 proposal 会被静默吞掉（done group 不再被轮询）。
+    ///
+    /// 未 done 的 group 不重置 stage（避免打断进行中的审议）。
     pub async fn upsert_proposal_group(
         &self,
         similarity_key: &str,
@@ -160,6 +181,12 @@ impl ProposalStore {
                      action_evolution_proposal_groups.governance_topics || EXCLUDED.governance_topics \
                  ) AS elem \
              ), \
+             status = CASE WHEN action_evolution_proposal_groups.stage = 'done' \
+                           THEN 'pending_review' \
+                           ELSE action_evolution_proposal_groups.status END, \
+             stage = CASE WHEN action_evolution_proposal_groups.stage = 'done' \
+                          THEN 'awaiting_fuxi_initial' \
+                          ELSE action_evolution_proposal_groups.stage END, \
              updated_at = NOW() \
              RETURNING *",
         )
@@ -189,12 +216,14 @@ impl ProposalStore {
                     serde_json::from_value(r.proposal_ids).context("deserialize proposal_ids")?;
                 let governance_topics: Vec<GovernanceTopic> =
                     serde_json::from_value(r.governance_topics).context("deserialize topics")?;
+                let stage = ProposalStage::from_db_str(r.stage.as_deref().unwrap_or(""));
                 Ok(PendingGroup {
                     id: r.id,
                     similarity_key: r.similarity_key,
                     primary_soul: r.primary_soul,
                     governance_topics,
                     proposal_count: proposal_ids.len(),
+                    stage,
                     created_at: r.created_at,
                 })
             })
@@ -226,6 +255,7 @@ impl ProposalStore {
         let co_reviewers: Vec<String> =
             serde_json::from_value(row.co_reviewers).context("deserialize co_reviewers")?;
         let status = ProposalStatus::from_db_str(&row.status);
+        let stage = ProposalStage::from_db_str(row.stage.as_deref().unwrap_or(""));
 
         Ok(Some(GroupFull {
             id: row.id,
@@ -234,6 +264,7 @@ impl ProposalStore {
             co_reviewers,
             governance_topics,
             status,
+            stage,
             votes,
             final_decision: row.final_decision,
             dissent_log,
@@ -259,10 +290,13 @@ impl ProposalStore {
             .map(|r| {
                 let evidence_refs: Vec<String> =
                     serde_json::from_value(r.evidence_refs).context("deserialize evidence_refs")?;
+                // votes 表 vote 字段存 "approve"/"reject"/"abstain"，与 VoteChoice serde 对齐
+                let vote: VoteChoice = serde_json::from_value(serde_json::Value::String(r.vote))
+                    .unwrap_or(VoteChoice::Reject);
                 Ok(GroupVote {
                     soul: r.soul,
                     role: r.role,
-                    vote: ProposalStatus::from_db_str(&r.vote),
+                    vote,
                     rationale: r.rationale,
                     evidence_refs,
                     created_at: r.created_at,
@@ -316,13 +350,59 @@ impl ProposalStore {
         Ok(())
     }
 
-    /// 强制关闭超时的 pending/under_review group（防止无限轮询）
+    /// 更新管道阶段（awaiting_fuxi_initial / awaiting_peer / awaiting_fuxi_final / done）
+    pub async fn update_group_stage(&self, group_id: Uuid, stage: ProposalStage) -> Result<()> {
+        sqlx::query(
+            "UPDATE action_evolution_proposal_groups \
+             SET stage = $2, updated_at = NOW() WHERE id = $1",
+        )
+        .bind(group_id)
+        .bind(stage.as_str())
+        .execute(&self.pool)
+        .await
+        .context("update group stage")?;
+
+        Ok(())
+    }
+
+    /// 同时更新状态与阶段
+    pub async fn update_group_status_and_stage(
+        &self,
+        group_id: Uuid,
+        status: ProposalStatus,
+        stage: ProposalStage,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE action_evolution_proposal_groups \
+             SET status = $2, stage = $3, updated_at = NOW() WHERE id = $1",
+        )
+        .bind(group_id)
+        .bind(status.to_string())
+        .bind(stage.as_str())
+        .execute(&self.pool)
+        .await
+        .context("update group status and stage")?;
+
+        Ok(())
+    }
+
+    /// 强制关闭超时且**尚未进入审议管道**的 group
+    ///
+    /// # 为什么仅关闭 awaiting_fuxi_initial
+    ///
+    /// group 在三阶段管道中流转时 status 始终为 pending_review（仅 stage 推进）。
+    /// 若 close_stale_groups 不区分 stage，会误关闭正在 awaiting_peer / awaiting_fuxi_final
+    /// 中流转的 group，丢失已完成的初审/同辈审议结果。
+    ///
+    /// awaiting_fuxi_initial 卡住意味着数据陈旧或 LLM 持续失败——重启管道比保留更合理。
+    /// 已进入审议管道的 group 由轮询任务自动重试当前阶段，无需强制关闭。
     pub async fn close_stale_groups(&self, timeout_secs: u64) -> Result<u64> {
         let timeout_i64 = timeout_secs as i64;
         let result = sqlx::query(
             "UPDATE action_evolution_proposal_groups \
-             SET status = 'closed_rejected', final_decision = 'timeout', updated_at = NOW() \
+             SET status = 'closed_rejected', final_decision = 'timeout', stage = 'done', updated_at = NOW() \
              WHERE status IN ('pending_review', 'under_review') \
+             AND stage = 'awaiting_fuxi_initial' \
              AND created_at < NOW() - make_interval(secs => $1)",
         )
         .bind(timeout_i64)

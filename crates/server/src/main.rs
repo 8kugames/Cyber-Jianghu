@@ -187,15 +187,17 @@ async fn init_governance(
                     }
                 }
                 _ = interval.tick() => {
-                    let review_timeout = std::time::Duration::from_secs(30);
+                    // 单次轮询 batch 总时间预算：review_config.timeout_secs
+                    // 默认 1800s，可容纳多 group × 多 LLM 调用 × 单次 LLM request_timeout
+                    let review_timeout = std::time::Duration::from_secs(review_config.timeout_secs);
 
-                    // 超时清理：关闭超过 group_stale_secs 仍未闭环的 group
-                    // 注：与 timeout_secs（LLM 调用超时）独立配置
+                    // 超时清理：仅关闭 awaiting_fuxi_initial 阶段超时的 group
+                    // 已进入 awaiting_peer / awaiting_fuxi_final 的 group 不关闭（管道会重试）
                     let stale_secs = review_config.group_stale_secs;
                     if let Ok(closed) = store_clone.close_stale_groups(stale_secs).await
                         && closed > 0
                     {
-                        info!("治理轮询: 强制关闭 {} 个超时 group", closed);
+                        info!("治理轮询: 强制关闭 {} 个超时 group（awaiting_fuxi_initial）", closed);
                     }
 
                     let pending_result =

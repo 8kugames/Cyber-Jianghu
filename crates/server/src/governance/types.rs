@@ -44,12 +44,67 @@ impl ProposalStatus {
 }
 
 /// 投票选择
+///
+/// 注：管道设计不允许弃权。LLM 必须输出 approve 或 reject；
+/// LLM 调用超时/失败时由系统强制注入 Reject（reject_reason="other"）。
+/// 保留 Abstain 仅为内部 fallback 标识，不应进入决议统计。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VoteChoice {
     Approve,
     Reject,
+    #[allow(dead_code)]
     Abstain,
+}
+
+/// 三皇共审管道阶段
+///
+/// 持久化于 `action_evolution_proposal_groups.stage` 列。
+/// 轮询任务（main.rs）按 stage 路由到对应处理函数，每轮只推进一个阶段，
+/// 多轮跨周期完成完整管道。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProposalStage {
+    /// 阶段 1：等待伏羲初审
+    ///
+    /// group 创建后初始状态。close_stale_groups 仅作用于此阶段超时的 group
+    /// —— 长时间停留意味着数据陈旧或 LLM 持续失败，应强制关闭。
+    #[default]
+    AwaitingFuxiInitial,
+    /// 阶段 2：等待神农 + 轩辕并行审议
+    ///
+    /// 伏羲初审已 approve。神农/轩辕将通过 tokio::join! 并行审议。
+    AwaitingPeer,
+    /// 阶段 3：等待伏羲终审调整 + 写入
+    ///
+    /// 同辈审议已达成 approve_threshold。伏羲终审时注入同辈反馈，
+    /// 可能调整 inferred_action_config 以满足附条件批准的合理顾虑。
+    AwaitingFuxiFinal,
+    /// 管道完成（已 approved / rejected / closed / escalated_admin / error）
+    ///
+    /// done 状态下同名 action 重新提议时，upsert_proposal_group 会重置
+    /// stage 为 awaiting_fuxi_initial 重新启动管道。
+    Done,
+}
+
+impl ProposalStage {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::AwaitingFuxiInitial => "awaiting_fuxi_initial",
+            Self::AwaitingPeer => "awaiting_peer",
+            Self::AwaitingFuxiFinal => "awaiting_fuxi_final",
+            Self::Done => "done",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Self {
+        match s {
+            "awaiting_peer" => Self::AwaitingPeer,
+            "awaiting_fuxi_final" => Self::AwaitingFuxiFinal,
+            "done" => Self::Done,
+            _ => Self::AwaitingFuxiInitial,
+        }
+    }
 }
 
 /// Reject 细分原因（伏羲 LLM 输出）
@@ -93,21 +148,32 @@ pub struct RoutePlan {
     pub escalate: bool,
 }
 
-/// 审议结果
+/// 审议结果（单个 soul 对单个 proposal 的裁决）
+///
+/// 由 `GovernanceLlmClient::review_with_llm` 返回，或由 engine 在硬规则命中时构造。
+/// 持久化时拆解到 `soul_review_votes` 表（不含 inferred_action_config 与 reject_reason）。
 #[derive(Debug, Clone)]
 pub struct ReviewVerdict {
     pub soul: String,
     pub vote: VoteChoice,
     pub rationale: String,
     pub evidence_refs: Vec<String>,
-    /// reject 时细分原因（approve/abstain 时为 None）
+    /// reject 时细分原因（approve 时为 None）
+    ///
+    /// 三皇 prompt 必须输出对应的字符串值：non_atomic / governance_value / other
     pub reject_reason: Option<RejectReason>,
     /// approve 时附带 LLM 推断的 actions.yaml 字段
+    ///
+    /// 仅在伏羲初审/终审 approve 时填充。神农/轩辕的 verdict 此字段为 None
+    /// （写入 actions.yaml 的字段以伏羲终审推断为准）。
     pub inferred_action_config: Option<InferredActionConfig>,
 }
 
 impl ReviewVerdict {
-    /// 构造 abstain fallback（用于 LLM 未启用、调用失败等场景）
+    /// 构造 abstain fallback（用于 soul 未注册等内部场景）
+    ///
+    /// 注：管道不允许 LLM 输出 abstain（LLM 超时/失败由 llm_review::system_reject 强制 reject）。
+    /// 此函数仅用于非 LLM 调用路径的内部 fallback。
     pub fn abstain(soul: impl Into<String>, rationale: impl Into<String>) -> Self {
         Self {
             soul: soul.into(),
@@ -260,11 +326,12 @@ pub struct SoulsClassifierConfig {
 pub struct SoulsReviewConfig {
     pub timeout_secs: u64,
     pub dissent_log_threshold: u32,
+    /// 三皇共审 approve 阈值（含伏羲初审票数）
+    /// 默认 2 = 伏羲初审 + 至少一票同辈批准
     pub approve_threshold: u8,
-    pub reject_threshold: u8,
     pub poll_interval_secs: u64,
     /// proposal_group 生命周期超时（秒），超过此值未闭环的 group 强制关闭
-    /// 与 timeout_secs（LLM 调用超时）语义独立，避免混淆
+    /// 仅作用于 stage='awaiting_fuxi_initial' 的 group（管道开始就卡住）
     #[serde(default = "default_group_stale_secs")]
     pub group_stale_secs: u64,
 }
