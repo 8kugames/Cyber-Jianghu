@@ -9,6 +9,36 @@ use uuid::Uuid;
 use super::types::{ProposalEvidence, ProposalStatus};
 
 // ---------------------------------------------------------------------------
+// DB 字符串 → 枚举 显式转换（DB 中的未知值视为数据损坏，强制报错）
+// ---------------------------------------------------------------------------
+
+fn try_parse_target_arity(
+    s: &str,
+) -> Result<cyber_jianghu_protocol::types::governance::TargetArity> {
+    use cyber_jianghu_protocol::types::governance::TargetArity;
+    Ok(match s {
+        "zero" => TargetArity::Zero,
+        "one" => TargetArity::One,
+        "many" => TargetArity::Many,
+        other => anyhow::bail!("未知 target_arity 数据库值: {other}"),
+    })
+}
+
+fn try_parse_protocol_kind(
+    s: &str,
+) -> Result<cyber_jianghu_protocol::types::governance::ProtocolKind> {
+    use cyber_jianghu_protocol::types::governance::ProtocolKind;
+    Ok(match s {
+        "none" => ProtocolKind::None,
+        "bilateral" => ProtocolKind::Bilateral,
+        "multi_phase" => ProtocolKind::MultiPhase,
+        "composite" => ProtocolKind::Composite,
+        "unknown" => ProtocolKind::Unknown,
+        other => anyhow::bail!("未知 protocol_kind 数据库值: {other}"),
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Row types (sqlx::FromRow)
 // ---------------------------------------------------------------------------
 
@@ -301,51 +331,48 @@ impl ProposalStore {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|r| {
-            let target_arity_str: String = r.get(5);
-            let target_arity = match target_arity_str.as_str() {
-                "zero" => cyber_jianghu_protocol::types::governance::TargetArity::Zero,
-                "many" => cyber_jianghu_protocol::types::governance::TargetArity::Many,
-                _ => cyber_jianghu_protocol::types::governance::TargetArity::One,
-            };
-            let protocol_kind_str: String = r.get(8);
-            let protocol_kind = match protocol_kind_str.as_str() {
-                "bilateral" => cyber_jianghu_protocol::types::governance::ProtocolKind::Bilateral,
-                "multi_phase" => {
-                    cyber_jianghu_protocol::types::governance::ProtocolKind::MultiPhase
-                }
-                "composite" => cyber_jianghu_protocol::types::governance::ProtocolKind::Composite,
-                "unknown" => cyber_jianghu_protocol::types::governance::ProtocolKind::Unknown,
-                _ => cyber_jianghu_protocol::types::governance::ProtocolKind::None,
-            };
-            let effect_refs: Vec<String> =
-                serde_json::from_value(r.get::<serde_json::Value, _>(9)).unwrap_or_default();
-            let requirement_refs: Vec<String> =
-                serde_json::from_value(r.get::<serde_json::Value, _>(10)).unwrap_or_default();
-            let governance_topics: Vec<GovernanceTopic> =
-                serde_json::from_value(r.get::<serde_json::Value, _>(11)).unwrap_or_default();
-            let topic_confidence: HashMap<GovernanceTopic, f64> =
-                serde_json::from_value(r.get::<serde_json::Value, _>(12)).unwrap_or_default();
+        let Some(r) = row else { return Ok(None) };
 
-            ProposalEvidence {
-                agent_id: r.get(0),
-                tick_id: r.get(1),
-                proposed_action_type: r.get(2),
-                rationale: r.get(3),
-                ir: ProposedActionIR {
-                    source: cyber_jianghu_protocol::types::governance::IRSource::FromAgentIntent,
-                    atomic_kind: cyber_jianghu_protocol::types::governance::AtomicKind::Unknown,
-                    actor_arity: r.get::<i16, _>(4) as u8,
-                    target_arity,
-                    tick_span: r.get::<i16, _>(6) as u8,
-                    phase_count: r.get::<i16, _>(7) as u8,
-                    protocol_kind,
-                    effect_refs,
-                    requirement_refs,
-                },
-                governance_topics,
-                topic_confidence,
-            }
+        let target_arity_str: String = r.get(5);
+        let target_arity = try_parse_target_arity(&target_arity_str)
+            .with_context(|| format!("反序列化 target_arity 失败: {}", target_arity_str))?;
+
+        let protocol_kind_str: String = r.get(8);
+        let protocol_kind = try_parse_protocol_kind(&protocol_kind_str)
+            .with_context(|| format!("反序列化 protocol_kind 失败: {}", protocol_kind_str))?;
+
+        let effect_refs: Vec<String> = serde_json::from_value(r.get::<serde_json::Value, _>(9))
+            .context("反序列化 effect_refs 失败")?;
+        let requirement_refs: Vec<String> =
+            serde_json::from_value(r.get::<serde_json::Value, _>(10))
+                .context("反序列化 requirement_refs 失败")?;
+        let governance_topics: Vec<GovernanceTopic> =
+            serde_json::from_value(r.get::<serde_json::Value, _>(11))
+                .context("反序列化 governance_topics 失败")?;
+        let topic_confidence: HashMap<GovernanceTopic, f64> =
+            serde_json::from_value(r.get::<serde_json::Value, _>(12))
+                .context("反序列化 topic_confidence 失败")?;
+
+        // NOTE: source / atomic_kind 在 DB schema 中无对应列（migration 012 仅删除 state_transition_count）。
+        // Phase 0 伏羲审议不消费这两个字段，硬编码占位；Phase 2 多 soul 上线时需补 schema 列。
+        Ok(Some(ProposalEvidence {
+            agent_id: r.get(0),
+            tick_id: r.get(1),
+            proposed_action_type: r.get(2),
+            rationale: r.get(3),
+            ir: ProposedActionIR {
+                source: cyber_jianghu_protocol::types::governance::IRSource::FromAgentIntent,
+                atomic_kind: cyber_jianghu_protocol::types::governance::AtomicKind::Unknown,
+                actor_arity: r.get::<i16, _>(4) as u8,
+                target_arity,
+                tick_span: r.get::<i16, _>(6) as u8,
+                phase_count: r.get::<i16, _>(7) as u8,
+                protocol_kind,
+                effect_refs,
+                requirement_refs,
+            },
+            governance_topics,
+            topic_confidence,
         }))
     }
 
