@@ -235,6 +235,130 @@ pub async fn admin_action_on_group(
         _ => return Err(axum::http::StatusCode::BAD_REQUEST),
     };
 
+    // reject 路径：仅更新 group status，无副作用
+    if new_status == "rejected" {
+        sqlx::query(
+            "UPDATE action_evolution_proposal_groups
+             SET status = $1, final_decision = $2, updated_at = NOW()
+             WHERE id = $3",
+        )
+        .bind(new_status)
+        .bind(&req.reason)
+        .bind(group_id)
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            warn!(group_id = %group_id, error = %e, "管理员 reject: DB 更新失败");
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+        return Ok(Json(
+            serde_json::json!({"status": "ok", "new_status": new_status}),
+        ));
+    }
+
+    // approve 路径：先执行所有副作用（写 yaml / reload registry / reload manifest / broadcast），
+    // 全部成功后才更新 group status，确保状态与 actions.yaml 一致。任一步失败返回 5xx，
+    // group status 保持 pending_review/under_review，便于管理员重试。
+    let gov = state
+        .governance
+        .as_ref()
+        .ok_or_else(|| {
+            warn!("管理员 approve: governance 模块未初始化");
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let group_row =
+        sqlx::query("SELECT proposal_ids FROM action_evolution_proposal_groups WHERE id = $1")
+            .bind(group_id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| {
+                warn!(group_id = %group_id, error = %e, "管理员 approve: 查询 group 失败");
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            })?
+            .ok_or(axum::http::StatusCode::NOT_FOUND)?;
+
+    let proposal_ids: Vec<uuid::Uuid> =
+        serde_json::from_value(group_row.get::<serde_json::Value, _>(0)).map_err(|e| {
+            warn!(group_id = %group_id, error = %e, "管理员 approve: proposal_ids 反序列化失败");
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    if proposal_ids.is_empty() {
+        warn!(group_id = %group_id, "管理员 approve: group 无 proposal_ids，拒绝审批");
+        return Err(axum::http::StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    let config_dir = crate::paths::get_config_dir();
+
+    // Step 1: 逐个 proposal 生成并写入 actions.yaml（任一失败立即返回错误，已写入的保留）
+    let mut written_actions = Vec::with_capacity(proposal_ids.len());
+    for pid in &proposal_ids {
+        let evidence = gov
+            .proposal_store
+            .get_proposal(*pid)
+            .await
+            .map_err(|e| {
+                warn!(proposal_id = %pid, error = %e, "管理员 approve: 获取 proposal 失败");
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            })?
+            .ok_or_else(|| {
+                warn!(proposal_id = %pid, "管理员 approve: proposal 不存在");
+                axum::http::StatusCode::NOT_FOUND
+            })?;
+
+        let (action_name, entry) =
+            crate::governance::auto_evolve::generate_action_config(&evidence).map_err(|e| {
+                warn!(proposal_id = %pid, error = %e, "管理员 approve: 生成 action config 失败");
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+        crate::governance::action_writer::append_action_to_yaml(
+            &config_dir,
+            &action_name,
+            &entry,
+        )
+        .map_err(|e| {
+            warn!(action_name = %action_name, error = %e, "管理员 approve: 写入 actions.yaml 失败");
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+        written_actions.push(action_name);
+    }
+
+    // Step 2: 重载 ActionRegistry
+    let new_actions = crate::game_data::loaders::load_actions(&config_dir).map_err(|e| {
+        warn!(error = %e, "管理员 approve: ActionRegistry 重载失败");
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    state.game_data.update_actions(new_actions);
+    info!("管理员 approve: ActionRegistry 已更新");
+
+    // Step 3: 刷新 CapabilityManifest
+    gov.engine.reload_manifest().await;
+
+    // Step 4: 广播 ConfigUpdate（actions.yaml 读取失败 = 状态不一致，返回错误）
+    let actions_content = std::fs::read_to_string(config_dir.join("actions.yaml")).map_err(|e| {
+        warn!(error = %e, "管理员 approve: 读取 actions.yaml 失败");
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let config_update = cyber_jianghu_protocol::messages::ServerMessage::ConfigUpdate {
+        config_type: "actions".to_string(),
+        update_type: "full".to_string(),
+        version: chrono::Utc::now().to_rfc3339(),
+        content: serde_json::json!({"yaml": actions_content}),
+        content_hash: None,
+        updated_items: vec![],
+        removed_items: vec![],
+    };
+    if let Err(e) =
+        crate::websocket::broadcast_config_update(config_update, &gov.connection_manager).await
+    {
+        warn!(error = %e, "管理员 approve: broadcast 失败");
+    }
+
+    // Step 5: 全部副作用成功，才更新 group status
     sqlx::query(
         "UPDATE action_evolution_proposal_groups
          SET status = $1, final_decision = $2, updated_at = NOW()
@@ -245,116 +369,14 @@ pub async fn admin_action_on_group(
     .bind(group_id)
     .execute(pool)
     .await
-    .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|e| {
+        warn!(group_id = %group_id, error = %e, "管理员 approve: 副作用已完成但 DB 更新失败（状态分裂风险）");
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
-    // 管理员 approve 触发完整 auto-evolve 流水线
-    if new_status == "approved" {
-        let Some(ref gov) = state.governance else {
-            return Ok(Json(
-                serde_json::json!({"status": "ok", "new_status": new_status}),
-            ));
-        };
-
-        // 读取 group 的 proposal_ids
-        let group_row =
-            sqlx::query("SELECT proposal_ids FROM action_evolution_proposal_groups WHERE id = $1")
-                .bind(group_id)
-                .fetch_optional(pool)
-                .await
-                .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        if let Some(row) = group_row {
-            let proposal_ids: Vec<uuid::Uuid> =
-                serde_json::from_value(row.get::<serde_json::Value, _>(0)).unwrap_or_default();
-
-            let config_dir = crate::paths::get_config_dir();
-
-            // 逐个 proposal 生成 action config 并写入 actions.yaml
-            for pid in &proposal_ids {
-                match gov.proposal_store.get_proposal(*pid).await {
-                    Ok(Some(evidence)) => {
-                        match crate::governance::auto_evolve::generate_action_config(&evidence) {
-                            Ok((action_name, entry)) => {
-                                if let Err(e) =
-                                    crate::governance::action_writer::append_action_to_yaml(
-                                        &config_dir,
-                                        &action_name,
-                                        &entry,
-                                    )
-                                {
-                                    warn!(
-                                        action_name = %action_name,
-                                        error = %e,
-                                        "管理员 approve: 写入 actions.yaml 失败"
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                warn!(
-                                    proposal_id = %pid,
-                                    error = %e,
-                                    "管理员 approve: 生成 action config 失败"
-                                );
-                            }
-                        }
-                    }
-                    Ok(None) => {
-                        warn!(proposal_id = %pid, "管理员 approve: proposal 不存在");
-                    }
-                    Err(e) => {
-                        warn!(
-                            proposal_id = %pid,
-                            error = %e,
-                            "管理员 approve: 获取 proposal 失败"
-                        );
-                    }
-                }
-            }
-
-            // 重载 ActionRegistry
-            match crate::game_data::loaders::load_actions(&config_dir) {
-                Ok(new_actions) => {
-                    state.game_data.update_actions(new_actions);
-                    info!("管理员 approve: ActionRegistry 已更新");
-                }
-                Err(e) => {
-                    warn!("管理员 approve: ActionRegistry 重载失败: {}", e);
-                }
-            }
-
-            // 刷新 CapabilityManifest
-            gov.engine.reload_manifest().await;
-
-            // 广播 ConfigUpdate
-            // 注：actions.yaml 读取失败时跳过广播，避免空内容破坏 agent 端缓存
-            let actions_content = match std::fs::read_to_string(config_dir.join("actions.yaml")) {
-                Ok(c) => c,
-                Err(e) => {
-                    warn!("管理员 approve: 读取 actions.yaml 失败，跳过广播: {}", e);
-                    return Ok(Json(
-                        serde_json::json!({"status": "ok", "new_status": new_status, "broadcast": "skipped", "reason": e.to_string()}),
-                    ));
-                }
-            };
-            let config_update = cyber_jianghu_protocol::messages::ServerMessage::ConfigUpdate {
-                config_type: "actions".to_string(),
-                update_type: "full".to_string(),
-                version: chrono::Utc::now().to_rfc3339(),
-                content: serde_json::json!({"yaml": actions_content}),
-                content_hash: None,
-                updated_items: vec![],
-                removed_items: vec![],
-            };
-            if let Err(e) =
-                crate::websocket::broadcast_config_update(config_update, &gov.connection_manager)
-                    .await
-            {
-                warn!("管理员 approve: broadcast 失败: {}", e);
-            }
-        }
-    }
-
-    Ok(Json(
-        serde_json::json!({"status": "ok", "new_status": new_status}),
-    ))
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "new_status": new_status,
+        "written_actions": written_actions,
+    })))
 }
