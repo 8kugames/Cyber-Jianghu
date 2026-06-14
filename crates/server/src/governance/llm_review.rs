@@ -4,7 +4,9 @@ use tracing::{error, info, warn};
 use crate::game_data::loaders::LlmConfig;
 
 use super::manifest::CapabilityManifest;
-use super::types::{ProposalEvidence, ReviewVerdict, VoteChoice};
+use super::types::{
+    InferredActionConfig, ProposalEvidence, RejectReason, ReviewVerdict, VoteChoice,
+};
 
 // ---------------------------------------------------------------------------
 // Structured LLM response (parsed from JSON output)
@@ -16,6 +18,12 @@ struct LlmReviewResponse {
     rationale: String,
     #[serde(default)]
     evidence_refs: Vec<String>,
+    /// reject 时细分原因（"non_atomic" / "governance_value" / "other"）
+    #[serde(default)]
+    reject_reason: Option<String>,
+    /// approve 时附带的 LLM 推断动作字段（写入 actions.yaml）
+    #[serde(default)]
+    inferred_action_config: Option<InferredActionConfig>,
 }
 
 // ---------------------------------------------------------------------------
@@ -63,12 +71,7 @@ impl GovernanceLlmClient {
 
     pub async fn review_with_llm(&self, system_prompt: &str, user_message: &str) -> ReviewVerdict {
         if !self.enabled {
-            return ReviewVerdict {
-                soul: String::new(),
-                vote: VoteChoice::Abstain,
-                rationale: "LLM 未启用，无法执行软裁决".to_string(),
-                evidence_refs: vec![],
-            };
+            return ReviewVerdict::abstain("", "LLM 未启用，无法执行软裁决");
         }
 
         let config = self.config.as_ref().unwrap();
@@ -98,12 +101,7 @@ impl GovernanceLlmClient {
             Ok(c) => c,
             Err(e) => {
                 error!("Governance LLM 构建 HTTP 客户端失败: {}", e);
-                return ReviewVerdict {
-                    soul: String::new(),
-                    vote: VoteChoice::Abstain,
-                    rationale: format!("LLM 客户端构建失败: {}", e),
-                    evidence_refs: vec![],
-                };
+                return ReviewVerdict::abstain("", format!("LLM 客户端构建失败: {}", e));
             }
         };
 
@@ -125,12 +123,7 @@ impl GovernanceLlmClient {
             Ok(r) => r,
             Err(e) => {
                 error!("Governance LLM 请求失败: {}", e);
-                return ReviewVerdict {
-                    soul: String::new(),
-                    vote: VoteChoice::Abstain,
-                    rationale: format!("LLM 请求失败: {}", e),
-                    evidence_refs: vec![],
-                };
+                return ReviewVerdict::abstain("", format!("LLM 请求失败: {}", e));
             }
         };
 
@@ -139,12 +132,7 @@ impl GovernanceLlmClient {
 
         if !status.is_success() {
             error!("Governance LLM 返回错误状态 {}: {}", status, body);
-            return ReviewVerdict {
-                soul: String::new(),
-                vote: VoteChoice::Abstain,
-                rationale: format!("LLM 返回错误 {}: {}", status, body),
-                evidence_refs: vec![],
-            };
+            return ReviewVerdict::abstain("", format!("LLM 返回错误 {}: {}", status, body));
         }
 
         // Parse LLM response envelope
@@ -167,12 +155,7 @@ impl GovernanceLlmClient {
             Ok(e) => e,
             Err(e) => {
                 error!("Governance LLM 解析响应信封失败: {}", e);
-                return ReviewVerdict {
-                    soul: String::new(),
-                    vote: VoteChoice::Abstain,
-                    rationale: format!("LLM 响应解析失败: {}", e),
-                    evidence_refs: vec![],
-                };
+                return ReviewVerdict::abstain("", format!("LLM 响应解析失败: {}", e));
             }
         };
 
@@ -184,12 +167,7 @@ impl GovernanceLlmClient {
 
         if content.trim().is_empty() {
             error!("Governance LLM 返回空内容");
-            return ReviewVerdict {
-                soul: String::new(),
-                vote: VoteChoice::Abstain,
-                rationale: "LLM 返回空内容".to_string(),
-                evidence_refs: vec![],
-            };
+            return ReviewVerdict::abstain("", "LLM 返回空内容");
         }
 
         // Parse structured JSON from LLM output
@@ -200,9 +178,16 @@ impl GovernanceLlmClient {
                     "reject" => VoteChoice::Reject,
                     _ => VoteChoice::Abstain,
                 };
+                let reject_reason = parsed.reject_reason.as_deref().and_then(|s| match s {
+                    "non_atomic" => Some(RejectReason::NonAtomic),
+                    "governance_value" => Some(RejectReason::GovernanceValue),
+                    "other" => Some(RejectReason::Other),
+                    _ => None,
+                });
                 info!(
-                    "Governance LLM 裁决完成: vote={}, rationale_len={}",
+                    "Governance LLM 裁决完成: vote={}, reject_reason={:?}, rationale_len={}",
                     parsed.vote,
+                    reject_reason,
                     parsed.rationale.len()
                 );
                 ReviewVerdict {
@@ -210,6 +195,8 @@ impl GovernanceLlmClient {
                     vote,
                     rationale: parsed.rationale,
                     evidence_refs: parsed.evidence_refs,
+                    reject_reason,
+                    inferred_action_config: parsed.inferred_action_config,
                 }
             }
             Err(e) => {
@@ -218,12 +205,7 @@ impl GovernanceLlmClient {
                     "Governance LLM 输出无法解析为结构化 JSON ({}), 原始内容: {}",
                     e, preview
                 );
-                ReviewVerdict {
-                    soul: String::new(),
-                    vote: VoteChoice::Abstain,
-                    rationale: format!("LLM 输出格式异常: {}", e),
-                    evidence_refs: vec![],
-                }
+                ReviewVerdict::abstain("", format!("LLM 输出格式异常: {}", e))
             }
         }
     }
@@ -263,27 +245,13 @@ pub fn build_soul_prompt(
         .collect::<Vec<_>>()
         .join("\n");
 
-    let effect_refs = evidence
-        .ir
-        .effect_refs
-        .iter()
-        .map(|r| format!("- {}", r))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let requirement_refs = evidence
-        .ir
-        .requirement_refs
-        .iter()
-        .map(|r| format!("- {}", r))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let action_data_yaml = serde_yaml::to_string(&evidence.action_data)
+        .unwrap_or_else(|_| "<serialize failed>".to_string());
 
     let prompt = template
         .replace("{capabilities}", &capabilities)
         .replace("{action_type}", &evidence.proposed_action_type)
-        .replace("{effect_refs}", &effect_refs)
-        .replace("{requirement_refs}", &requirement_refs)
+        .replace("{action_data}", &action_data_yaml)
         .replace("{rationale}", &evidence.rationale);
 
     Ok(prompt)
@@ -296,14 +264,12 @@ pub fn build_review_message(evidence: &ProposalEvidence) -> String {
          提案 ID: {}\n\
          提出者 Agent: {}\n\
          动作类型: {}\n\
-         效果引用: {:?}\n\
-         前置条件: {:?}\n\
+         Intent 参数:\n{}\n\
          提案理由: {}",
         evidence.tick_id,
         evidence.agent_id,
         evidence.proposed_action_type,
-        evidence.ir.effect_refs,
-        evidence.ir.requirement_refs,
+        serde_yaml::to_string(&evidence.action_data).unwrap_or_default(),
         evidence.rationale,
     )
 }
@@ -316,24 +282,17 @@ pub fn build_review_message(evidence: &ProposalEvidence) -> String {
 mod tests {
     use super::*;
     use crate::governance::types::{ProposalEvidence, VoteChoice};
-    use cyber_jianghu_protocol::types::governance::{GovernanceTopic, ProposedActionIR};
+    use cyber_jianghu_protocol::types::governance::GovernanceTopic;
 
     fn test_evidence() -> ProposalEvidence {
         ProposalEvidence {
             agent_id: uuid::Uuid::new_v4(),
             tick_id: 1,
             proposed_action_type: "combat.slash".to_string(),
-            ir: ProposedActionIR {
-                source: cyber_jianghu_protocol::types::governance::IRSource::FromAgentIntent,
-                atomic_kind: cyber_jianghu_protocol::types::governance::AtomicKind::Unknown,
-                actor_arity: 1,
-                target_arity: cyber_jianghu_protocol::types::governance::TargetArity::One,
-                tick_span: 0,
-                phase_count: 1,
-                protocol_kind: cyber_jianghu_protocol::types::governance::ProtocolKind::None,
-                effect_refs: vec!["combat.slash".into()],
-                requirement_refs: vec!["tool.sword".into()],
-            },
+            action_data: serde_json::json!({
+                "target_agent_id": "abc-def-123",
+                "item_id": "sword_001"
+            }),
             governance_topics: vec![GovernanceTopic::Evolution],
             topic_confidence: [(GovernanceTopic::Evolution, 0.9)].into_iter().collect(),
             rationale: "test proposal".to_string(),

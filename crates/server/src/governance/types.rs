@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use cyber_jianghu_protocol::types::governance::{GovernanceTopic, ProposedActionIR};
+use cyber_jianghu_protocol::types::governance::{
+    AtomicKind, GovernanceTopic, ProtocolKind, TargetArity,
+};
 
 /// 审议角色
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +52,31 @@ pub enum VoteChoice {
     Abstain,
 }
 
+/// Reject 细分原因（伏羲 LLM 输出）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RejectReason {
+    /// 非原子性：动作涉及多执行者/多阶段/跨 tick
+    NonAtomic,
+    /// 不符合演化方向/世界观
+    GovernanceValue,
+    /// 其他原因（在 rationale 中说明）
+    Other,
+}
+
+/// 伏羲 LLM 推断的动作配置（approve 时附带，写入 actions.yaml）
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InferredActionConfig {
+    pub atomic_kind: AtomicKind,
+    pub actor_arity: u8,
+    pub target_arity: TargetArity,
+    pub tick_span: u8,
+    pub phase_count: u8,
+    pub protocol_kind: ProtocolKind,
+    pub effect_refs: Vec<String>,
+    pub requirement_refs: Vec<String>,
+}
+
 /// 分类结果
 #[derive(Debug, Clone)]
 pub struct ClassificationResult {
@@ -73,15 +100,38 @@ pub struct ReviewVerdict {
     pub vote: VoteChoice,
     pub rationale: String,
     pub evidence_refs: Vec<String>,
+    /// reject 时细分原因（approve/abstain 时为 None）
+    pub reject_reason: Option<RejectReason>,
+    /// approve 时附带 LLM 推断的 actions.yaml 字段
+    pub inferred_action_config: Option<InferredActionConfig>,
+}
+
+impl ReviewVerdict {
+    /// 构造 abstain fallback（用于 LLM 未启用、调用失败等场景）
+    pub fn abstain(soul: impl Into<String>, rationale: impl Into<String>) -> Self {
+        Self {
+            soul: soul.into(),
+            vote: VoteChoice::Abstain,
+            rationale: rationale.into(),
+            evidence_refs: vec![],
+            reject_reason: None,
+            inferred_action_config: None,
+        }
+    }
 }
 
 /// 提案证据
+///
+/// 提案触发条件是 agent 端 UnknownAction，agent 无可信执行特征（IR）数据源。
+/// 携带 agent 的 intent 上下文（action_data），由伏羲 LLM 审议时推断原子性
+/// 与执行特征。actions.yaml 是运行时真相，DB 中不再存 IR 字段。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProposalEvidence {
     pub agent_id: uuid::Uuid,
     pub tick_id: i64,
     pub proposed_action_type: String,
-    pub ir: ProposedActionIR,
+    /// Agent intent 上下文（target_agent_id / item_id / quantity 等完整参数）
+    pub action_data: serde_json::Value,
     pub governance_topics: Vec<GovernanceTopic>,
     pub topic_confidence: HashMap<GovernanceTopic, f64>,
     pub rationale: String,

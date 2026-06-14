@@ -305,11 +305,35 @@ pub async fn admin_action_on_group(
                 axum::http::StatusCode::NOT_FOUND
             })?;
 
-        let (action_name, entry) =
-            crate::governance::auto_evolve::generate_action_config(&evidence).map_err(|e| {
-                warn!(proposal_id = %pid, error = %e, "管理员 approve: 生成 action config 失败");
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+        // 管理员人工审批 = 隐式声明该动作为原子性，构造默认 atomic verdict
+        use crate::governance::types::{InferredActionConfig, ReviewVerdict, VoteChoice};
+        use cyber_jianghu_protocol::types::governance::{AtomicKind, ProtocolKind, TargetArity};
+        let admin_verdict = ReviewVerdict {
+            soul: "admin_override".to_string(),
+            vote: VoteChoice::Approve,
+            rationale: format!("管理员人工审批（理由: {}）", req.reason),
+            evidence_refs: vec![],
+            reject_reason: None,
+            inferred_action_config: Some(InferredActionConfig {
+                atomic_kind: AtomicKind::Atomic,
+                actor_arity: 1,
+                target_arity: TargetArity::Zero,
+                tick_span: 0,
+                phase_count: 1,
+                protocol_kind: ProtocolKind::None,
+                effect_refs: vec![],
+                requirement_refs: vec![],
+            }),
+        };
+
+        let (action_name, entry) = crate::governance::auto_evolve::generate_action_config(
+            &evidence,
+            &admin_verdict,
+        )
+        .map_err(|e| {
+            warn!(proposal_id = %pid, error = %e, "管理员 approve: 生成 action config 失败");
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
         crate::governance::action_writer::append_action_to_yaml(
             &config_dir,

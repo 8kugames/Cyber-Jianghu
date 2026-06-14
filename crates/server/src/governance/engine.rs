@@ -143,7 +143,7 @@ impl SoulReviewEngine {
         &self,
         rule: &PolicyRule,
         soul_id: &str,
-        evidence: &ProposalEvidence,
+        _evidence: &ProposalEvidence,
     ) -> bool {
         match rule {
             PolicyRule::Metric {
@@ -179,15 +179,15 @@ impl SoulReviewEngine {
             PolicyRule::EffectRef {
                 effect_ref_matches, ..
             } => {
-                let provider = self.sources.get(soul_id);
-                effect_ref_matches.iter().any(|pattern| match provider {
-                    Some(p) => p.match_effect_ref(&evidence.ir.effect_refs, pattern),
-                    None => evidence.ir.effect_refs.iter().any(|e| e == pattern),
-                })
+                // Phase 0：伏羲单 soul + agent 提议时无 effect_refs（LLM 审议后才有），
+                // EffectRef 规则永远不命中。Phase 2 多 soul 上线时由 LLM 推断后回填。
+                let _ = (effect_ref_matches, soul_id);
+                false
             }
-            PolicyRule::EffectGroup { all_effects_in } => all_effects_in
-                .iter()
-                .all(|cap| evidence.ir.effect_refs.iter().any(|e| e == cap)),
+            PolicyRule::EffectGroup { all_effects_in } => {
+                let _ = all_effects_in;
+                false
+            }
         }
     }
 
@@ -201,12 +201,7 @@ impl SoulReviewEngine {
         let soul_config = match self.config.souls.get(soul_id) {
             Some(c) => c,
             None => {
-                return ReviewVerdict {
-                    soul: soul_id.to_string(),
-                    vote: VoteChoice::Abstain,
-                    rationale: format!("Soul {} 未在配置中注册", soul_id),
-                    evidence_refs: vec![],
-                };
+                return ReviewVerdict::abstain(soul_id, format!("Soul {} 未在配置中注册", soul_id));
             }
         };
 
@@ -222,7 +217,9 @@ impl SoulReviewEngine {
                     soul: soul_id.to_string(),
                     vote: VoteChoice::Reject,
                     rationale: reason,
-                    evidence_refs: evidence.ir.effect_refs.clone(),
+                    evidence_refs: vec![],
+                    reject_reason: Some(super::types::RejectReason::Other),
+                    inferred_action_config: None,
                 };
             }
         }
@@ -239,7 +236,9 @@ impl SoulReviewEngine {
                     soul: soul_id.to_string(),
                     vote: VoteChoice::Approve,
                     rationale: reason,
-                    evidence_refs: evidence.ir.effect_refs.clone(),
+                    evidence_refs: vec![],
+                    reject_reason: None,
+                    inferred_action_config: None,
                 };
             }
         }
@@ -274,12 +273,7 @@ impl SoulReviewEngine {
             Ok(p) => p,
             Err(e) => {
                 warn!("构建 Soul {} prompt 失败: {}, 回退 Abstain", soul_id, e);
-                return ReviewVerdict {
-                    soul: soul_id.to_string(),
-                    vote: VoteChoice::Abstain,
-                    rationale: format!("prompt 构建失败: {}", e),
-                    evidence_refs: vec![],
-                };
+                return ReviewVerdict::abstain(soul_id, format!("prompt 构建失败: {}", e));
             }
         };
         drop(manifest_guard);
@@ -373,8 +367,8 @@ impl SoulReviewEngine {
             },
         };
 
-        // 收集投票
-        let mut votes: Vec<ReviewVerdict> = Vec::new();
+        // 收集投票（含 proposal_id → verdict 映射，供 auto-evolve 索引推断字段）
+        let mut votes: Vec<(uuid::Uuid, ReviewVerdict)> = Vec::new();
 
         // Primary soul 评估
         for proposal_id in &group_full.proposal_ids {
@@ -407,7 +401,7 @@ impl SoulReviewEngine {
                 );
             }
             if !matches!(verdict.vote, VoteChoice::Abstain) {
-                votes.push(verdict);
+                votes.push((*proposal_id, verdict));
             }
         }
 
@@ -443,12 +437,12 @@ impl SoulReviewEngine {
                     );
                 }
                 if !matches!(verdict.vote, VoteChoice::Abstain) {
-                    votes.push(verdict);
+                    votes.push((*proposal_id, verdict));
                 }
             }
         }
 
-        let status = self.resolve_votes(&votes);
+        let status = self.resolve_votes(&votes.iter().map(|(_, v)| v.clone()).collect::<Vec<_>>());
 
         // 检查 dissent log 阈值
         let dissent_count = group_full.dissent_log.len() as u32;
@@ -465,7 +459,7 @@ impl SoulReviewEngine {
         if status == ProposalStatus::Approved {
             let approve_count = votes
                 .iter()
-                .filter(|v| v.vote == VoteChoice::Approve)
+                .filter(|(_, v)| v.vote == VoteChoice::Approve)
                 .count();
             let total_votes = votes.len();
             info!(
@@ -477,37 +471,54 @@ impl SoulReviewEngine {
                 "Proposal group approved — auto-evolving action configs"
             );
 
-            // Auto-evolve: 从每个 proposal 的 IR 生成 action config 并写入 actions.yaml
+            // Auto-evolve: 从每个 proposal + 其对应的 verdict（含 LLM 推断字段）生成 actions.yaml 条目
             let config_dir = crate::paths::get_config_dir();
             for proposal_id in &group_full.proposal_ids {
-                match self.build_evidence_from_group(store, *proposal_id).await {
-                    Ok(evidence) => match super::auto_evolve::generate_action_config(&evidence) {
-                        Ok((action_name, entry)) => {
-                            if let Err(e) = super::action_writer::append_action_to_yaml(
-                                &config_dir,
-                                &action_name,
-                                &entry,
-                            ) {
-                                error!(
-                                    action_name = %action_name,
-                                    error = %e,
-                                    "auto-evolve: 写入 actions.yaml 失败"
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            warn!(
-                                proposal_id = %proposal_id,
-                                error = %e,
-                                "auto-evolve: 生成 action config 失败"
-                            );
-                        }
-                    },
+                let evidence = match self.build_evidence_from_group(store, *proposal_id).await {
+                    Ok(e) => e,
                     Err(e) => {
                         warn!(
                             proposal_id = %proposal_id,
                             error = %e,
                             "auto-evolve: 获取 proposal evidence 失败"
+                        );
+                        continue;
+                    }
+                };
+                // 找到该 proposal 对应的 verdict（取首个 approve 即可，单 soul Phase 0 唯一）
+                let verdict = votes.iter().find_map(|(pid, v)| {
+                    if pid == proposal_id && v.vote == VoteChoice::Approve {
+                        Some(v)
+                    } else {
+                        None
+                    }
+                });
+                let Some(verdict) = verdict else {
+                    warn!(
+                        proposal_id = %proposal_id,
+                        "auto-evolve: 未找到 approve verdict，跳过 action 写入"
+                    );
+                    continue;
+                };
+                match super::auto_evolve::generate_action_config(&evidence, verdict) {
+                    Ok((action_name, entry)) => {
+                        if let Err(e) = super::action_writer::append_action_to_yaml(
+                            &config_dir,
+                            &action_name,
+                            &entry,
+                        ) {
+                            error!(
+                                action_name = %action_name,
+                                error = %e,
+                                "auto-evolve: 写入 actions.yaml 失败"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            proposal_id = %proposal_id,
+                            error = %e,
+                            "auto-evolve: 生成 action config 失败"
                         );
                     }
                 }
@@ -616,12 +627,16 @@ mod tests {
                 vote: VoteChoice::Approve,
                 rationale: String::new(),
                 evidence_refs: vec![],
+                reject_reason: None,
+                inferred_action_config: None,
             },
             ReviewVerdict {
                 soul: "fuxi".to_string(),
                 vote: VoteChoice::Approve,
                 rationale: String::new(),
                 evidence_refs: vec![],
+                reject_reason: None,
+                inferred_action_config: None,
             },
         ];
         assert_eq!(engine.resolve_votes(&votes), ProposalStatus::Approved);
@@ -636,12 +651,16 @@ mod tests {
                 vote: VoteChoice::Reject,
                 rationale: String::new(),
                 evidence_refs: vec![],
+                reject_reason: None,
+                inferred_action_config: None,
             },
             ReviewVerdict {
                 soul: "fuxi".to_string(),
                 vote: VoteChoice::Reject,
                 rationale: String::new(),
                 evidence_refs: vec![],
+                reject_reason: None,
+                inferred_action_config: None,
             },
         ];
         assert_eq!(engine.resolve_votes(&votes), ProposalStatus::Rejected);
@@ -655,6 +674,8 @@ mod tests {
             vote: VoteChoice::Approve,
             rationale: String::new(),
             evidence_refs: vec![],
+            reject_reason: None,
+            inferred_action_config: None,
         }];
         assert_eq!(engine.resolve_votes(&votes), ProposalStatus::UnderReview);
     }

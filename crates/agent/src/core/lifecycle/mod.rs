@@ -801,7 +801,7 @@ impl super::Agent {
                                                 continue;
                                             }
 
-                                            let (action_type_str, _) = intent_map
+                                            let (action_type_str, action_data) = intent_map
                                                 .get(&result.intent_id)
                                                 .map(|(at, ad)| (at.to_string(), (*ad).clone()))
                                                 .unwrap_or_else(|| ("unknown".to_string(), None));
@@ -810,6 +810,7 @@ impl super::Agent {
                                                 "agent_id": agent_id,
                                                 "tick_id": result.tick_id,
                                                 "proposed_action_type": action_type_str,
+                                                "action_data": action_data,
                                                 "rationale": result.error.clone().unwrap_or_default(),
                                             });
                                             let url = format!("{}/api/v1/action-evolution/propose", self.config.server.http_url);
