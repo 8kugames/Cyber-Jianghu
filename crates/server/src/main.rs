@@ -188,9 +188,10 @@ async fn init_governance(
                 _ = interval.tick() => {
                     let review_timeout = std::time::Duration::from_secs(30);
 
-                    // 超时清理：关闭超过 timeout_secs 仍未闭环的 group
-                    let timeout_secs = review_config.timeout_secs;
-                    if let Ok(closed) = store_clone.close_stale_groups(timeout_secs).await {
+                    // 超时清理：关闭超过 group_stale_secs 仍未闭环的 group
+                    // 注：与 timeout_secs（LLM 调用超时）独立配置
+                    let stale_secs = review_config.group_stale_secs;
+                    if let Ok(closed) = store_clone.close_stale_groups(stale_secs).await {
                         if closed > 0 {
                             info!("治理轮询: 强制关闭 {} 个超时 group", closed);
                         }

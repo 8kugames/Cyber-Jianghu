@@ -74,3 +74,4 @@ data:
     approve_threshold: 1
     reject_threshold: 1
     poll_interval_secs: 60
+    group_stale_secs: 1800

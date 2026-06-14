@@ -213,4 +213,12 @@ pub struct SoulsReviewConfig {
     pub approve_threshold: u8,
     pub reject_threshold: u8,
     pub poll_interval_secs: u64,
+    /// proposal_group 生命周期超时（秒），超过此值未闭环的 group 强制关闭
+    /// 与 timeout_secs（LLM 调用超时）语义独立，避免混淆
+    #[serde(default = "default_group_stale_secs")]
+    pub group_stale_secs: u64,
+}
+
+fn default_group_stale_secs() -> u64 {
+    1800
 }

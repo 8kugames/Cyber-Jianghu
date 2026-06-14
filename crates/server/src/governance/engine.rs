@@ -571,6 +571,7 @@ mod tests {
                 approve_threshold: 2,
                 reject_threshold: 2,
                 poll_interval_secs: 60,
+                group_stale_secs: 1800,
             },
         }
     }
