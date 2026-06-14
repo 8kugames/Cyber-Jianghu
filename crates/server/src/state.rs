@@ -144,7 +144,7 @@ pub async fn populate_agent_state_cache(
 pub struct GovernanceState {
     pub classifier: Arc<TopicClassifier>,
     pub proposal_store: Arc<ProposalStore>,
-    pub engine: Arc<RwLock<SoulReviewEngine>>,
+    pub engine: Arc<SoulReviewEngine>,
     pub connection_manager: websocket::ConnectionManager,
     pub review_config: SoulsReviewConfig,
 }

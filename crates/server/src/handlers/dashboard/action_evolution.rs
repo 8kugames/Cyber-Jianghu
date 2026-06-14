@@ -323,7 +323,7 @@ pub async fn admin_action_on_group(
             }
 
             // 刷新 CapabilityManifest
-            gov.engine.write().await.reload_manifest().await;
+            gov.engine.reload_manifest().await;
 
             // 广播 ConfigUpdate
             let actions_content =
