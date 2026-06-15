@@ -71,15 +71,37 @@
 
 ### P0 核心机制
 
-- **拒绝 → 提案转化**: Agent 提交未知动作或表达力不足的动作时，天魂拒绝后经 `ServerGovernanceMapper` 映射为 `GovernanceCode`（UnknownAction / ExpressionGap），Agent 端 `SelfEvaluator` 产出结构化 `ProposedActionIR`，通过原子闸门后提交到 Server。
-- **原子行为闸门**: `check_atomicity()` 检查 `actor_arity==1 && tick_span==0 && phase_count==1 && protocol_kind=="none"`，复合行为直接 Drop。
-- **Soul 审议引擎 (SoulReviewEngine)**: 配置驱动的投票式审核引擎，从 `souls.yaml` 加载 Soul 策略（hard_reject_if / hard_approve_if），周期任务（`poll_interval_secs`）审议 pending 提案。
-- **真源三皇**: 伏羲（演化）、神农（资源/生存）、轩辕（秩序/伦理），通过 `topic_to_soul` 路由映射实现"单皇首审 + 双皇复审"。Phase 0 仅伏羲单皇审议，配置已就绪。
-- **数据驱动**: 全部行为由 `souls.yaml` 和 `action_evolution.yaml` 驱动，新增 Soul 只需加 YAML 条目 + 实现 `SourceProvider` trait。
+- **拒绝 → 提案转化**: Agent 提交未知动作时，天魂拒绝后经 `ServerGovernanceMapper` 映射为 `GovernanceCode`（UnknownAction），Agent 异步提交提案（含 action_type + action_data + rationale）到 Server 演化池。
+- **三皇共治（火云洞天宏观治理智能）**:
+  - **伏羲氏（演化之主）**: 世界多样性 + 演化方向，倾向引入新变量。初审 + 终审双角色。
+  - **神农氏（生存之主）**: 种群生存率 + 资源平衡，倾向稳健生态策略。同辈并行审议。
+  - **轩辕氏（秩序之主）**: 世界观稳定秩序——天道法则自洽 + 世界循环稳定。不审查个体 agent 命运，不审查合理 violence（PK/报仇/抢夺是社会涌现）。
+- **三阶段管道（stage 持久化）**:
+  - 阶段 1：伏羲初审 → 拒绝直接关单 / 批准（含 inferred_action_config）推进阶段 2
+  - 阶段 2：神农 ‖ 轩辕并行（tokio::join!）→ 全部拒绝关单 / ≥approve_threshold 推进阶段 3
+  - 阶段 3：伏羲终审（注入同辈反馈，可能调整 inferred_action_config）→ 写入 actions.yaml
+- **管道约束**:
+  - 禁止弃权（LLM 超时/失败由系统强制注入 Reject）
+  - 同 similarity_key 多 proposal 共享 fate
+  - 写入失败保护：避免 group 标 Approved 但 actions.yaml 未写入的状态分裂
+  - close_stale_groups 仅关闭 awaiting_fuxi_initial 超时 group
+- **数据驱动**: `souls.yaml` 配置三皇 + `approve_threshold`（默认 2/3）+ 阶段超时；新增 Soul 只需加 YAML 条目。
 - **能力注册表 (CapabilityManifest)**: 从 `ActionRegistry` 自动投影，作为审议引擎的"事实层"真源。
 - **优雅降级**: `init_governance` 失败时 `governance: None`，非治理路径不受影响。
 
+### 延后项（明确登记，Phase 2 实施）
+
+- 神农氏核心职责：种群生存率/资源平衡/生态稳健的指标监控
+- 轩辕氏核心职责：世界观稳定秩序监控（法则自洽/循环稳定/规则套利防御）
+- `SourceProvider` trait 的实际 metric 接入
+
 ### 破坏性更新
 
-- `ExecutionResult` 新增 `governance_code: Option<GovernanceCode>` 字段，`skip_serializing_if = "Option::is_none"` 保持向后兼容。
-- `cyber-jianghu-protocol` 版本从 0.1.68 升级到 0.1.69。
+- 删除 `ProposedActionIR` + `IRSource` 类型（protocol crate）
+- DB migration 013 删除 `action_evolution_proposals` 表 IR 字段，新增 `action_data`
+- DB migration 014 新增 `action_evolution_proposal_groups.stage` 列
+- `ProposalRequest.ir` 字段删除，新增 `action_data: serde_json::Value`
+- `ReviewVerdict` 新增 `reject_reason` + `inferred_action_config` 字段
+- `GroupVote.vote` 类型从 `ProposalStatus` 改为 `VoteChoice`
+- `SoulsReviewConfig` 删除 `reject_threshold` + `source_bindings` 字段
+- 旧版 `ExecutionResult.governance_code` 字段保持向后兼容（`Option` + `skip_serializing_if`）

@@ -29,6 +29,27 @@
 //!   已进入审议管道的 group 由轮询任务自动重试
 //! - **写入失败保护**：阶段 3 写入 actions.yaml 失败时不标记 Approved，
 //!   避免状态分裂（group 标 Approved 但 actions.yaml 实际未写入）
+//!
+//! # Error 状态恢复路径
+//!
+//! 阶段 3 写入 actions.yaml 失败时，`review_pending` catch Err 后标记 `ProposalStatus::Error`，
+//! 但 **stage 保持 `awaiting_fuxi_final`**（未调用 update_group_status_and_stage）。
+//!
+//! 注意：`get_pending_groups` SQL 仅查 `status IN ('pending_review', 'under_review')`，
+//! Error 状态的 group **不会**被下一轮轮询拉取。这是设计意图——避免持续失败的写入
+//! 每轮都重试占用 LLM 配额。
+//!
+//! 恢复方式（任一即可）：
+//! 1. **同名 action 重新提议**：agent 再次提交同名 action 时，`upsert_proposal_group`
+//!    ON CONFLICT 检测到 `stage='done'` 会重置管道。但 Error 状态的 group stage 仍是
+//!    `awaiting_fuxi_final` 而非 `done`——此路径不生效。需 DBA 介入。
+//! 2. **DBA 介入**：直接 UPDATE proposal_groups SET status='under_review' WHERE id=...
+//!    让轮询任务重新拉取并重试阶段 3。
+//! 3. **后续优化**（未实装）：增加 `recover_error_groups()` 接口，按配置的重试策略
+//!    重新拉取 Error 状态的 group。
+//!
+//! 当前采用方案 2（DBA 介入）——Error 状态是相对罕见的边界场景，过度自动化可能掩盖
+//! 持续性故障（如 LLM 服务异常、磁盘满）。
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -749,7 +770,6 @@ mod tests {
                 display_name: "伏羲".to_string(),
                 governance_role: "evolution".to_string(),
                 review_policy: ReviewPolicy::default(),
-                source_bindings: HashMap::new(),
                 system_prompt_template: "fuxi_review_prompt".to_string(),
             },
         );

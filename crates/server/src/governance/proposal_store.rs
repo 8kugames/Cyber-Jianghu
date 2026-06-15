@@ -336,20 +336,6 @@ impl ProposalStore {
         }))
     }
 
-    pub async fn update_group_status(&self, group_id: Uuid, status: ProposalStatus) -> Result<()> {
-        sqlx::query(
-            "UPDATE action_evolution_proposal_groups \
-             SET status = $2, updated_at = NOW() WHERE id = $1",
-        )
-        .bind(group_id)
-        .bind(status.to_string())
-        .execute(&self.pool)
-        .await
-        .context("update group status")?;
-
-        Ok(())
-    }
-
     /// 更新管道阶段（awaiting_fuxi_initial / awaiting_peer / awaiting_fuxi_final / done）
     pub async fn update_group_stage(&self, group_id: Uuid, stage: ProposalStage) -> Result<()> {
         sqlx::query(

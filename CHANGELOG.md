@@ -4,6 +4,68 @@
 
 ## [Unreleased]
 
+> **BREAKING**（治理数据流重大重构）：
+> - 删除 `ProposedActionIR` + `IRSource` 类型（protocol crate 0.1.73 → 后续版本）
+> - DB migration 013 删除 `action_evolution_proposals` 表 IR 字段（actor_arity / target_arity / tick_span / phase_count / protocol_kind / effect_refs / requirement_refs）
+> - DB migration 014 新增 `action_evolution_proposal_groups.stage` 列
+> - `ProposalRequest` 字段变更：删除 `ir: Option<ProposedActionIR>`，新增 `action_data: serde_json::Value`
+> - `ReviewVerdict` 新增 `reject_reason: Option<RejectReason>` + `inferred_action_config: Option<InferredActionConfig>` 字段
+> - `GroupVote.vote` 类型从 `ProposalStatus` 改为 `VoteChoice`（与 votes 表字符串对齐）
+> - `SoulsReviewConfig` 删除 `reject_threshold` 字段（管道不再使用）
+
+### 三皇共审管道（Three-Soul Pipeline）
+
+火云洞天宏观治理智能——三皇各司其职共审动作演化提案：
+
+- **伏羲氏（演化之主）**：世界多样性 + 演化方向，倾向引入新变量。初审 + 终审双角色。
+- **神农氏（生存之主）**：种群生存率 + 资源平衡，倾向稳健生态策略。同辈并行审议。
+- **轩辕氏（秩序之主）**：世界观稳定秩序（天道法则自洽 + 世界循环稳定），不审查个体 agent 命运。同辈并行审议。
+
+**三阶段管道**（每个 group 按 stage 持久化推进）：
+
+```text
+阶段 1：伏羲初审（awaiting_fuxi_initial）
+  ├─ 拒绝 → 整组关单
+  └─ 批准（含 inferred_action_config）→ 推进阶段 2
+
+阶段 2：神农 ‖ 轩辕并行（awaiting_peer，tokio::join!）
+  ├─ 全部拒绝 → 整组关单
+  └─ ≥approve_threshold（默认 2/3）→ 推进阶段 3
+
+阶段 3：伏羲终审（awaiting_fuxi_final，注入同辈反馈）
+  ├─ dissent_log 阈值检查 → 升级 EscalatedAdmin
+  ├─ 写入 actions.yaml 失败 → 保持 awaiting_fuxi_final 等下轮重试
+  └─ 写入成功 → Approved + Done
+```
+
+**关键设计**：
+- 禁止弃权（LLM 超时/失败强制 Reject）
+- 同 similarity_key 多 proposal 共享 fate
+- stage 持久化，重启可断点续跑
+- close_stale_groups 仅关闭 awaiting_fuxi_initial 超时 group
+- 写入失败保护：避免 group 标 Approved 但 actions.yaml 未写入的状态分裂
+
+### 配置变更（souls.yaml）
+
+- 启用 shennong（survival）+ xuanyuan（order）
+- `topic_to_soul` + `topic_priority` 三皇完整映射
+- `approve_threshold: 2`（含伏羲初审 + 至少一票同辈批准）
+- 删除 `source_bindings` 配置（Phase 2 多 soul metric 监控延后）
+- 删除 `reject_threshold`（管道不用，仅 approve_threshold 生效）
+
+### 延后项（明确登记，Phase 2 实施）
+
+- 神农氏核心职责：种群生存率/资源平衡/生态稳健的指标监控
+- 轩辕氏核心职责：世界观稳定秩序监控（法则自洽/循环稳定/规则套利防御）
+
+### 审计修复（前置 commit）
+
+本次变更前已修复伏羲审议全链路审计问题（commits `f750b64d` ~ `ca463a08`），详见 git log。
+
+---
+
+## [历史归档]
+
 > **BREAKING**: `ExecutionResult` 新增 `governance_code` 字段（向后兼容：`Option<GovernanceCode>` 序列化时 `skip_serializing_if`）。protocol crate 版本从 0.1.68 升级到 0.1.69。
 
 ### 治理系统 (Governance)
