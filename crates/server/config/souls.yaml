@@ -9,7 +9,6 @@ data:
         hard_approve_if: []
         hard_reject_if: []
         soft_concern_if: []
-      source_bindings: {}
       system_prompt_template: "fuxi_review_prompt"
 
     shennong:
@@ -21,7 +20,6 @@ data:
         hard_approve_if: []
         hard_reject_if: []
         soft_concern_if: []
-      source_bindings: {}
       system_prompt_template: "shennong_review_prompt"
 
     xuanyuan:
@@ -33,7 +31,6 @@ data:
         hard_approve_if: []
         hard_reject_if: []
         soft_concern_if: []
-      source_bindings: {}
       system_prompt_template: "xuanyuan_review_prompt"
 
   topic_to_soul:

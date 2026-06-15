@@ -209,7 +209,6 @@ pub struct SoulConfig {
     pub display_name: String,
     pub governance_role: String,
     pub review_policy: ReviewPolicy,
-    pub source_bindings: HashMap<String, serde_json::Value>,
     pub system_prompt_template: String,
 }
 
