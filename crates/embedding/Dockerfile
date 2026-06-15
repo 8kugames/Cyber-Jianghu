@@ -38,6 +38,7 @@ COPY Cargo.toml Cargo.lock* ./
 COPY crates/protocol/Cargo.toml ./crates/protocol/
 COPY crates/embedding/Cargo.toml ./crates/embedding/
 COPY crates/server/Cargo.toml ./crates/server/
+COPY crates/agent/Cargo.toml ./crates/agent/
 
 RUN mkdir -p crates/server/src && echo "fn main() {}" > crates/server/src/main.rs
 RUN mkdir -p crates/agent/src && echo "fn main() {}" > crates/agent/src/main.rs
