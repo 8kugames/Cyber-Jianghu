@@ -750,11 +750,19 @@ impl super::Agent {
                                     };
 
                                     // BUG-4b: intent 失败且 agent 已死亡 → 立即触发死亡处理
+                                    // 双路径检测：(1) is_dead 原子标志 (2) server error 含 "is dead"/"not in cache"
                                     if !self.death_reported && first_failure.is_some() {
                                         let is_dead_now = self.http_api_state.as_ref()
                                             .map(|s| s.is_dead.load(std::sync::atomic::Ordering::Relaxed))
                                             .unwrap_or(false);
-                                        if is_dead_now {
+                                        // Path 4: server error 明确告知 agent 已死亡
+                                        // （WebSocket AgentDied 消息可能未到达，is_dead 未设置）
+                                        let error_str = first_failure
+                                            .and_then(|r| r.error.as_deref())
+                                            .unwrap_or("");
+                                        let server_says_dead = error_str.contains("is dead")
+                                            || error_str.contains("not in cache");
+                                        if is_dead_now || server_says_dead {
                                             let reason_str = first_failure.and_then(|r| r.error.as_deref()).unwrap_or("");
                                             warn!(
                                                 "Agent '{}' 检测到死亡（intent 失败后）: {}",
