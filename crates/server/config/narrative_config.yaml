@@ -71,10 +71,14 @@ attributes:
           max: 49
           description: "身体虚弱，伤痛明显，行动困难"
           urgency: 5
-        - min: 10
+        - min: 20
           max: 29
-          description: "身受重伤，剧痛袭来，意识模糊，随时可能倒下"
-          urgency: 8
+          description: "身受重伤，剧痛如潮，但意识尚清，尚能勉强支撑"
+          urgency: 7
+        - min: 10
+          max: 19
+          description: "身受重创，剧痛难忍，意识模糊，随时可能倒下"
+          urgency: 9
         - min: 0
           max: 9
           description: "生命垂危，意识在消散，死亡的阴影笼罩着你"
@@ -102,8 +106,12 @@ attributes:
           max: 39
           description: "饥肠辘辘，四肢乏力，必须立即进食"
           urgency: 7
-        - min: 0
+        - min: 10
           max: 24
+          description: "饥饿至极，四肢酸软，再不进食恐怕性命难保"
+          urgency: 9
+        - min: 0
+          max: 9
           description: "极度饥饿，生命正在消逝，不择手段也要找到食物"
           urgency: 10
 
@@ -129,9 +137,13 @@ attributes:
           max: 39
           description: "口渴难耐，急需饮水，喉咙如火烧"
           urgency: 7
-        - min: 0
+        - min: 10
           max: 19
-          description: "脱水严重，急需饮水，视线模糊，生命垂危"
+          description: "口渴至极，喉咙如火，嘴唇干裂，急需水源"
+          urgency: 9
+        - min: 0
+          max: 9
+          description: "脱水严重，视线模糊，生命垂危，不饮水必死无疑"
           urgency: 10
 
     stamina:
@@ -197,9 +209,15 @@ attributes:
         - min: 20
           max: 39
           description: "理智涣散，难以集中注意力"
-        - min: 0
+          urgency: 4
+        - min: 10
           max: 19
-          description: "神志不清，幻觉与现实交织，无法分辨真伪"
+          description: "精神恍惚，时常产生幻觉，难以分辨真假"
+          urgency: 5
+        - min: 0
+          max: 9
+          description: "神志崩溃，幻觉与现实交织，已无法分辨真伪，濒临疯狂"
+          urgency: 6
 
     reputation:
       name: reputation

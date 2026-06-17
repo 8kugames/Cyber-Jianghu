@@ -137,28 +137,6 @@ pub fn create_attributes_glimpse(
     }
 }
 
-/// 从 AgentSelfState 中查找属性值
-///
-/// 同时检查 attributes（i32 基础属性）和 derived_attributes（f32 派生属性）。
-/// 因为 attribute_descriptions 由 build_attribute_descriptions 注入，
-/// 其中包含派生属性条目，迭代 descriptions 时 raw value 可能来自任一张 map。
-fn lookup_attr_value(
-    attr: &str,
-    state: &cyber_jianghu_protocol::types::entities::AgentSelfState,
-) -> String {
-    state
-        .attributes
-        .get(attr)
-        .map(|v| format!(" [当前值: {}]", v))
-        .or_else(|| {
-            state
-                .derived_attributes
-                .get(attr)
-                .map(|v| format!(" [当前值: {:.3}]", v))
-        })
-        .unwrap_or_default()
-}
-
 /// 生成叙事化上下文
 pub fn generate_context_markdown(
     state: &WorldState,
@@ -226,18 +204,16 @@ fn generate_impl(
     // 核心状态属性优先展示（选择哪些属性优先是展示层决策，不做数据驱动）
     for attr in &vital_attrs {
         if let Some(desc) = descriptions.get(*attr) {
-            let raw = lookup_attr_value(attr, &state.self_state);
-            sections.push(format!("- {}: {}{}", attr, desc, raw));
+            sections.push(format!("- {}", desc));
         }
     }
 
-    // 其他属性（包括派生属性）—— 统一使用 attribute_descriptions + 双 map 查值
-    for (name, desc) in descriptions {
-        if vital_attrs.contains(&name.as_str()) {
+    // 其他属性（包括派生属性）—— 只输出叙事描述
+    for (_name, desc) in descriptions {
+        if vital_attrs.contains(&_name.as_str()) {
             continue;
         }
-        let raw = lookup_attr_value(name, &state.self_state);
-        sections.push(format!("- {}: {}{}", name, desc, raw));
+        sections.push(format!("- {}", desc));
     }
 
     // 状态效果

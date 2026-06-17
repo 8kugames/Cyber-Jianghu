@@ -345,22 +345,11 @@ impl super::CognitiveEngine {
 
         if !world_state.self_state.attribute_descriptions.is_empty() {
             ws_parts.push("\n## 自身状态".to_string());
-            for (attr, desc) in &world_state.self_state.attribute_descriptions {
-                // 同时支持基础/派生属性值查询（派生属性由 build_attribute_descriptions 注入）
-                let raw = world_state
-                    .self_state
-                    .attributes
-                    .get(attr)
-                    .map(|v| format!(" [当前值: {}]", v))
-                    .or_else(|| {
-                        world_state
-                            .self_state
-                            .derived_attributes
-                            .get(attr)
-                            .map(|v| format!(" [当前值: {:.3}]", v))
-                    })
-                    .unwrap_or_default();
-                ws_parts.push(format!("- {}: {}{}", attr, desc, raw));
+            for (_attr, desc) in &world_state.self_state.attribute_descriptions {
+                // 武侠化感知：只输出叙事描述，完全隐藏属性名和数值。
+                // LLM 看不到 hp/satiation/sanity 等属性名，也看不到具体数字。
+                // 决策完全依赖叙事描述的语义和紧迫度（survival_drives）。
+                ws_parts.push(format!("- {}", desc));
             }
         }
 
