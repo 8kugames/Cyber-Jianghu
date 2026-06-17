@@ -6,6 +6,19 @@
 # 启用 BuildKit: DOCKER_BUILDKIT=1 docker build -f Dockerfile.ci ...
 # ============================================================================
 
+# ----------------------------------------------------------------------------
+# 同步维护契约 (Sync Maintenance Contract)
+# ----------------------------------------------------------------------------
+# 本文件是 CI 专用副本（GitHub Actions 使用，无国内镜像优化）。
+# 任何 workspace 成员的增删（crates/*/Cargo.toml）、构建占位 src 的增删，
+# 必须同时同步以下两个文件：
+#   1. crates/server/Dockerfile        (生产 / 本地 docker-compose)
+#   2. crates/server/Dockerfile.ci     (CI / GitHub Actions，本文件)
+# 漏改本文件将导致：error: failed to load manifest for workspace member
+#   `/app/crates/<X>` → No such file or directory (os error 2)
+# 历史教训：4091f754 修复 Dockerfile 时未同步本文件，导致 CI 自 6cd072b0 起失败
+# ----------------------------------------------------------------------------
+
 # ============================================================================
 # Stage 1: 构建阶段 - 编译 Rust 代码
 # ============================================================================
@@ -29,12 +42,16 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # 复制 Cargo 文件
 COPY Cargo.toml Cargo.lock* ./
 COPY crates/protocol/Cargo.toml ./crates/protocol/
+COPY crates/embedding/Cargo.toml ./crates/embedding/
 COPY crates/server/Cargo.toml ./crates/server/
 COPY crates/agent/Cargo.toml ./crates/agent/
 
 # 创建占位 src 目录，用于预下载依赖
 RUN mkdir -p crates/protocol/src crates/server/src crates/agent/src/bin && \
+    mkdir -p crates/embedding/src crates/embedding/src/bin && \
     echo "pub fn placeholder() {}" > crates/protocol/src/lib.rs && \
+    echo "fn main() {}" > crates/embedding/src/lib.rs && \
+    echo "fn main() {}" > crates/embedding/src/bin/embedding-service.rs && \
     echo "fn main() {}" > crates/server/src/main.rs && \
     echo "pub fn placeholder() {}" > crates/agent/src/lib.rs && \
     echo "fn main() {}" > crates/agent/src/bin/cyber-jianghu-agent.rs

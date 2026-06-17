@@ -1,10 +1,11 @@
 [package]
 name = "cyber-jianghu-server"
-version = "0.1.254"
+version = "0.1.255"
 edition = "2024"
 authors = ["Cyber-Jianghu Community"]
 license = "MIT OR Apache-2.0"
 description = "MVP server for Cyber-Jianghu MMO-MAS"
+publish = false
 
 [dependencies]
 # 内部 crates
