@@ -170,6 +170,36 @@ impl IntentWorker {
             return Ok(());
         }
 
+        // 2.1 P1 fix (#50): 校验 agents.status='active'
+        // DashMap 可能残留 retired/dead 的历史 agent（#49 启动加载已修，
+        // 但运行期 rebirth 后旧 agent_id 仍可能在 DashMap 中残留），
+        // 此处对 DB 二次校验，拒绝非 active 的 intent。
+        let agent_db_status: Option<String> = sqlx::query_scalar(
+            "SELECT status FROM agents WHERE agent_id = $1",
+        )
+        .bind(agent_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .context(format!("查询 Agent {} 状态失败", agent_id))?;
+
+        match agent_db_status.as_deref() {
+            Some("active") => {}
+            other => {
+                let (code, msg) = match other {
+                    Some(s) => ("agent_not_active", format!("Agent 状态为 {}，不接受 intent", s)),
+                    None => ("agent_not_found", "Agent 不存在".to_string()),
+                };
+                warn!(
+                    "Intent 被拒绝: agent={} status={:?}（非 active），DashMap 残留",
+                    agent_id, agent_db_status
+                );
+                self.send_error_to_agent(agent_id, intent_id, code, &msg, agent_state.tick_id)
+                    .await;
+                self.state_cache.remove(&agent_id);
+                return Ok(());
+            }
+        }
+
         // 3. 收集 DashMap 快照（供跨 Agent 校验）
         let all_states: Vec<AgentState> =
             self.state_cache.iter().map(|r| r.value().clone()).collect();
@@ -337,7 +367,33 @@ impl IntentWorker {
             }
         }
 
-        // 11. Whisper 执行后立即释放 session（避免同 tick 内 AlreadyInDialogue）
+        // 11. Action 致死善后：state_processor 可能在 StateChange 处理中将
+        //     is_alive 翻转为 false（HP 归零、stamina 归零、显式 AgentDied 等）。
+        //     历史路径分裂：
+        //       - decay 自然死亡（satiation/hydration/sanity 衰减）→ decay 模块
+        //         生成 DeathNotification → handle_deaths 善后（status='dead' 回写、
+        //         物品掉落、DashMap 移除、AgentDied WS、同位置广播）
+        //       - action 致死 → 仅设 is_alive=false，缺 status='dead' 回写，
+        //         导致 auto_rebirth SQL WHERE status='dead' 0 行命中，agent 永久卡死。
+        //     修复：检测 is_alive=false 时复用 handle_deaths 完成统一善后。
+        //     step 6 的 state_cache.insert 已写入 is_alive=false 的最终态，
+        //     handle_deaths 内部仍能从中读取死亡元数据（hp/sat/hyd/sanity/birth_tick）。
+        if !result.updated_state.is_alive {
+            let death_notif = decay::DeathNotification::new(
+                agent_id,
+                "action".to_string(),
+                format!("Action 致死: {}", action_type),
+                result.updated_state.node_id.clone(),
+                tick_id,
+            );
+            info!(
+                "[death] action 致死触发善后: agent={}, action={}, tick={}, node={}",
+                agent_id, action_type, tick_id, result.updated_state.node_id
+            );
+            self.handle_deaths(vec![death_notif], tick_id).await;
+        }
+
+        // 12. Whisper 执行后立即释放 session（避免同 tick 内 AlreadyInDialogue）
         self.close_session_if_whisper(&action_type, &intent).await;
 
         Ok(())
@@ -436,6 +492,25 @@ impl IntentWorker {
             if let Err(e) = self.broadcast_event(*target_id, event.clone()).await {
                 warn!("事件广播失败: target={}, error={}", target_id, e);
             }
+        }
+
+        // P0 修复（subsequent 路径）：与 process_single_intent step 11 对齐。
+        // 历史 bug：action 致死（HP 归零、stamina 归零等）只在主 intent 末尾检测，
+        // subsequent intent（pipe_seq > 0）中的死亡漏检，导致 status='active' 卡死、
+        // auto_rebirth 永久拒绝。复用 handle_deaths 完成统一善后。
+        if !updated_state.is_alive {
+            let death_notif = decay::DeathNotification::new(
+                agent_id,
+                "action".to_string(),
+                format!("Action 致死 (subsequent pipe_seq={}): {}", pipe_seq, intent.action_type),
+                updated_state.node_id.clone(),
+                tick_id,
+            );
+            info!(
+                "[death] action 致死触发善后 (subsequent): agent={}, action={}, pipe_seq={}, tick={}, node={}",
+                agent_id, intent.action_type, pipe_seq, tick_id, updated_state.node_id
+            );
+            self.handle_deaths(vec![death_notif], tick_id).await;
         }
 
         Ok(())
