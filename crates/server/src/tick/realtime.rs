@@ -174,19 +174,21 @@ impl IntentWorker {
         // DashMap 可能残留 retired/dead 的历史 agent（#49 启动加载已修，
         // 但运行期 rebirth 后旧 agent_id 仍可能在 DashMap 中残留），
         // 此处对 DB 二次校验，拒绝非 active 的 intent。
-        let agent_db_status: Option<String> = sqlx::query_scalar(
-            "SELECT status FROM agents WHERE agent_id = $1",
-        )
-        .bind(agent_id)
-        .fetch_optional(&self.db_pool)
-        .await
-        .context(format!("查询 Agent {} 状态失败", agent_id))?;
+        let agent_db_status: Option<String> =
+            sqlx::query_scalar("SELECT status FROM agents WHERE agent_id = $1")
+                .bind(agent_id)
+                .fetch_optional(&self.db_pool)
+                .await
+                .context(format!("查询 Agent {} 状态失败", agent_id))?;
 
         match agent_db_status.as_deref() {
             Some("active") => {}
             other => {
                 let (code, msg) = match other {
-                    Some(s) => ("agent_not_active", format!("Agent 状态为 {}，不接受 intent", s)),
+                    Some(s) => (
+                        "agent_not_active",
+                        format!("Agent 状态为 {}，不接受 intent", s),
+                    ),
                     None => ("agent_not_found", "Agent 不存在".to_string()),
                 };
                 warn!(
@@ -502,7 +504,10 @@ impl IntentWorker {
             let death_notif = decay::DeathNotification::new(
                 agent_id,
                 "action".to_string(),
-                format!("Action 致死 (subsequent pipe_seq={}): {}", pipe_seq, intent.action_type),
+                format!(
+                    "Action 致死 (subsequent pipe_seq={}): {}",
+                    pipe_seq, intent.action_type
+                ),
                 updated_state.node_id.clone(),
                 tick_id,
             );
