@@ -414,6 +414,59 @@ impl super::Agent {
                                         warn!("转世重生: RelationshipStore 重初始化失败: {}", e);
                                     }
                                 }
+
+                                // 跨代记忆 fix (#51)：重建 MemoryManager（新 agent_id → 新 DB）
+                                // 重生后是新的人，前世的情景/语义/工作记忆应清空。
+                                // 技能（skills）通过 server 推送，不受影响。
+                                if let Some(template) = &api_state.memory_config_template {
+                                    let mut mem_config = template.clone();
+                                    mem_config.agent_id = new_id;
+                                    mem_config.db_dir = api_state.data_dir.clone();
+                                    match crate::component::memory::MemoryManager::new(mem_config) {
+                                        Ok(new_manager) => {
+                                            let new_mem_arc = std::sync::Arc::new(
+                                                tokio::sync::RwLock::new(new_manager),
+                                            );
+                                            self.memory_manager = Some(new_mem_arc.clone());
+                                            if let Some(ref engine) = self.cognitive_engine {
+                                                engine.set_memory_manager(new_mem_arc.clone());
+                                            }
+                                            *api_state.memory_manager.write().await =
+                                                Some(new_mem_arc);
+                                            info!(
+                                                "转世重生: MemoryManager 已重初始化 (new_id={})，前世记忆已清空",
+                                                new_id
+                                            );
+                                        }
+                                        Err(e) => {
+                                            warn!("转世重生: MemoryManager 重初始化失败: {}", e);
+                                        }
+                                    }
+                                }
+
+                                // 跨代记忆 fix (#51)：重建 PersonaStore（新 agent_id → 新 DB）
+                                // 人格/经验值/动态特质也应清空，新生角色从默认人设开始。
+                                let new_persona_path = api_state
+                                    .data_dir
+                                    .join(format!("persona_{}.db", new_id));
+                                let persona_config =
+                                    crate::component::persona::PersonaPersistenceConfig::default();
+                                match crate::component::persona::PersonaStore::open(
+                                    new_id,
+                                    &new_persona_path,
+                                    persona_config,
+                                ) {
+                                    Ok(new_store) => {
+                                        self.persona_store = Some(std::sync::Arc::new(new_store));
+                                        info!(
+                                            "转世重生: PersonaStore 已重初始化 (new_id={})，前世人格已清空",
+                                            new_id
+                                        );
+                                    }
+                                    Err(e) => {
+                                        warn!("转世重生: PersonaStore 重初始化失败: {}", e);
+                                    }
+                                }
                             }
 
                             info!(
