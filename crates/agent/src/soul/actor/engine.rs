@@ -1556,10 +1556,13 @@ impl CognitiveEngine {
     }
 
     /// 记录行动结果到 Outcome Memory
+    ///
+    /// P1-3 修复：mem.record() 现在返回 Result，这里显式处理（warn + best-effort 继续）。
     pub fn record_outcome(&self, record: crate::component::memory::OutcomeRecord) {
-        if let Some(ref mem) = self.outcome_memory {
-            mem.record(record);
-        }
+        if let Some(ref mem) = self.outcome_memory
+            && let Err(e) = mem.record(record) {
+                tracing::warn!("record_outcome 失败，已 best-effort 忽略：{e:?}");
+            }
     }
 
     /// 设置当前 tick 的对话上下文（由 lifecycle 每轮注入）

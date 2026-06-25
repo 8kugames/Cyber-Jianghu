@@ -4,7 +4,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::{Connection, PgPool};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -18,13 +18,13 @@ pub struct GroundItem {
 
 /// 添加物品到地面
 pub async fn add_ground_item(
-    pool: &PgPool,
+    conn: &mut sqlx::PgConnection,
     node_id: &str,
     item_id: &str,
     quantity: i32,
     dropped_by: Option<Uuid>,
 ) -> Result<()> {
-    let mut tx = pool.begin().await.context("开始事务失败")?;
+    let mut tx = conn.begin().await.context("开始事务失败")?;
 
     // Check if the item already exists on the ground in this node
     let existing: Option<(i64, i32)> = sqlx::query_as(
@@ -76,12 +76,12 @@ pub async fn add_ground_item(
 
 /// 从地面移除物品（如果数量归零则删除记录）
 pub async fn remove_ground_item(
-    pool: &PgPool,
+    conn: &mut sqlx::PgConnection,
     node_id: &str,
     item_id: &str,
     quantity: i32,
 ) -> Result<bool> {
-    let mut tx = pool.begin().await.context("开始事务失败")?;
+    let mut tx = conn.begin().await.context("开始事务失败")?;
 
     let existing: Option<(i64, i32)> = sqlx::query_as(
         r#"
