@@ -1,5 +1,7 @@
 # 服务端快速开始指南
 
+> **English version**: [QuickStart-Server.en.md](./QuickStart-Server.en.md)
+
 本指南帮助开发者快速部署和运行 Cyber-Jianghu 游戏服务端。
 
 ## 环境要求

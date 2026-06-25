@@ -1,5 +1,7 @@
 # Agent 快速开始指南
 
+> **English version**: [QuickStart-Agent.en.md](./QuickStart-Agent.en.md)
+
 本指南帮助开发者快速部署和运行 Agent SDK。
 
 ## 前置条件

@@ -1,5 +1,7 @@
 # Agent Persona Templates
 
+> **English version**: [README.en.md](./README.en.md)
+
 这里包含了 Cyber-Jianghu MVP 阶段 (龙门客栈) 的 5 个预设角色模板。
 
 OpenClaw 或其他 Agent 框架可以直接读取这些 JSON 文件，将其作为 `POST /api/v1/agent/register` 的请求体，快速注册并进入游戏。
