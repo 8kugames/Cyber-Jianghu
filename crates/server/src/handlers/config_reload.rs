@@ -1,6 +1,11 @@
 //! 配置热重载处理器
 
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{
+    Json,
+    extract::{ConnectInfo, State},
+    http::StatusCode,
+};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::info;
 
@@ -19,7 +24,10 @@ pub struct ReloadResponse {
 /// POST /api/admin/reload-config
 pub async fn reload_config_handler(
     State(state): State<Arc<crate::state::AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<ReloadResponse>, (StatusCode, Json<ReloadResponse>)> {
+    let audit_ctx = crate::db::build_audit_request_context(&headers, addr);
     let timestamp = chrono::Utc::now();
 
     // 重新加载配置
@@ -53,6 +61,37 @@ pub async fn reload_config_handler(
             };
             reloaded.push(format!("agent_status_metadata({})", refreshed));
 
+            if let Err(e) = crate::db::insert_audit_log(
+                &state.db_pool,
+                crate::db::AuditLogEntry {
+                    event_type: "config.reload",
+                    actor_type: "admin",
+                    token_type: Some("write"),
+                    resource_type: "game_config",
+                    resource_id: None,
+                    endpoint: "/api/admin/reload-config",
+                    method: "POST",
+                    result: "success",
+                    reason: None,
+                    payload: serde_json::json!({
+                        "refreshed_agents": refreshed,
+                        "reloaded": reloaded.clone(),
+                    }),
+                    request_id: Some(audit_ctx.request_id),
+                    ip: audit_ctx.ip,
+                    user_agent: audit_ctx.user_agent,
+                    before_state: None,
+                    after_state: Some(serde_json::json!({
+                        "refreshed_agents": refreshed,
+                        "reloaded": reloaded.clone(),
+                    })),
+                },
+            )
+            .await
+            {
+                tracing::error!("audit_log 写入失败(config.reload): {}", e);
+            }
+
             Ok(Json(ReloadResponse {
                 success: true,
                 reloaded,
@@ -67,11 +106,15 @@ pub async fn reload_config_handler(
                 success: false,
                 reloaded: vec![],
                 timestamp,
-                error: Some(format!("{:?}", e)),
+                error: Some(sanitize_reload_error_message(&e)),
                 message: None,
             }),
         )),
     }
+}
+
+fn sanitize_reload_error_message<T>(_error: &T) -> String {
+    "Internal Server Error".to_string()
 }
 
 /// 刷新 DashMap 中所有 agent 的 StatusComponent metadata
@@ -94,4 +137,15 @@ fn refresh_agent_status_metadata(
         );
     }
     count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_reload_error_message;
+
+    #[test]
+    fn test_sanitize_reload_error_message_hides_internal_details() {
+        let message = sanitize_reload_error_message(&"db exploded");
+        assert!(!message.contains("db exploded"));
+    }
 }

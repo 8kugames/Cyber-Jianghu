@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
+use std::net::IpAddr;
 use std::time::{Duration, Instant};
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
@@ -38,9 +39,37 @@ pub struct PromptTemplateCache {
 /// 防止恶意客户端频繁发送 Intent
 pub type RateLimiter = Arc<RwLock<std::collections::HashMap<uuid::Uuid, Instant>>>;
 
+/// 设备注册 IP 限流器
+pub type DeviceRegisterLimiter = Arc<RwLock<std::collections::HashMap<IpAddr, Instant>>>;
+
 /// 创建速率限制器
 pub fn create_rate_limiter() -> RateLimiter {
     Arc::new(RwLock::new(std::collections::HashMap::new()))
+}
+
+/// 创建设备注册限流器
+pub fn create_device_register_limiter() -> DeviceRegisterLimiter {
+    Arc::new(RwLock::new(std::collections::HashMap::new()))
+}
+
+/// 检查设备注册限流
+pub async fn check_device_register_rate_limit(
+    limiter: &DeviceRegisterLimiter,
+    ip: IpAddr,
+    now: Instant,
+    min_interval: Duration,
+) -> bool {
+    let mut limiter = limiter.write().await;
+    limiter.retain(|_, last_time| now.duration_since(*last_time) < min_interval);
+
+    if let Some(last_time) = limiter.get(&ip)
+        && now.duration_since(*last_time) < min_interval
+    {
+        return false;
+    }
+
+    limiter.insert(ip, now);
+    true
 }
 
 /// 检查速率限制
@@ -169,6 +198,9 @@ pub struct AppState {
     /// 数据库连接池
     pub db_pool: DbPool,
 
+    /// 数据库运行期健康状态（probe 与 /health 共用）
+    pub db_runtime_health: crate::db::DbRuntimeHealthState,
+
     /// WebSocket 连接管理器
     pub connection_manager: websocket::ConnectionManager,
 
@@ -183,6 +215,9 @@ pub struct AppState {
 
     /// Intent 速率限制器
     pub rate_limiter: RateLimiter,
+
+    /// 设备注册限流器（按源 IP）
+    pub device_register_limiter: DeviceRegisterLimiter,
 
     /// 游戏数据配置缓存
     pub game_data: Arc<game_data::GameDataCache>,
@@ -220,11 +255,13 @@ impl AppState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         db_pool: DbPool,
+        db_runtime_health: crate::db::DbRuntimeHealthState,
         connection_manager: websocket::ConnectionManager,
         agent_to_device_map: websocket::AgentToDeviceMap,
         agent_state_cache: AgentStateCache,
         worker_tx: mpsc::Sender<WorkerMessage>,
         rate_limiter: RateLimiter,
+        device_register_limiter: DeviceRegisterLimiter,
         game_data: Arc<game_data::GameDataCache>,
         dialogue_manager: Arc<dialogue::DialogueManager>,
         admin_read_token: String,
@@ -236,11 +273,13 @@ impl AppState {
     ) -> Self {
         Self {
             db_pool,
+            db_runtime_health,
             connection_manager,
             agent_to_device_map,
             agent_state_cache,
             worker_tx,
             rate_limiter,
+            device_register_limiter,
             game_data,
             dialogue_manager,
             admin_read_token,
@@ -252,5 +291,48 @@ impl AppState {
             prompt_template_cache: Arc::new(tokio::sync::RwLock::new(None)),
             governance,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    #[tokio::test]
+    async fn test_device_register_rate_limit_allows_first_request() {
+        let limiter = create_device_register_limiter();
+        let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let now = Instant::now();
+
+        assert!(check_device_register_rate_limit(
+            &limiter,
+            ip,
+            now,
+            Duration::from_secs(10)
+        )
+        .await);
+    }
+
+    #[tokio::test]
+    async fn test_device_register_rate_limit_blocks_repeated_request_within_window() {
+        let limiter = create_device_register_limiter();
+        let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+        let now = Instant::now();
+
+        assert!(check_device_register_rate_limit(
+            &limiter,
+            ip,
+            now,
+            Duration::from_secs(10)
+        )
+        .await);
+        assert!(!check_device_register_rate_limit(
+            &limiter,
+            ip,
+            now + Duration::from_secs(5),
+            Duration::from_secs(10)
+        )
+        .await);
     }
 }

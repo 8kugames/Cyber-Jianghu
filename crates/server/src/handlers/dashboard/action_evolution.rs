@@ -1,12 +1,13 @@
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{ConnectInfo, Path, State},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::state::AppState;
 
@@ -100,9 +101,10 @@ pub async fn get_action_evolution_stats(
     let recent_rows = sqlx::query(
         "SELECT p.id, p.proposed_action_type, p.rationale, g.primary_soul, g.status, p.created_at
          FROM action_evolution_proposals p
+         LEFT JOIN action_evolution_group_proposals gp
+           ON gp.proposal_id = p.id
          LEFT JOIN action_evolution_proposal_groups g
-           ON g.id = (SELECT id FROM action_evolution_proposal_groups
-                      WHERE proposal_ids ? p.id::text LIMIT 1)
+           ON g.id = gp.proposal_group_id
          ORDER BY p.created_at DESC
          LIMIT 20",
     )
@@ -188,9 +190,19 @@ pub async fn get_proposal_group_detail(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, axum::http::StatusCode> {
     let pool = &state.db_pool;
+    let proposal_ids = sqlx::query_scalar::<_, uuid::Uuid>(
+        "SELECT proposal_id
+         FROM action_evolution_group_proposals
+         WHERE proposal_group_id = $1
+         ORDER BY created_at ASC, proposal_id ASC",
+    )
+    .bind(group_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
     let row = sqlx::query(
         "SELECT id, similarity_key, primary_soul, co_reviewers, governance_topics,
-                status, votes, final_decision, dissent_log, proposal_ids, created_at, updated_at
+                status, votes, final_decision, dissent_log, created_at, updated_at
          FROM action_evolution_proposal_groups WHERE id = $1",
     )
     .bind(group_id)
@@ -209,9 +221,9 @@ pub async fn get_proposal_group_detail(
             "votes": r.try_get::<serde_json::Value, _>(6).ok(),
             "final_decision": r.try_get::<Option<String>, _>(7).ok(),
             "dissent_log": r.try_get::<serde_json::Value, _>(8).ok(),
-            "proposal_ids": r.try_get::<serde_json::Value, _>(9).ok(),
-            "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>(10).ok(),
-            "updated_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>(11).ok(),
+            "proposal_ids": proposal_ids,
+            "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>(9).ok(),
+            "updated_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>(10).ok(),
         }))),
         None => Err(axum::http::StatusCode::NOT_FOUND),
     }
@@ -226,8 +238,11 @@ pub struct AdminActionRequest {
 pub async fn admin_action_on_group(
     Path(group_id): Path<uuid::Uuid>,
     State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<AdminActionRequest>,
 ) -> Result<Json<serde_json::Value>, axum::http::StatusCode> {
+    let audit_ctx = crate::db::build_audit_request_context(&headers, addr);
     let pool = &state.db_pool;
     let new_status = match req.action.as_str() {
         "approve" => "approved",
@@ -252,6 +267,34 @@ pub async fn admin_action_on_group(
             axum::http::StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
+        if let Err(e) = crate::db::insert_audit_log(
+            pool,
+            crate::db::AuditLogEntry {
+                event_type: "action_evolution.group.reject",
+                actor_type: "admin",
+                token_type: Some("write"),
+                resource_type: "action_evolution_group",
+                resource_id: Some(group_id.to_string()),
+                endpoint: "/api/dashboard/action-evolution/groups/{id}/action",
+                method: "POST",
+                result: "success",
+                reason: Some(req.reason.clone()),
+                payload: serde_json::json!({
+                    "group_id": group_id,
+                    "action": req.action.clone(),
+                }),
+                request_id: Some(audit_ctx.request_id.clone()),
+                ip: audit_ctx.ip.clone(),
+                user_agent: audit_ctx.user_agent.clone(),
+                before_state: Some(serde_json::json!({"status": "pending_review_or_under_review"})),
+                after_state: Some(serde_json::json!({"status": new_status})),
+            },
+        )
+        .await
+        {
+            error!("audit_log 写入失败(action_evolution.group.reject): {}", e);
+        }
+
         return Ok(Json(
             serde_json::json!({"status": "ok", "new_status": new_status}),
         ));
@@ -265,22 +308,19 @@ pub async fn admin_action_on_group(
         axum::http::StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let group_row =
-        sqlx::query("SELECT proposal_ids FROM action_evolution_proposal_groups WHERE id = $1")
-            .bind(group_id)
-            .fetch_optional(pool)
-            .await
-            .map_err(|e| {
-                warn!(group_id = %group_id, error = %e, "管理员 approve: 查询 group 失败");
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR
-            })?
-            .ok_or(axum::http::StatusCode::NOT_FOUND)?;
-
-    let proposal_ids: Vec<uuid::Uuid> =
-        serde_json::from_value(group_row.get::<serde_json::Value, _>(0)).map_err(|e| {
-            warn!(group_id = %group_id, error = %e, "管理员 approve: proposal_ids 反序列化失败");
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let proposal_ids = sqlx::query_scalar::<_, uuid::Uuid>(
+        "SELECT proposal_id
+         FROM action_evolution_group_proposals
+         WHERE proposal_group_id = $1
+         ORDER BY created_at ASC, proposal_id ASC",
+    )
+    .bind(group_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        warn!(group_id = %group_id, error = %e, "管理员 approve: 查询 group proposal links 失败");
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     if proposal_ids.is_empty() {
         warn!(group_id = %group_id, "管理员 approve: group 无 proposal_ids，拒绝审批");
@@ -395,6 +435,35 @@ pub async fn admin_action_on_group(
         warn!(group_id = %group_id, error = %e, "管理员 approve: 副作用已完成但 DB 更新失败（状态分裂风险）");
         axum::http::StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+    if let Err(e) = crate::db::insert_audit_log(
+        pool,
+        crate::db::AuditLogEntry {
+            event_type: "action_evolution.group.approve",
+            actor_type: "admin",
+            token_type: Some("write"),
+            resource_type: "action_evolution_group",
+            resource_id: Some(group_id.to_string()),
+            endpoint: "/api/dashboard/action-evolution/groups/{id}/action",
+            method: "POST",
+            result: "success",
+            reason: Some(req.reason.clone()),
+            payload: serde_json::json!({
+                "group_id": group_id,
+                "action": req.action.clone(),
+                "written_actions": written_actions.clone(),
+            }),
+            request_id: Some(audit_ctx.request_id),
+            ip: audit_ctx.ip,
+            user_agent: audit_ctx.user_agent,
+            before_state: Some(serde_json::json!({"status": "pending_review_or_under_review"})),
+            after_state: Some(serde_json::json!({"status": new_status, "written_actions": written_actions.clone()})),
+        },
+    )
+    .await
+    {
+        error!("audit_log 写入失败(action_evolution.group.approve): {}", e);
+    }
 
     Ok(Json(serde_json::json!({
         "status": "ok",
