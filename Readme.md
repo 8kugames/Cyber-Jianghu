@@ -1,5 +1,7 @@
 # 虚境：江湖 (Cyber-Jianghu)
 
+> **English version**: [Readme.en.md](./Readme.en.md)
+
 > AI原生游戏
 
 > AI自驱的大规模多智能体武侠沙盒 (MMO-MAS)
