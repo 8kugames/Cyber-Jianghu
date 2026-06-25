@@ -193,7 +193,10 @@ fn build_direct_client_with_max_tokens(
         .with_temperature(llm_config.temperature)
         .with_max_tokens(max_tokens)
         .with_enable_thinking(enable_thinking)
-        .with_context_window_tokens(context_window_tokens);
+        .with_context_window_tokens(context_window_tokens)
+        // P1-F6 端到端：从 LlmConfig 透传 timeout，agent.yaml 改值即可生效
+        .with_request_timeout_secs(llm_config.request_timeout_secs)
+        .with_connect_timeout_secs(llm_config.connect_timeout_secs);
 
     let mut client = DirectLlmClient::new(client_config)?;
     if let Some(esc) = earth_soul_config {
@@ -201,4 +204,85 @@ fn build_direct_client_with_max_tokens(
     }
     client = client.with_breaker(shared_breaker);
     Ok(client)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::LlmConfig;
+    use std::sync::Arc;
+
+    /// 验证 P1-F6 端到端：`LlmConfig` 的 `request_timeout_secs` / `connect_timeout_secs`
+    /// 必须从 yaml/json 一路传到 `DirectLlmClient` 的 `build_http_client`。
+    /// 之前 DirectLlmClientConfig 自己有字段但 LlmConfig 缺字段 → 用户改 agent.yaml 不生效。
+    #[test]
+    fn test_p1_f6_llm_config_propagates_timeout_to_direct_client() {
+        let cfg = LlmConfig {
+            provider: "ollama".to_string(),
+            base_url: None,
+            api_key: None,
+            model: Some("test-model".to_string()),
+            temperature: 0.7,
+            max_tokens: 1024,
+            fallback_models: vec![],
+            models: vec![],
+            idle_rotate_threshold: 24,
+            context_window_tokens: 32768,
+            summary_trigger_ratio: 0.5,
+            keep_recent_turns: 8,
+            reconnect_delay_secs: 5,
+            execution_result_timeout_ms: 30_000,
+            soul_cycle_report_retries: 3,
+            soul_cycle_report_base_delay_ms: 1000,
+            narrative_window_size: 100,
+            enable_streaming: true,
+            enable_thinking: None,
+            request_timeout_secs: 90,  // P1-F6：自定义非默认值，断言端到端传播
+            connect_timeout_secs: 15,
+            cache_diagnostics: crate::config::CacheDiagnosticsConfig::default(),
+        };
+
+        let breaker = Arc::new(client::SharedBreaker::default());
+        let client = build_direct_client_with_max_tokens(
+            &cfg,
+            Some("test-model"),
+            false,
+            1024,
+            None,
+            32768,
+            None,
+            breaker,
+        )
+        .expect("build_direct_client_with_max_tokens must succeed");
+
+        assert_eq!(
+            client.config().request_timeout_secs, 90,
+            "P1-F6 端到端：LlmConfig.request_timeout_secs 必须传到 DirectLlmClient.config"
+        );
+        assert_eq!(
+            client.config().connect_timeout_secs, 15,
+            "P1-F6 端到端：LlmConfig.connect_timeout_secs 必须传到 DirectLlmClient.config"
+        );
+    }
+
+    /// 验证 P1-F6：`LlmConfig` 缺这两个字段时，serde 反序列化会因字段缺失失败
+    /// （前提：使用 `#[serde(default)]`），保证向前兼容。
+    /// 这是兜底回归测试：未来如果有人不小心删掉字段，反序列化也不会静默丢配置。
+    #[test]
+    fn test_p1_f6_llm_config_yaml_omits_timeout_uses_serde_default() {
+        // 完整 yaml 故意省略 request_timeout_secs / connect_timeout_secs
+        let yaml = r#"
+provider: ollama
+model: test-model
+"#;
+        let cfg: LlmConfig = serde_yaml::from_str(yaml).expect("must parse without timeout fields");
+        assert_eq!(
+            cfg.request_timeout_secs, 120,
+            "P1-F6：缺省值必须回退到 DEFAULT_LLM_REQUEST_TIMEOUT_SECS=120（与 Server 对齐）"
+        );
+        assert_eq!(
+            cfg.connect_timeout_secs, 30,
+            "P1-F6：缺省值必须回退到 DEFAULT_LLM_CONNECT_TIMEOUT_SECS=30（与 Server 对齐）"
+        );
+    }
 }

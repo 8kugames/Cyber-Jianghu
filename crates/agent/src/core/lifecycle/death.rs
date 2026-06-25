@@ -11,8 +11,6 @@ struct RebirthParams {
     api_state: Arc<crate::infra::api::HttpApiState>,
     device_id: Uuid,
     auth_token: String,
-    name: String,
-    system_prompt: String,
     retry_max: u32,
     retry_interval: std::time::Duration,
     context: String,
@@ -26,8 +24,6 @@ fn schedule_auto_rebirth(params: RebirthParams) {
         api_state,
         device_id,
         auth_token,
-        name,
-        system_prompt,
         retry_max,
         retry_interval,
         context,
@@ -46,8 +42,6 @@ fn schedule_auto_rebirth(params: RebirthParams) {
             "device_id": device_id,
             "auth_token": auth_token,
             "old_agent_id": old_agent_id,
-            "name": name,
-            "system_prompt": system_prompt,
         });
 
         for attempt in 0..retry_max {
@@ -58,6 +52,7 @@ fn schedule_auto_rebirth(params: RebirthParams) {
                         .as_str()
                         .and_then(|s| s.parse::<Uuid>().ok())
                         .unwrap_or(Uuid::nil());
+                    let system_prompt = data["system_prompt"].as_str().map(ToOwned::to_owned);
 
                     info!(
                         "自动转世重生成功: old_agent={} → new_agent={}",
@@ -65,6 +60,7 @@ fn schedule_auto_rebirth(params: RebirthParams) {
                     );
 
                     *api_state.pending_rebirth_agent_id.write().await = Some(new_id);
+                    *api_state.pending_rebirth_system_prompt.write().await = system_prompt;
                     api_state
                         .is_dead
                         .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -147,17 +143,6 @@ pub(super) async fn maybe_schedule_auto_rebirth(
     let device_id = device_cfg.device_id;
     let auth_token = device_cfg.auth_token.clone();
 
-    let (name, system_prompt) = agent
-        .character_config
-        .as_ref()
-        .map(|cc| {
-            (
-                cc.name.clone(),
-                cc.system_prompt.clone().unwrap_or_default(),
-            )
-        })
-        .unwrap_or_default();
-
     let retry_max = agent
         .config
         .game_rules
@@ -196,8 +181,6 @@ pub(super) async fn maybe_schedule_auto_rebirth(
         api_state,
         device_id,
         auth_token,
-        name,
-        system_prompt,
         retry_max,
         retry_interval,
         context: context.to_string(),

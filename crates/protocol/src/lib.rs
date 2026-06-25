@@ -80,6 +80,16 @@ pub const DEFAULT_LLM_PROVIDER: &str = "ollama";
 /// LLM 温度默认
 pub const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
 
+/// P1-F6：LLM HTTP 请求整体超时默认值（秒）。
+/// 与 Server LlmConfig.request_timeout_secs 保持一致；调低可缩短 cognitive
+/// retry 雪崩的最坏耗时（默认 12 retries × 120s = 24min），调高可避免长
+/// 上下文请求被截断。
+pub const DEFAULT_LLM_REQUEST_TIMEOUT_SECS: u64 = 120;
+
+/// P1-F6：LLM HTTP 连接超时默认值（秒）。
+/// 与 Server LlmConfig.connect_timeout_secs 保持一致。
+pub const DEFAULT_LLM_CONNECT_TIMEOUT_SECS: u64 = 30;
+
 /// 连续 idle tick 达到此阈值后主动切换下一个模型
 pub const DEFAULT_IDLE_ROTATE_THRESHOLD: u32 = 24;
 

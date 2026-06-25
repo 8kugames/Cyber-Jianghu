@@ -355,7 +355,9 @@ impl super::super::Agent {
                     s.is_dead.store(true, std::sync::atomic::Ordering::Relaxed);
                     s.rebirth_delay_ticks
                         .store(*rebirth_delay_ticks, std::sync::atomic::Ordering::Relaxed);
-                    let _ = s.death_event_tx.send(msg.clone());
+                    if let Err(e) = s.death_event_tx.send(msg.clone()) {
+                        tracing::warn!("death_event_tx.send（callbacks）失败（receiver 可能已 drop）：{e:?}");
+                    }
                 }
                 if let Some(ref prev) = prev_callback {
                     prev(msg);

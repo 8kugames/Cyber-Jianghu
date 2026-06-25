@@ -116,7 +116,11 @@ impl super::Agent {
                                         rebirth_delay_ticks: 0,
                                         metadata: None,
                                     };
-                                    let _ = api_state.death_event_tx.send(death_msg);
+                                    if let Err(e) = api_state.death_event_tx.send(death_msg) {
+                                        tracing::warn!(
+                                            "death_event_tx.send（归隐 delay=0）失败（receiver 可能已 drop）：{e:?}"
+                                        );
+                                    }
                                 }
                                 // 归隐后不返回错误，保持进程存活等待创建新角色
                                 return Ok(());
@@ -146,7 +150,11 @@ impl super::Agent {
                                         rebirth_delay_ticks: delay,
                                         metadata: None,
                                     };
-                                    let _ = api_state.death_event_tx.send(death_msg);
+                                    if let Err(e) = api_state.death_event_tx.send(death_msg) {
+                                        tracing::warn!(
+                                            "death_event_tx.send（归隐 delay={delay}）失败（receiver 可能已 drop）：{e:?}"
+                                        );
+                                    }
                                 }
 
                                 // 持久化死亡状态
@@ -508,7 +516,13 @@ async fn reconcile_stale_characters(
 
     let entries = match std::fs::read_dir(characters_dir) {
         Ok(e) => e,
-        Err(_) => return,
+        Err(e) => {
+            tracing::warn!(
+                "reconcile_characters: read_dir({}) 失败（best-effort 跳过）：{e:?}",
+                characters_dir.display()
+            );
+            return;
+        }
     };
 
     for entry in entries.flatten() {
@@ -522,7 +536,13 @@ async fn reconcile_stale_characters(
 
         let mut char_cfg = match CharacterConfig::from_file(&yaml_path) {
             Ok(c) => c,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::warn!(
+                    "reconcile_characters: CharacterConfig::from_file({}) 失败（best-effort 跳过本文件）：{e:?}",
+                    yaml_path.display()
+                );
+                continue;
+            }
         };
 
         // 只处理非当前、且 yaml 声称 alive 的角色

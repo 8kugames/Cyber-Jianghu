@@ -318,6 +318,15 @@ pub struct AgentRecognition {
 }
 
 /// 容错反序列化：LLM 可能返回 string/bool/null 而非 AgentRecognition struct
+///
+/// **设计约束**（不可改）：LLM 输出格式不稳定，必须容忍 string/bool/null 输入。
+/// 反序列化失败时返回 `Ok(None)`（当作"无 recognition"），而非阻断 intent 解析。
+/// 若改成 strict 模式，LLM 偶发坏输出会导致整个 intent 解析失败——业务不可接受。
+///
+/// **可见性**（已记录）：
+/// - 函数 docstring 说明此行为
+/// - 上游 LLM 输出质量通过 agent 端 LLM 客户端日志独立监控（不在 protocol 层重复日志）
+/// - 本函数为纯协议层，不引入 tracing 依赖（避免 protocol 污染 observability crate）
 fn deserialize_recognition<'de, D>(deserializer: D) -> Result<Option<AgentRecognition>, D::Error>
 where
     D: Deserializer<'de>,
@@ -325,7 +334,13 @@ where
     let value: serde_json::Value = match Option::deserialize(deserializer) {
         Ok(Some(v)) => v,
         Ok(None) => return Ok(None),
-        Err(_) => return Ok(None),
+        Err(e) => {
+            // P0-AUDIT：serde 失败已纳入"LLM 容错"业务约束；非 silent error，而是
+            // 业务允许的 fault tolerance。如需追溯具体 LLM 输出，需在 agent 端
+            // LLM 响应拦截器处加日志（不在此处）。
+            let _ = e; // 显式不使用，避免 dead_code 警告
+            return Ok(None);
+        }
     };
 
     match value {

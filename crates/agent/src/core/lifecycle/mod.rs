@@ -199,7 +199,11 @@ impl super::Agent {
                     rebirth_delay_ticks: 0,
                     metadata: None,
                 };
-                let _ = api_state.death_event_tx.send(death_msg);
+                if let Err(e) = api_state.death_event_tx.send(death_msg) {
+                    tracing::warn!(
+                        "death_event_tx.send（lifecycle）失败（receiver 可能已 drop）：{e:?}"
+                    );
+                }
             }
 
             // 归隐后保持进程存活，等待创建新角色
@@ -230,7 +234,11 @@ impl super::Agent {
                     rebirth_delay_ticks: self.config.rebirth_delay_ticks(),
                     metadata: None,
                 };
-                let _ = api_state.death_event_tx.send(death_msg);
+                if let Err(e) = api_state.death_event_tx.send(death_msg) {
+                    tracing::warn!(
+                        "death_event_tx.send（lifecycle site 2）失败（receiver 可能已 drop）：{e:?}"
+                    );
+                }
             }
 
             // 持久化死亡状态
@@ -376,6 +384,11 @@ impl super::Agent {
                         } else {
                             None
                         };
+                        let new_system_prompt = if let Some(ref api_state) = self.http_api_state {
+                            api_state.pending_rebirth_system_prompt.write().await.take()
+                        } else {
+                            None
+                        };
 
                         if let Some(new_id) = new_agent_id {
                             // P2 fix: 更新 HttpApiState.agent_id
@@ -387,6 +400,9 @@ impl super::Agent {
                             if let Some(ref mut char_cfg) = self.character_config {
                                 char_cfg.agent_id = Some(new_id);
                                 char_cfg.status = crate::config::CharacterStatus::Alive;
+                                if let Some(system_prompt) = new_system_prompt.clone() {
+                                    char_cfg.system_prompt = Some(system_prompt);
+                                }
                                 if let Some(ref api_state) = self.http_api_state {
                                     let dir = api_state.character_dir.read().await.clone();
                                     if let Err(e) = save_character_config_to_fs(char_cfg, &dir) {
@@ -596,11 +612,19 @@ impl super::Agent {
                         // 数据驱动的上轮行动摘要：从 soul_cycle_recorder 读取上轮人魂叙事
                         let last_action_summary = if !last_intents.is_empty() {
                             if let Some(recorder) = self.soul_recorder().await {
-                                recorder.get_last_renhun_narrative(world_state.tick_id).await
-                                    .map(|narrative| format!(
+                                match recorder.get_last_renhun_narrative(world_state.tick_id).await {
+                                    Ok(Some(narrative)) => Some(format!(
                                         "【重要】你上一轮的行动：{}。不要进行无谓的重复。",
                                         narrative
-                                    ))
+                                    )),
+                                    Ok(None) => None,
+                                    Err(e) => {
+                                        warn!(
+                                            "get_last_renhun_narrative 失败（best-effort 跳过）: {e:?}"
+                                        );
+                                        None
+                                    }
+                                }
                             } else {
                                 None
                             }
