@@ -91,7 +91,7 @@ pub type VendorPendingEvents =
 pub use responses::{
     AgentRegisterRequest, AgentRegisterResponse, DeviceRegisterErrorResponse,
     DeviceRegisterResponse, DeviceVerifyErrorResponse, DeviceVerifyRequest, DeviceVerifyResponse,
-    GameRules, HealthResponse,
+    DbHealthStatus, GameRules, HealthResponse,
 };
 
 // ============================================================================

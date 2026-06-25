@@ -40,6 +40,7 @@ impl AgentState {
             agent_id,
             name: String::new(), // 由 DB JOIN 填充
             tick_id,
+            state_version: 0,
             primary_attributes,
             status,
             node_id,

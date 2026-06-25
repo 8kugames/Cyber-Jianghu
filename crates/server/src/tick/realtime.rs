@@ -244,7 +244,10 @@ impl IntentWorker {
         }
 
         // 5. 持久化到 DB（await 确认）
-        if let Err(e) = crate::db::upsert_agent_state(&self.db_pool, &result.updated_state).await {
+        let persisted_version =
+            match crate::db::upsert_agent_state(&self.db_pool, &result.updated_state).await {
+                Ok(version) => version,
+                Err(e) => {
             // persist 失败 → DashMap 不更新 → 反馈失败给 Agent + 释放 whisper session
             self.send_error_to_agent(
                 agent_id,
@@ -256,11 +259,13 @@ impl IntentWorker {
             .await;
             self.close_session_if_whisper(&action_type, &intent).await;
             return Err(e).context(format!("Agent {} 状态持久化失败", agent_id));
-        }
+                }
+            };
 
         // 6. 更新 DashMap（persist 成功后）
-        self.state_cache
-            .insert(agent_id, result.updated_state.clone());
+        let mut persisted_state = result.updated_state.clone();
+        persisted_state.state_version = persisted_version;
+        self.state_cache.insert(agent_id, persisted_state.clone());
 
         // 6.5 技能习得推送：检测新增技能，推送 SkillContent 给 Agent
         let new_skills: Vec<String> = result
@@ -380,17 +385,17 @@ impl IntentWorker {
         //     修复：检测 is_alive=false 时复用 handle_deaths 完成统一善后。
         //     step 6 的 state_cache.insert 已写入 is_alive=false 的最终态，
         //     handle_deaths 内部仍能从中读取死亡元数据（hp/sat/hyd/sanity/birth_tick）。
-        if !result.updated_state.is_alive {
+        if !persisted_state.is_alive {
             let death_notif = decay::DeathNotification::new(
                 agent_id,
                 "action".to_string(),
                 format!("Action 致死: {}", action_type),
-                result.updated_state.node_id.clone(),
+                persisted_state.node_id.clone(),
                 tick_id,
             );
             info!(
                 "[death] action 致死触发善后: agent={}, action={}, tick={}, node={}",
-                agent_id, action_type, tick_id, result.updated_state.node_id
+                agent_id, action_type, tick_id, persisted_state.node_id
             );
             self.handle_deaths(vec![death_notif], tick_id).await;
         }
@@ -455,7 +460,10 @@ impl IntentWorker {
         };
 
         // 持久化
-        if let Err(e) = crate::db::upsert_agent_state(&self.db_pool, &updated_state).await {
+        let persisted_version =
+            match crate::db::upsert_agent_state(&self.db_pool, &updated_state).await {
+                Ok(version) => version,
+                Err(e) => {
             // persist 失败 → 发 failure notification + 清理 whisper session（不更新 DashMap）
             self.send_error_to_agent(
                 agent_id,
@@ -468,10 +476,13 @@ impl IntentWorker {
             self.close_session_if_whisper(intent.action_type.as_ref(), intent)
                 .await;
             return Err(e).context("Subsequent intent 持久化失败");
-        }
+                }
+            };
 
         // persist 成功后更新 DashMap
-        self.state_cache.insert(agent_id, updated_state.clone());
+        let mut persisted_state = updated_state.clone();
+        persisted_state.state_version = persisted_version;
+        self.state_cache.insert(agent_id, persisted_state.clone());
 
         // 发成功通知
         self.send_execution_result(
@@ -500,7 +511,7 @@ impl IntentWorker {
         // 历史 bug：action 致死（HP 归零、stamina 归零等）只在主 intent 末尾检测，
         // subsequent intent（pipe_seq > 0）中的死亡漏检，导致 status='active' 卡死、
         // auto_rebirth 永久拒绝。复用 handle_deaths 完成统一善后。
-        if !updated_state.is_alive {
+        if !persisted_state.is_alive {
             let death_notif = decay::DeathNotification::new(
                 agent_id,
                 "action".to_string(),
@@ -508,12 +519,12 @@ impl IntentWorker {
                     "Action 致死 (subsequent pipe_seq={}): {}",
                     pipe_seq, intent.action_type
                 ),
-                updated_state.node_id.clone(),
+                persisted_state.node_id.clone(),
                 tick_id,
             );
             info!(
                 "[death] action 致死触发善后 (subsequent): agent={}, action={}, pipe_seq={}, tick={}, node={}",
-                agent_id, intent.action_type, pipe_seq, tick_id, updated_state.node_id
+                agent_id, intent.action_type, pipe_seq, tick_id, persisted_state.node_id
             );
             self.handle_deaths(vec![death_notif], tick_id).await;
         }
@@ -555,6 +566,7 @@ impl IntentWorker {
         // 2.1 更新 tick_id 到当前 tick（衰减不更新 tick_id，需显式设置）
         for state in &mut updated_states {
             state.tick_id = tick_id;
+            state.state_version = 0;
         }
 
         // 3. 批量持久化衰减结果（失败时回退到逐条 persist 并清除 ghost agent）
@@ -996,13 +1008,21 @@ impl IntentWorker {
                 .await;
             }
 
-            // 1. 物品掉落：清空背包 → 掉落到地面
-            match crate::inventory::InventoryManager::clear_inventory(&self.db_pool, agent_id).await
+            // 1. 开启事务：物品掉落 + 标记死亡
+            let mut tx = match self.db_pool.begin().await {
+                Ok(tx) => tx,
+                Err(e) => {
+                    warn!("处理死亡开启事务失败: agent={}, error={}", agent_id, e);
+                    continue;
+                }
+            };
+
+            match crate::inventory::InventoryManager::clear_inventory(&mut tx, agent_id).await
             {
                 Ok(items) => {
                     for item in items {
                         if let Err(e) = crate::db::add_ground_item(
-                            &self.db_pool,
+                            &mut tx,
                             location,
                             &item.item_id,
                             item.quantity,
@@ -1025,10 +1045,15 @@ impl IntentWorker {
                 "UPDATE agents SET status = 'dead' WHERE agent_id = $1 AND status = 'active'",
             )
             .bind(agent_id)
-            .execute(&self.db_pool)
+            .execute(&mut *tx)
             .await
             {
                 warn!("标记 Agent {} 为 dead 失败: {}", agent_id, e);
+            }
+
+            if let Err(e) = tx.commit().await {
+                warn!("提交死亡处理事务失败: agent={}, error={}", agent_id, e);
+                continue;
             }
 
             // 3. DashMap: 移除死亡 Agent
@@ -1091,10 +1116,9 @@ impl IntentWorker {
                 warn!("AgentDied 通知发送失败: agent={}, error={}", agent_id, e);
             }
 
-            // 6. 自动重生时不断连，保留 agent_to_device_map 映射
-            if rebirth_delay <= 0 {
-                self.agent_to_device_map.write().await.remove(&agent_id);
-            }
+            // 6. 无论是否自动重生，都立即移除旧 agent 的广播映射。
+            // 自动重生继续依赖同一 device_id 的 WebSocket 存活，但旧角色不能再接收后续广播。
+            self.agent_to_device_map.write().await.remove(&agent_id);
 
             info!(
                 "Agent {} 已死亡处理完成: cause={}, location={}",

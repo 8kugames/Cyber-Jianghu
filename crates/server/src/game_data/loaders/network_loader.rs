@@ -57,6 +57,9 @@ mod tests {
                         "cleanup_interval_secs": 300,
                         "cleanup_threshold": 100
                     },
+                    "device_register": {
+                        "rate_limit_secs": 10
+                    },
                     "dialogue": {
                         "window_seconds": 300,
                         "max_messages_per_agent": 20
@@ -71,6 +74,7 @@ mod tests {
         assert_eq!(config.data.websocket.rate_limit_ms, 500);
         assert_eq!(config.data.websocket.cleanup_interval_secs, 300);
         assert_eq!(config.data.websocket.cleanup_threshold, 100);
+        assert_eq!(config.data.device_register.rate_limit_secs, 10);
     }
 
     #[test]
@@ -84,6 +88,8 @@ data:
     rate_limit_ms: 500
     cleanup_interval_secs: 300
     cleanup_threshold: 100
+  device_register:
+    rate_limit_secs: 10
   dialogue:
     window_seconds: 300
     max_messages_per_agent: 20
@@ -94,5 +100,6 @@ data:
         assert_eq!(config.data.websocket.rate_limit_ms, 500);
         assert_eq!(config.data.websocket.cleanup_interval_secs, 300);
         assert_eq!(config.data.websocket.cleanup_threshold, 100);
+        assert_eq!(config.data.device_register.rate_limit_secs, 10);
     }
 }

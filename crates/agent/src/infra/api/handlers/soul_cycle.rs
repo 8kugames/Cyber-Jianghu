@@ -227,8 +227,30 @@ pub(crate) async fn get_soul_cycles_handler(
 
     if let Some(tid) = tick_id {
         // 按 tick_id 查询
-        let records = recorder.get_by_tick(tid).await;
-        let immediate = recorder.get_immediate_by_tick(tid).await;
+        let records = match recorder.get_by_tick(tid).await {
+            Ok(r) => r,
+            Err(e) => {
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": format!("get_by_tick({tid}) 失败: {e:?}")
+                    })),
+                )
+                    .into_response();
+            }
+        };
+        let immediate = match recorder.get_immediate_by_tick(tid).await {
+            Ok(r) => r,
+            Err(e) => {
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": format!("get_immediate_by_tick({tid}) 失败: {e:?}")
+                    })),
+                )
+                    .into_response();
+            }
+        };
 
         let attempts: Vec<SoulCycleAttemptEntry> =
             records.into_iter().map(record_to_attempt_entry).collect();
@@ -246,11 +268,44 @@ pub(crate) async fn get_soul_cycles_handler(
         .into_response()
     } else {
         // 分页查询：按 tick_id 分组
-        let (tick_ids, total) = recorder.get_tick_ids_page(page, limit).await;
+        let (tick_ids, total) = match recorder.get_tick_ids_page(page, limit).await {
+            Ok(r) => r,
+            Err(e) => {
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": format!("get_tick_ids_page 失败: {e:?}")
+                    })),
+                )
+                    .into_response();
+            }
+        };
 
         // 批量获取所有 tick 的记录和即时意图
-        let all_records = recorder.get_by_ticks(&tick_ids).await;
-        let all_immediate = recorder.get_immediate_by_ticks(&tick_ids).await;
+        let all_records = match recorder.get_by_ticks(&tick_ids).await {
+            Ok(r) => r,
+            Err(e) => {
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": format!("get_by_ticks 失败: {e:?}")
+                    })),
+                )
+                    .into_response();
+            }
+        };
+        let all_immediate = match recorder.get_immediate_by_ticks(&tick_ids).await {
+            Ok(r) => r,
+            Err(e) => {
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": format!("get_immediate_by_ticks 失败: {e:?}")
+                    })),
+                )
+                    .into_response();
+            }
+        };
 
         // 按 tick_id 分组记录
         let mut records_map: std::collections::HashMap<String, Vec<SoulCycleAttemptEntry>> =
@@ -381,21 +436,11 @@ pub(crate) async fn rebirth_character_handler(
     let (server_url, request_body, log_tag) = match character_status {
         crate::config::CharacterStatus::Dead => {
             // dead → auto-rebirth（创建全新 agent，old agent 保持 status='dead'）
-            // 需要 name/system_prompt，从 character.yaml 读
-            let characters_dir = state.character_dir.read().await.clone();
-            let char_yaml = characters_dir
-                .join(agent_id.to_string())
-                .join("character.yaml");
-            let (name, system_prompt) = crate::config::CharacterConfig::from_file(&char_yaml)
-                .map(|c| (c.name, c.system_prompt.unwrap_or_default()))
-                .unwrap_or_default();
             let url = format!("{}/api/v1/agent/auto-rebirth", server_http_url);
             let body = serde_json::json!({
                 "device_id": device_id,
                 "auth_token": auth_token,
                 "old_agent_id": agent_id,
-                "name": name,
-                "system_prompt": system_prompt,
             });
             (url, body, "auto-rebirth (dead→保持dead, 创建新agent)")
         }

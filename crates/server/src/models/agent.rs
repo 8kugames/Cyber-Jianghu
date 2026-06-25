@@ -64,6 +64,9 @@ pub struct AgentState {
     /// Tick编号（递增）
     pub tick_id: i64,
 
+    /// 同一 `(agent_id, tick_id)` 行内的乐观锁版本号
+    pub state_version: i64,
+
     /// 先天属性组件（力量、敏捷、体质、智力、魅力、福缘）
     pub primary_attributes: crate::game_data::types::AttributeComponent,
 

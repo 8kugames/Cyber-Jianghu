@@ -101,6 +101,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for AgentState {
             agent_id: row.try_get("agent_id")?,
             name: row.try_get("name").unwrap_or_default(),
             tick_id: row.try_get("tick_id")?,
+            state_version: row.try_get("state_version").unwrap_or(0),
             primary_attributes,
             status,
             node_id: row.try_get("node_id")?,

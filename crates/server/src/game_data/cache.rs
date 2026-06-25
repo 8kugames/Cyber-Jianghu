@@ -393,6 +393,7 @@ mod tests {
                         max_missed_pongs: 3,
                         log_preview_length: 50,
                     },
+                    device_register: Default::default(),
                     dialogue: Default::default(),
                 },
             },

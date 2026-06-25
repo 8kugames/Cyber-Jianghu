@@ -297,7 +297,10 @@ pub fn compute_age_years(birth_tick: i64, current_tick: i64) -> i64 {
         // tick_id 是秒级时间戳，需除以 real_seconds_per_tick 得到 tick count
         let registry = match crate::game_data::registry_or_error() {
             Ok(r) => r,
-            Err(_) => return 0,
+            Err(e) => {
+                tracing::warn!("get_real_seconds_per_tick: registry 读取失败（fallback 0 = 不衰减）：{e:?}");
+                return 0;
+            }
         };
         let real_seconds_per_tick = registry
             .get()
@@ -332,7 +335,10 @@ pub fn compute_age_years(birth_tick: i64, current_tick: i64) -> i64 {
 pub fn compute_starting_age_ticks() -> i64 {
     let registry = match crate::game_data::registry_or_error() {
         Ok(r) => r,
-        Err(_) => return 0,
+        Err(e) => {
+            tracing::warn!("decay: registry 读取失败（fallback 0 = 不衰减）：{e:?}");
+            return 0;
+        }
     };
     let gd = registry.get();
     let starting_age = gd

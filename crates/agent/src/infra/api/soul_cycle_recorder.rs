@@ -400,103 +400,104 @@ impl SoulCycleRecorder {
     ///
     /// Agent 推理频率低于 tick 推进频率，tick_id 不连续。
     /// 用于 `update_previous_round_narrative` 找到真正需要回填的上一轮 tick。
-    pub async fn get_last_recorded_tick(&self, before_tick_id: i64) -> Option<i64> {
-        let conn = match self.conn.lock() {
-            Ok(c) => c,
-            Err(_) => return None,
-        };
-
+    pub async fn get_last_recorded_tick(&self, before_tick_id: i64) -> anyhow::Result<Option<i64>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("soul_cycle_record lock poisoned: {e}"))?;
         conn.query_row(
             "SELECT MAX(tick_id) FROM soul_cycle_record WHERE tick_id < ?1",
             params![before_tick_id],
             |row| row.get(0),
         )
-        .ok()
-        .flatten()
+        .context("get_last_recorded_tick query 失败")
     }
 
     /// 获取上轮人魂叙事（最近一条 tick_id < before_tick_id 的记录）
-    pub async fn get_last_renhun_narrative(&self, before_tick_id: i64) -> Option<String> {
-        let conn = match self.conn.lock() {
-            Ok(c) => c,
-            Err(_) => return None,
-        };
-
+    pub async fn get_last_renhun_narrative(
+        &self,
+        before_tick_id: i64,
+    ) -> anyhow::Result<Option<String>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("soul_cycle_record lock poisoned: {e}"))?;
         // 取最近一条成功的记录（attempt 最大的，通常是最终通过的）
         conn.query_row(
             "SELECT renhun_narrative FROM soul_cycle_record WHERE tick_id < ?1 AND renhun_narrative IS NOT NULL ORDER BY tick_id DESC, attempt DESC LIMIT 1",
             params![before_tick_id],
             |row| row.get(0),
         )
-        .ok()
-        .flatten()
+        .context("get_last_renhun_narrative query 失败")
     }
 
     /// 按 tick_id 获取所有 attempt 的记录
-    pub async fn get_by_tick(&self, tick_id: i64) -> Vec<SoulCycleRecord> {
-        let conn = match self.conn.lock() {
-            Ok(c) => c,
-            Err(_) => return vec![],
-        };
-
-        let mut stmt = match conn.prepare(
-            "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
+    pub async fn get_by_tick(&self, tick_id: i64) -> anyhow::Result<Vec<SoulCycleRecord>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("soul_cycle_record lock poisoned: {e}"))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
                     tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
                     tianhun_layer3_result, tianhun_reason,
                     final_intent_id, final_action_type, final_action_data, final_pipeline_json,
                     route_type, world_time, earth_tool_calls, created_at
              FROM soul_cycle_record WHERE tick_id = ?1 ORDER BY attempt ASC",
-        ) {
-            Ok(s) => s,
-            Err(_) => return vec![],
-        };
-
-        stmt.query_map(params![tick_id], |row| Ok(Self::row_to_record(row)))
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-            .unwrap_or_default()
+            )
+            .context("get_by_tick prepare 失败")?;
+        let rows = stmt
+            .query_map(params![tick_id], |row| Ok(Self::row_to_record(row)))
+            .context("get_by_tick query_map 失败")?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("get_by_tick collect rows 失败")
     }
 
     /// 按 tick 分组的分页查询（返回去重 tick_id 列表）
-    pub async fn get_tick_ids_page(&self, page: u32, limit: u32) -> (Vec<i64>, u32) {
+    pub async fn get_tick_ids_page(
+        &self,
+        page: u32,
+        limit: u32,
+    ) -> anyhow::Result<(Vec<i64>, u32)> {
         let page = page.max(1);
-        let conn = match self.conn.lock() {
-            Ok(c) => c,
-            Err(_) => return (vec![], 0),
-        };
-
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("soul_cycle_record lock poisoned: {e}"))?;
         let total: u32 = conn
             .query_row(
                 "SELECT COUNT(DISTINCT tick_id) FROM soul_cycle_record",
                 [],
                 |row| row.get(0),
             )
-            .unwrap_or(0);
+            .context("get_tick_ids_page COUNT 失败")?;
 
         let offset = ((page - 1) * limit) as i64;
-        let mut stmt = match conn.prepare(
-            "SELECT DISTINCT tick_id FROM soul_cycle_record ORDER BY tick_id DESC LIMIT ?1 OFFSET ?2",
-        ) {
-            Ok(s) => s,
-            Err(_) => return (vec![], total),
-        };
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT tick_id FROM soul_cycle_record ORDER BY tick_id DESC LIMIT ?1 OFFSET ?2",
+            )
+            .context("get_tick_ids_page prepare 失败")?;
 
         let tick_ids: Vec<i64> = stmt
             .query_map(params![limit, offset], |row| row.get(0))
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-            .unwrap_or_default();
+            .context("get_tick_ids_page query_map 失败")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("get_tick_ids_page collect rows 失败")?;
 
-        (tick_ids, total)
+        Ok((tick_ids, total))
     }
 
     /// 批量获取多个 tick 的三魂循环记录（单次 SQL，消除 N+1）
-    pub async fn get_by_ticks(&self, tick_ids: &[i64]) -> Vec<SoulCycleRecord> {
+    pub async fn get_by_ticks(&self, tick_ids: &[i64]) -> anyhow::Result<Vec<SoulCycleRecord>> {
         if tick_ids.is_empty() || tick_ids.len() > 100 {
-            return vec![];
+            return Ok(vec![]);
         }
-        let conn = match self.conn.lock() {
-            Ok(c) => c,
-            Err(_) => return vec![],
-        };
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("soul_cycle_record lock poisoned: {e}"))?;
 
         let sql = format!(
             "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
@@ -508,29 +509,31 @@ impl SoulCycleRecorder {
             build_in_placeholders(tick_ids.len())
         );
 
-        let mut stmt = match conn.prepare(&sql) {
-            Ok(s) => s,
-            Err(_) => return vec![],
-        };
+        let mut stmt = conn.prepare(&sql).context("get_by_ticks prepare 失败")?;
 
         let params: Vec<&dyn rusqlite::ToSql> = tick_ids
             .iter()
             .map(|id| id as &dyn rusqlite::ToSql)
             .collect();
-        stmt.query_map(params.as_slice(), |row| Ok(Self::row_to_record(row)))
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-            .unwrap_or_default()
+        let rows = stmt
+            .query_map(params.as_slice(), |row| Ok(Self::row_to_record(row)))
+            .context("get_by_ticks query_map 失败")?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("get_by_ticks collect rows 失败")
     }
 
     /// 批量获取多个 tick 的即时意图记录
-    pub async fn get_immediate_by_ticks(&self, tick_ids: &[i64]) -> Vec<ImmediateIntentRecord> {
+    pub async fn get_immediate_by_ticks(
+        &self,
+        tick_ids: &[i64],
+    ) -> anyhow::Result<Vec<ImmediateIntentRecord>> {
         if tick_ids.is_empty() || tick_ids.len() > 100 {
-            return vec![];
+            return Ok(vec![]);
         }
-        let conn = match self.conn.lock() {
-            Ok(c) => c,
-            Err(_) => return vec![],
-        };
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("soul_cycle_record lock poisoned: {e}"))?;
 
         let sql = format!(
             "SELECT id, tick_id, intent_id, source_narrative, route_type,
@@ -539,44 +542,47 @@ impl SoulCycleRecorder {
             build_in_placeholders(tick_ids.len())
         );
 
-        let mut stmt = match conn.prepare(&sql) {
-            Ok(s) => s,
-            Err(_) => return vec![],
-        };
+        let mut stmt = conn
+            .prepare(&sql)
+            .context("get_immediate_by_ticks prepare 失败")?;
 
         // 绑定参数
         let params: Vec<&dyn rusqlite::ToSql> = tick_ids
             .iter()
             .map(|id| id as &dyn rusqlite::ToSql)
             .collect();
-        stmt.query_map(params.as_slice(), |row| {
-            Ok(Self::row_to_immediate_record(row))
-        })
-        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default()
+        let rows = stmt
+            .query_map(params.as_slice(), |row| {
+                Ok(Self::row_to_immediate_record(row))
+            })
+            .context("get_immediate_by_ticks query_map 失败")?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("get_immediate_by_ticks collect rows 失败")
     }
 
     /// 获取即时意图记录
-    pub async fn get_immediate_by_tick(&self, tick_id: i64) -> Vec<ImmediateIntentRecord> {
-        let conn = match self.conn.lock() {
-            Ok(c) => c,
-            Err(_) => return vec![],
-        };
-
-        let mut stmt = match conn.prepare(
-            "SELECT id, tick_id, intent_id, source_narrative, route_type,
+    pub async fn get_immediate_by_tick(
+        &self,
+        tick_id: i64,
+    ) -> anyhow::Result<Vec<ImmediateIntentRecord>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("soul_cycle_record lock poisoned: {e}"))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, tick_id, intent_id, source_narrative, route_type,
                     action_type, action_data, speech_content, send_status, send_error, created_at
              FROM immediate_intent_record WHERE tick_id = ?1 ORDER BY id ASC",
-        ) {
-            Ok(s) => s,
-            Err(_) => return vec![],
-        };
-
-        stmt.query_map(params![tick_id], |row| {
-            Ok(Self::row_to_immediate_record(row))
-        })
-        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default()
+            )
+            .context("get_immediate_by_tick prepare 失败")?;
+        let rows = stmt
+            .query_map(params![tick_id], |row| {
+                Ok(Self::row_to_immediate_record(row))
+            })
+            .context("get_immediate_by_tick query_map 失败")?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("get_immediate_by_tick collect rows 失败")
     }
 
     fn row_to_record(row: &rusqlite::Row<'_>) -> SoulCycleRecord {
@@ -647,7 +653,7 @@ mod tests {
         recorder
             .record_renhun(1, 0, "吃馒头充饥", "思考中...")
             .await;
-        let records = recorder.get_by_tick(1).await;
+        let records = recorder.get_by_tick(1).await.expect("get_by_tick in test");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].renhun_narrative.as_deref(), Some("吃馒头充饥"));
         assert_eq!(records[0].renhun_thought_log.as_deref(), Some("思考中..."));
@@ -668,7 +674,7 @@ mod tests {
                 None,
             )
             .await;
-        let records = recorder.get_by_tick(1).await;
+        let records = recorder.get_by_tick(1).await.expect("get_by_tick in test");
         assert_eq!(records[0].tianhun_result.as_deref(), Some("approved"));
         assert_eq!(
             records[0].tianhun_layer1_result.as_deref(),
@@ -691,7 +697,7 @@ mod tests {
                 Some("意图不合理"),
             )
             .await;
-        let records = recorder.get_by_tick(1).await;
+        let records = recorder.get_by_tick(1).await.expect("get_by_tick in test");
         assert_eq!(records[0].tianhun_result.as_deref(), Some("rejected"));
         assert_eq!(records[0].tianhun_reason.as_deref(), Some("意图不合理"));
     }
@@ -701,7 +707,7 @@ mod tests {
         let (_dir, recorder) = make_recorder();
         recorder.record_renhun(1, 0, "第一次", "...").await;
         recorder.record_renhun(1, 0, "第二次覆盖", "...").await;
-        let records = recorder.get_by_tick(1).await;
+        let records = recorder.get_by_tick(1).await.expect("get_by_tick in test");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].renhun_narrative.as_deref(), Some("第二次覆盖"));
     }
@@ -722,7 +728,7 @@ mod tests {
                 None,
             )
             .await;
-        let records = recorder.get_immediate_by_tick(1).await;
+        let records = recorder.get_immediate_by_tick(1).await.expect("get_immediate_by_tick in test");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].action_type, "说话");
         assert_eq!(records[0].send_status, "sent");
@@ -744,7 +750,7 @@ mod tests {
                 Some("WebSocket 断开"),
             )
             .await;
-        let records = recorder.get_immediate_by_tick(1).await;
+        let records = recorder.get_immediate_by_tick(1).await.expect("get_immediate_by_tick in test");
         assert_eq!(records[0].send_status, "failed");
         assert_eq!(records[0].send_error.as_deref(), Some("WebSocket 断开"));
     }
@@ -754,7 +760,7 @@ mod tests {
         let (_dir, recorder) = make_recorder();
         recorder.record_renhun(1, 0, "移动", "...").await;
         recorder.record_world_time(1, 0, "第三天 申时").await;
-        let records = recorder.get_by_tick(1).await;
+        let records = recorder.get_by_tick(1).await.expect("get_by_tick in test");
         assert_eq!(records[0].world_time.as_deref(), Some("第三天 申时"));
     }
 
@@ -767,7 +773,7 @@ mod tests {
         recorder.record_renhun(3, 0, "c", "...").await;
         recorder.record_renhun(2, 0, "b", "...").await;
 
-        let (ids, total) = recorder.get_tick_ids_page(1, 10).await;
+        let (ids, total) = recorder.get_tick_ids_page(1, 10).await.expect("get_tick_ids_page in test");
         assert_eq!(total, 3);
         assert_eq!(ids, vec![3, 2, 1]); // 降序，tick 1 只出现一次
     }
@@ -781,8 +787,8 @@ mod tests {
                 .await;
         }
 
-        let (p1, total) = recorder.get_tick_ids_page(1, 3).await;
-        let (p2, _) = recorder.get_tick_ids_page(2, 3).await;
+        let (p1, total) = recorder.get_tick_ids_page(1, 3).await.expect("get_tick_ids_page p1 in test");
+        let (p2, _) = recorder.get_tick_ids_page(2, 3).await.expect("get_tick_ids_page p2 in test");
         assert_eq!(total, 5);
         assert_eq!(p1, vec![5, 4, 3]);
         assert_eq!(p2, vec![2, 1]);
@@ -791,7 +797,10 @@ mod tests {
     #[tokio::test]
     async fn test_get_tick_ids_page_empty() {
         let (_dir, recorder) = make_recorder();
-        let (ids, total) = recorder.get_tick_ids_page(1, 10).await;
+        let (ids, total) = recorder
+            .get_tick_ids_page(1, 10)
+            .await
+            .expect("get_tick_ids_page empty in test");
         assert!(ids.is_empty());
         assert_eq!(total, 0);
     }
@@ -804,7 +813,7 @@ mod tests {
         recorder.record_renhun(3, 0, "c", "...").await;
         // tick 2 不存在
 
-        let records = recorder.get_by_ticks(&[1, 2, 3]).await;
+        let records = recorder.get_by_ticks(&[1, 2, 3]).await.expect("get_by_ticks in test");
         assert_eq!(records.len(), 3); // tick1×2 + tick3×1
         assert_eq!(records[0].tick_id, 3); // 降序
         assert_eq!(records[1].tick_id, 1);
@@ -814,7 +823,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_by_ticks_empty() {
         let (_dir, recorder) = make_recorder();
-        let records = recorder.get_by_ticks(&[]).await;
+        let records = recorder.get_by_ticks(&[]).await.expect("get_by_ticks empty in test");
         assert!(records.is_empty());
     }
 
@@ -861,10 +870,101 @@ mod tests {
             )
             .await;
 
-        let records = recorder.get_immediate_by_ticks(&[1, 2, 3]).await;
+        let records = recorder.get_immediate_by_ticks(&[1, 2, 3]).await.expect("get_immediate_by_ticks in test");
         assert_eq!(records.len(), 3);
         assert_eq!(records[0].tick_id, 1);
         assert_eq!(records[1].tick_id, 3);
         assert_eq!(records[2].tick_id, 3);
+    }
+
+    // ========================================================================
+    // P0-AUDIT 闭环：7 个 query 方法必须返回 Result，DB 错时 caller 显式处理
+    // 模式同 P1-3（outcome.rs）：init → DROP TABLE → assert Err
+    // 之前静默返回 None / 空 Vec / (空, 0) 会让 caller 误以为"无数据"
+    // ========================================================================
+
+    fn break_db(db: &std::path::Path) {
+        let conn = rusqlite::Connection::open(db).expect("reopen db");
+        conn.execute("DROP TABLE soul_cycle_record", [])
+            .expect("drop soul_cycle_record");
+        conn.execute("DROP TABLE immediate_intent_record", [])
+            .expect("drop immediate_intent_record");
+    }
+
+    #[tokio::test]
+    async fn test_p0_audit_get_last_recorded_tick_returns_err_on_broken_db() {
+        let (dir, recorder) = make_recorder();
+        break_db(&dir.path().join("soul_cycle.db"));
+        let result = recorder.get_last_recorded_tick(100).await;
+        assert!(
+            result.is_err(),
+            "P0-AUDIT：get_last_recorded_tick 在 DB 损坏时必须返回 Err，caller 显式处理"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_p0_audit_get_last_renhun_narrative_returns_err_on_broken_db() {
+        let (dir, recorder) = make_recorder();
+        break_db(&dir.path().join("soul_cycle.db"));
+        let result = recorder.get_last_renhun_narrative(100).await;
+        assert!(
+            result.is_err(),
+            "P0-AUDIT：get_last_renhun_narrative 在 DB 损坏时必须返回 Err"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_p0_audit_get_by_tick_returns_err_on_broken_db() {
+        let (dir, recorder) = make_recorder();
+        break_db(&dir.path().join("soul_cycle.db"));
+        let result = recorder.get_by_tick(1).await;
+        assert!(
+            result.is_err(),
+            "P0-AUDIT：get_by_tick 在 DB 损坏时必须返回 Err，caller 显式处理"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_p0_audit_get_tick_ids_page_returns_err_on_broken_db() {
+        let (dir, recorder) = make_recorder();
+        break_db(&dir.path().join("soul_cycle.db"));
+        let result = recorder.get_tick_ids_page(1, 10).await;
+        assert!(
+            result.is_err(),
+            "P0-AUDIT：get_tick_ids_page 在 DB 损坏时必须返回 Err"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_p0_audit_get_by_ticks_returns_err_on_broken_db() {
+        let (dir, recorder) = make_recorder();
+        break_db(&dir.path().join("soul_cycle.db"));
+        let result = recorder.get_by_ticks(&[1, 2, 3]).await;
+        assert!(
+            result.is_err(),
+            "P0-AUDIT：get_by_ticks 在 DB 损坏时必须返回 Err"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_p0_audit_get_immediate_by_ticks_returns_err_on_broken_db() {
+        let (dir, recorder) = make_recorder();
+        break_db(&dir.path().join("soul_cycle.db"));
+        let result = recorder.get_immediate_by_ticks(&[1, 2, 3]).await;
+        assert!(
+            result.is_err(),
+            "P0-AUDIT：get_immediate_by_ticks 在 DB 损坏时必须返回 Err"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_p0_audit_get_immediate_by_tick_returns_err_on_broken_db() {
+        let (dir, recorder) = make_recorder();
+        break_db(&dir.path().join("soul_cycle.db"));
+        let result = recorder.get_immediate_by_tick(1).await;
+        assert!(
+            result.is_err(),
+            "P0-AUDIT：get_immediate_by_tick 在 DB 损坏时必须返回 Err"
+        );
     }
 }

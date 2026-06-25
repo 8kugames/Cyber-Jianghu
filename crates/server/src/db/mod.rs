@@ -27,6 +27,7 @@
 
 // 公共模块
 mod agent_ops;
+mod audit_ops;
 mod common;
 mod ground_item_ops;
 mod item_ops;
@@ -35,18 +36,23 @@ mod state_ops;
 mod vendor_ops;
 
 // 导出公共API - 连接池初始化和工具函数
-pub use common::init_db_pool;
+pub use common::{
+    DbRuntimeHealth, DbRuntimeHealthState, create_db_runtime_health_state, init_db_pool,
+    record_db_probe_result, start_db_health_probe,
+};
 
 // 导出公共API - Agent操作
 pub use agent_ops::{
-    AutoRebirthResult, DeviceConnectResult, RetireResult, assign_initial_recipes,
-    auto_rebirth_agent, batch_get_known_recipe_ids, connect_device, find_device_by_auth_token,
-    get_agent_by_device_id, get_agent_by_id, get_all_agents, get_device_token,
-    get_intent_timeout_stats, get_known_recipe_ids, record_recipe_observation,
-    register_agent_transactional, register_device, retire_agent, update_agent_biography,
-    update_agent_location, update_agent_online, update_device_last_seen, verify_device_strict,
-    verify_device_token,
+    AutoRebirthParams, AutoRebirthResult, DeviceConnectResult, RetireResult, assign_initial_recipes,
+    auto_rebirth_agent, batch_get_known_recipe_ids, connect_device, ensure_old_agent_id_not_nil,
+    find_device_by_auth_token, get_agent_by_device_id, get_agent_by_id, get_all_agents,
+    get_device_token, get_intent_timeout_stats, get_known_recipe_ids, record_recipe_observation,
+    register_agent_transactional, register_device, retire_agent, rotate_device_token,
+    update_agent_biography, update_agent_location, update_agent_online, update_device_last_seen,
+    verify_device_strict, verify_device_token,
 };
+
+pub use audit_ops::{AuditLogEntry, build_audit_request_context, insert_audit_log};
 
 // 导出公共API - AgentState操作
 pub use state_ops::{

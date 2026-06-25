@@ -70,6 +70,30 @@ pub struct DatabaseConfig {
     /// 重试间隔（秒）
     #[serde(default = "default_db_retry_delay_secs")]
     pub retry_delay_secs: u64,
+
+    /// 连接池最大连接数
+    #[serde(default = "default_db_max_connections")]
+    pub max_connections: u32,
+
+    /// 连接池最小空闲连接数
+    #[serde(default = "default_db_min_connections")]
+    pub min_connections: u32,
+
+    /// 获取连接超时（秒）
+    #[serde(default = "default_db_acquire_timeout_secs")]
+    pub acquire_timeout_secs: u64,
+
+    /// 空闲连接回收时间（秒）
+    #[serde(default = "default_db_idle_timeout_secs")]
+    pub idle_timeout_secs: u64,
+
+    /// 连接最大生命周期（秒）
+    #[serde(default = "default_db_max_lifetime_secs")]
+    pub max_lifetime_secs: u64,
+
+    /// 后台探针轮询间隔（秒）
+    #[serde(default = "default_db_probe_interval_secs")]
+    pub probe_interval_secs: u64,
 }
 
 fn default_db_max_retries() -> u32 {
@@ -78,6 +102,30 @@ fn default_db_max_retries() -> u32 {
 
 fn default_db_retry_delay_secs() -> u64 {
     2
+}
+
+fn default_db_max_connections() -> u32 {
+    20
+}
+
+fn default_db_min_connections() -> u32 {
+    2
+}
+
+fn default_db_acquire_timeout_secs() -> u64 {
+    5
+}
+
+fn default_db_idle_timeout_secs() -> u64 {
+    300
+}
+
+fn default_db_max_lifetime_secs() -> u64 {
+    1800
+}
+
+fn default_db_probe_interval_secs() -> u64 {
+    30
 }
 
 // ============================================================================
@@ -131,6 +179,30 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(2),
+            max_connections: std::env::var("DB_MAX_CONNECTIONS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(default_db_max_connections),
+            min_connections: std::env::var("DB_MIN_CONNECTIONS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(default_db_min_connections),
+            acquire_timeout_secs: std::env::var("DB_ACQUIRE_TIMEOUT_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(default_db_acquire_timeout_secs),
+            idle_timeout_secs: std::env::var("DB_IDLE_TIMEOUT_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(default_db_idle_timeout_secs),
+            max_lifetime_secs: std::env::var("DB_MAX_LIFETIME_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(default_db_max_lifetime_secs),
+            probe_interval_secs: std::env::var("DB_PROBE_INTERVAL_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(default_db_probe_interval_secs),
         };
 
         Ok(Config { server, database })
@@ -151,6 +223,22 @@ impl Config {
         // 验证数据库URL（简单验证）
         if !self.database.url.starts_with("postgres://") {
             anyhow::bail!("Database URL must start with 'postgres://'");
+        }
+
+        if self.database.max_connections == 0 {
+            anyhow::bail!("DB_MAX_CONNECTIONS must be greater than 0");
+        }
+        if self.database.min_connections > self.database.max_connections {
+            anyhow::bail!("DB_MIN_CONNECTIONS cannot be greater than DB_MAX_CONNECTIONS");
+        }
+        if self.database.acquire_timeout_secs == 0 {
+            anyhow::bail!("DB_ACQUIRE_TIMEOUT_SECS must be greater than 0");
+        }
+        if self.database.max_lifetime_secs == 0 {
+            anyhow::bail!("DB_MAX_LIFETIME_SECS must be greater than 0");
+        }
+        if self.database.probe_interval_secs == 0 {
+            anyhow::bail!("DB_PROBE_INTERVAL_SECS must be greater than 0");
         }
 
         // 检查是否在生产环境使用默认密码"changeme"
@@ -193,6 +281,12 @@ impl Default for Config {
                 url: "postgres://postgres:changeme@localhost:5432/cyber_jianghu".to_string(),
                 max_retries: 5,
                 retry_delay_secs: 2,
+                max_connections: default_db_max_connections(),
+                min_connections: default_db_min_connections(),
+                acquire_timeout_secs: default_db_acquire_timeout_secs(),
+                idle_timeout_secs: default_db_idle_timeout_secs(),
+                max_lifetime_secs: default_db_max_lifetime_secs(),
+                probe_interval_secs: default_db_probe_interval_secs(),
             },
         }
     }
@@ -211,6 +305,8 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.server.host, "0.0.0.0");
         assert_eq!(config.server.port, 23333);
+        assert_eq!(config.database.max_connections, default_db_max_connections());
+        assert_eq!(config.database.min_connections, default_db_min_connections());
     }
 
     #[test]

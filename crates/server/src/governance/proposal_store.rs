@@ -6,7 +6,7 @@ use cyber_jianghu_protocol::GovernanceTopic;
 use sqlx::{PgPool, Postgres, Row};
 use uuid::Uuid;
 
-use super::types::{ProposalEvidence, ProposalStage, ProposalStatus, VoteChoice};
+use super::types::{parse_vote_str, ProposalEvidence, ProposalStage, ProposalStatus, VoteChoice};
 
 // ---------------------------------------------------------------------------
 // Row types (sqlx::FromRow)
@@ -168,7 +168,7 @@ impl ProposalStore {
     ) -> Result<Uuid> {
         let topics_val = serde_json::to_value(governance_topics).context("serialize topics")?;
         let pid_json = serde_json::to_value(proposal_id).context("serialize proposal_id")?;
-
+        let mut tx = self.pool.begin().await.context("begin upsert proposal group tx")?;
         let row = sqlx::query_as::<Postgres, GroupRow>(
             "INSERT INTO action_evolution_proposal_groups \
              (similarity_key, proposal_ids, governance_topics, primary_soul) \
@@ -194,40 +194,66 @@ impl ProposalStore {
         .bind(pid_json)
         .bind(topics_val)
         .bind(primary_soul)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
         .context("upsert proposal group")?;
+
+        sqlx::query(
+            "INSERT INTO action_evolution_group_proposals (proposal_group_id, proposal_id) \
+             VALUES ($1, $2) \
+             ON CONFLICT (proposal_id) DO UPDATE SET proposal_group_id = EXCLUDED.proposal_group_id",
+        )
+        .bind(row.id)
+        .bind(proposal_id)
+        .execute(&mut *tx)
+        .await
+        .context("link proposal to proposal group")?;
+
+        tx.commit()
+            .await
+            .context("commit upsert proposal group tx")?;
 
         Ok(row.id)
     }
 
     pub async fn get_pending_groups(&self) -> Result<Vec<PendingGroup>> {
         let rows = sqlx::query_as::<Postgres, GroupRow>(
-            "SELECT * FROM action_evolution_proposal_groups \
-             WHERE status IN ('pending_review', 'under_review') ORDER BY created_at ASC",
+            "UPDATE action_evolution_proposal_groups 
+             SET status = 'under_review', updated_at = CURRENT_TIMESTAMP
+             WHERE id IN (
+                 SELECT id FROM action_evolution_proposal_groups 
+                 WHERE status IN ('pending_review', 'under_review') 
+                 ORDER BY created_at ASC 
+                 FOR UPDATE SKIP LOCKED
+             )
+             RETURNING *",
         )
         .fetch_all(&self.pool)
         .await
         .context("query pending groups")?;
 
-        rows.into_iter()
-            .map(|r| {
-                let proposal_ids: Vec<Uuid> =
-                    serde_json::from_value(r.proposal_ids).context("deserialize proposal_ids")?;
-                let governance_topics: Vec<GovernanceTopic> =
-                    serde_json::from_value(r.governance_topics).context("deserialize topics")?;
-                let stage = ProposalStage::from_db_str(r.stage.as_deref().unwrap_or(""));
-                Ok(PendingGroup {
-                    id: r.id,
-                    similarity_key: r.similarity_key,
-                    primary_soul: r.primary_soul,
-                    governance_topics,
-                    proposal_count: proposal_ids.len(),
-                    stage,
-                    created_at: r.created_at,
-                })
-            })
-            .collect()
+        let mut groups = Vec::with_capacity(rows.len());
+        for r in rows {
+            let proposal_count = self
+                .get_group_proposal_count(r.id)
+                .await
+                .context("query proposal count")?;
+            let governance_topics: Vec<GovernanceTopic> =
+                serde_json::from_value(r.governance_topics).context("deserialize topics")?;
+            let stage = ProposalStage::try_from_db_str(r.stage.as_deref().unwrap_or(""))
+                .context("deserialize stage")?;
+            groups.push(PendingGroup {
+                id: r.id,
+                similarity_key: r.similarity_key,
+                primary_soul: r.primary_soul,
+                governance_topics,
+                proposal_count,
+                stage,
+                created_at: r.created_at,
+            });
+        }
+
+        Ok(groups)
     }
 
     pub async fn get_group(&self, group_id: Uuid) -> Result<Option<GroupFull>> {
@@ -248,14 +274,17 @@ impl ProposalStore {
 
         let governance_topics: Vec<GovernanceTopic> =
             serde_json::from_value(row.governance_topics).context("deserialize topics")?;
-        let proposal_ids: Vec<Uuid> =
-            serde_json::from_value(row.proposal_ids).context("deserialize proposal_ids")?;
+        let proposal_ids = self
+            .get_group_proposal_ids(group_id)
+            .await
+            .context("query proposal ids")?;
         let dissent_log: Vec<serde_json::Value> =
             serde_json::from_value(row.dissent_log).context("deserialize dissent_log")?;
         let co_reviewers: Vec<String> =
             serde_json::from_value(row.co_reviewers).context("deserialize co_reviewers")?;
-        let status = ProposalStatus::from_db_str(&row.status);
-        let stage = ProposalStage::from_db_str(row.stage.as_deref().unwrap_or(""));
+        let status = ProposalStatus::try_from_db_str(&row.status).context("deserialize status")?;
+        let stage = ProposalStage::try_from_db_str(row.stage.as_deref().unwrap_or(""))
+            .context("deserialize stage")?;
 
         Ok(Some(GroupFull {
             id: row.id,
@@ -290,9 +319,9 @@ impl ProposalStore {
             .map(|r| {
                 let evidence_refs: Vec<String> =
                     serde_json::from_value(r.evidence_refs).context("deserialize evidence_refs")?;
-                // votes 表 vote 字段存 "approve"/"reject"/"abstain"，与 VoteChoice serde 对齐
-                let vote: VoteChoice = serde_json::from_value(serde_json::Value::String(r.vote))
-                    .unwrap_or(VoteChoice::Reject);
+                // votes 表 vote 字段存 "approve"/"reject"/"abstain"；脏值必须显式 fail-fast。
+                let vote = parse_vote_str(&r.vote)
+                    .with_context(|| format!("deserialize vote for soul={}", r.soul))?;
                 Ok(GroupVote {
                     soul: r.soul,
                     role: r.role,
@@ -303,6 +332,33 @@ impl ProposalStore {
                 })
             })
             .collect()
+    }
+
+    async fn get_group_proposal_ids(&self, group_id: Uuid) -> Result<Vec<Uuid>> {
+        sqlx::query_scalar::<_, Uuid>(
+            "SELECT proposal_id \
+             FROM action_evolution_group_proposals \
+             WHERE proposal_group_id = $1 \
+             ORDER BY created_at ASC, proposal_id ASC",
+        )
+        .bind(group_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("query group proposal ids")
+    }
+
+    async fn get_group_proposal_count(&self, group_id: Uuid) -> Result<usize> {
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) \
+             FROM action_evolution_group_proposals \
+             WHERE proposal_group_id = $1",
+        )
+        .bind(group_id)
+        .fetch_one(&self.pool)
+        .await
+        .context("count group proposals")?;
+
+        usize::try_from(count).context("proposal count overflow")
     }
 
     pub async fn get_proposal(&self, proposal_id: Uuid) -> Result<Option<ProposalEvidence>> {
@@ -389,7 +445,7 @@ impl ProposalStore {
              SET status = 'closed_rejected', final_decision = 'timeout', stage = 'done', updated_at = NOW() \
              WHERE status IN ('pending_review', 'under_review') \
              AND stage = 'awaiting_fuxi_initial' \
-             AND created_at < NOW() - make_interval(secs => $1)",
+             AND updated_at < NOW() - make_interval(secs => $1)",
         )
         .bind(timeout_i64)
         .execute(&self.pool)

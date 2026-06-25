@@ -9,6 +9,8 @@
 #     rate_limit_ms: 消息发送速率限制（毫秒），防止客户端刷屏
 #     cleanup_interval_secs: 清理断开连接的间隔（秒）
 #     cleanup_threshold: 触发清理的连接数阈值
+#   device_register:
+#     rate_limit_secs: 同一 IP 设备注册最小间隔（秒）
 #   dialogue:
 #     window_seconds: 对话窗口时间（秒），用于对话上下文
 #     max_messages_per_agent: 每个 Agent 最大消息数，超出后移除最早消息
@@ -44,6 +46,11 @@ data:
     max_missed_pongs: 3
     # 日志消息预览截断长度（字节）
     log_preview_length: 50
+
+  # 设备显式注册限流
+  device_register:
+    # 同一 IP 最短 10 秒可注册一次，防止匿名刷库
+    rate_limit_secs: 10
 
   # 对话系统配置
   dialogue:

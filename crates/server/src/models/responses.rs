@@ -14,6 +14,16 @@ pub use protocol::GameRules;
 ///
 /// GET /health 接口的响应数据
 #[derive(Debug, Serialize, Deserialize)]
+pub struct DbHealthStatus {
+    pub current_query_ok: bool,
+    pub probe_available: bool,
+    pub last_probe_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_failure_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_recovery_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct HealthResponse {
     /// 服务状态（"ok"表示正常）
     pub status: String,
@@ -23,6 +33,9 @@ pub struct HealthResponse {
 
     /// Tick周期（秒）
     pub tick_duration_secs: u64,
+
+    /// 数据库运行期健康详情
+    pub db: DbHealthStatus,
 }
 
 // ============================================================================
@@ -124,11 +137,60 @@ pub struct AgentRegisterRequest {
     // === 当前目标 ===
     #[serde(default)]
     pub goals: GoalsRequest,
+}
 
-    // === 系统提示词（自动生成或自定义） ===
-    /// 自定义系统提示词（可选，如不提供则自动生成）
-    #[serde(default)]
-    pub system_prompt: Option<String>,
+impl AgentRegisterRequest {
+    /// 自动生成系统提示词
+    pub fn generate_system_prompt(&self) -> String {
+        let mut parts = vec![];
+
+        // 基本信息
+        parts.push(format!(
+            "你是{}，一位{}岁的{}。",
+            self.name, self.age, self.gender
+        ));
+
+        // 外貌
+        if let Some(ref appearance) = self.appearance {
+            parts.push(format!("外貌：{}。", appearance));
+        }
+
+        // 身份
+        if let Some(ref identity) = self.identity {
+            parts.push(format!("身份：{}。", identity));
+        }
+
+        // 性格
+        if !self.personality.is_empty() {
+            parts.push(format!("性格：{}。", self.personality.join("、")));
+        }
+
+        // 价值观
+        if !self.values.is_empty() {
+            parts.push(format!("核心价值观：{}。", self.values.join("；")));
+        }
+
+        // 语言风格
+        if let Some(ref tone) = self.language_style.tone {
+            parts.push(format!("说话风格{}。", tone));
+        }
+        if !self.language_style.speech_patterns.is_empty() {
+            parts.push(format!(
+                "语言特点：{}。",
+                self.language_style.speech_patterns.join("，")
+            ));
+        }
+
+        // 目标
+        if let Some(ref short_term) = self.goals.short_term {
+            parts.push(format!("当前目标：{}。", short_term));
+        }
+        if let Some(ref long_term) = self.goals.long_term {
+            parts.push(format!("终极目标：{}。", long_term));
+        }
+
+        parts.join(" ")
+    }
 }
 
 fn default_age() -> u8 {
@@ -180,6 +242,9 @@ pub struct AgentRegisterResponse {
     /// 叙事化配置 SHA256 hash（用于 agent 端 skip-optimization）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub narrative_config_hash: Option<String>,
+
+    /// 服务端最终落库的人设提示词
+    pub system_prompt: String,
 
     /// 初始属性（先天属性，用于 Agent 端存储 birth_attributes）
     #[serde(default)]

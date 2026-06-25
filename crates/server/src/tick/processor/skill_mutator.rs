@@ -100,9 +100,9 @@ impl StateMutator for SkillMutator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::DbPool;
     use crate::game_data::init_test_registry;
     use crate::models::AgentState;
+    use sqlx::Connection;
     use uuid::Uuid;
 
     fn make_test_agent(agent_id: Uuid) -> AgentState {
@@ -115,14 +115,21 @@ mod tests {
         state
     }
 
+    async fn test_connection() -> sqlx::PgConnection {
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://postgres@localhost/postgres".to_string());
+        sqlx::PgConnection::connect(&database_url).await.unwrap()
+    }
+
     #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
     async fn test_skill_mutator_learn() {
         let mutator = SkillMutator;
         let agent_id = Uuid::new_v4();
         let mut states = vec![make_test_agent(agent_id)];
         let mut events = vec![];
-        let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
-        let mut ctx = MutationContext::new(&db_pool, 1, None, &mut events);
+        let mut conn = test_connection().await;
+        let mut ctx = MutationContext::new(&mut conn, 1, None, &mut events);
 
         let change = StateChange::SkillLearned {
             agent_id,
@@ -139,14 +146,15 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
     async fn test_skill_mutator_idempotent() {
         let mutator = SkillMutator;
         let agent_id = Uuid::new_v4();
         let mut states = vec![make_test_agent(agent_id)];
         states[0].skills.push("social/trust-reading".to_string());
         let mut events = vec![];
-        let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
-        let mut ctx = MutationContext::new(&db_pool, 1, None, &mut events);
+        let mut conn = test_connection().await;
+        let mut ctx = MutationContext::new(&mut conn, 1, None, &mut events);
 
         let change = StateChange::SkillLearned {
             agent_id,
@@ -159,14 +167,15 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
     async fn test_skill_mutator_wrong_agent() {
         let mutator = SkillMutator;
         let agent_id = Uuid::new_v4();
         let other_id = Uuid::new_v4();
         let mut states = vec![make_test_agent(agent_id)];
         let mut events = vec![];
-        let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
-        let mut ctx = MutationContext::new(&db_pool, 1, None, &mut events);
+        let mut conn = test_connection().await;
+        let mut ctx = MutationContext::new(&mut conn, 1, None, &mut events);
 
         let change = StateChange::SkillLearned {
             agent_id: other_id,

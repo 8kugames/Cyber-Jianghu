@@ -95,7 +95,9 @@ impl AgentState {
             // 因为属性可能已通过其他途径（如吃/喝耗尽）触发了死亡条件
             if self.status.check_death_condition(&attr_name) {
                 self.is_alive = false;
-                let _ = self.status.set("hp", 0);
+                if let Err(e) = self.status.set("hp", 0) {
+                    tracing::warn!("death 触发：status.set(\"hp\", 0) 失败（is_alive 已设为 false 但状态未持久化）：{e:?}");
+                }
                 tracing::warn!(
                     "Agent {} 因 {} 归零而死亡 (Tick: {})",
                     self.agent_id,
@@ -124,7 +126,10 @@ impl AgentState {
 
             let base_recovery = match engine.evaluate_int(&formula, &i64_context) {
                 Ok(v) => v,
-                Err(_) => continue,
+                Err(e) => {
+                    tracing::warn!("state_mutation loop: 处理项失败（best-effort 跳过本轮）：{e:?}");
+                    continue;
+                }
             };
 
             if base_recovery > 0 {

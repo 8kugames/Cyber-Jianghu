@@ -7,14 +7,13 @@ use async_trait::async_trait;
 use uuid::Uuid;
 
 use crate::actions::StateChange;
-use crate::db::DbPool;
 use crate::models::{AgentState, WorldEvent};
 
 /// 变更上下文，包含执行状态变更所需的全部依赖
 #[allow(dead_code)]
 pub struct MutationContext<'a> {
-    /// 数据库连接池
-    pub db_pool: &'a DbPool,
+    /// 数据库执行器 (Transaction or Pool)
+    pub db_executor: &'a mut sqlx::PgConnection,
     /// 当前 Tick ID
     pub tick_id: i64,
     /// 触发此变更的 Intent ID
@@ -26,13 +25,13 @@ pub struct MutationContext<'a> {
 impl<'a> MutationContext<'a> {
     /// 创建新的变更上下文
     pub fn new(
-        db_pool: &'a DbPool,
+        db_executor: &'a mut sqlx::PgConnection,
         tick_id: i64,
         intent_id: Option<Uuid>,
         events: &'a mut Vec<(Uuid, WorldEvent)>,
     ) -> Self {
         Self {
-            db_pool,
+            db_executor,
             tick_id,
             intent_id,
             events,
@@ -200,17 +199,26 @@ impl StateMutator for LocationMutator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::Connection;
+
+    async fn test_connection() -> sqlx::PgConnection {
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://postgres@localhost/postgres".to_string());
+        sqlx::PgConnection::connect(&database_url).await.unwrap()
+    }
 
     #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
     async fn test_mutation_context() {
-        let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
         let mut events = vec![];
-        let ctx = MutationContext::new(&db_pool, 1, None, &mut events);
+        let mut conn = test_connection().await;
+        let ctx = MutationContext::new(&mut conn, 1, None, &mut events);
 
         assert_eq!(ctx.tick_id, 1);
     }
 
     #[tokio::test]
+    #[ignore = "requires PostgreSQL"]
     async fn test_location_mutator() {
         use crate::game_data::init_test_registry;
         use crate::models::AgentState;
@@ -223,8 +231,8 @@ mod tests {
         state.is_alive = true;
         let mut states = vec![state];
         let mut events = vec![];
-        let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
-        let mut ctx = MutationContext::new(&db_pool, 1, None, &mut events);
+        let mut conn = test_connection().await;
+        let mut ctx = MutationContext::new(&mut conn, 1, None, &mut events);
 
         let change = StateChange::LocationChanged {
             agent_id,
