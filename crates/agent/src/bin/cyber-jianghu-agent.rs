@@ -1247,7 +1247,9 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     api_state_clone
                         .rebirth_delay_ticks
                         .store(*rebirth_delay_ticks, std::sync::atomic::Ordering::Relaxed);
-                    let _ = death_tx_clone.send(msg);
+                    if let Err(e) = death_tx_clone.send(msg) {
+                        tracing::warn!("death_tx.send 失败（receiver 可能已 drop）：{e:?}");
+                    }
                 }
             }))
             .await;
@@ -1299,9 +1301,9 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     let current_tick = 0;
                     if let Some(downstream) =
                         DownstreamMessage::from_server_message(msg, current_tick)
-                    {
-                        let _ = tx_clone.send(downstream);
-                    }
+                        && let Err(e) = tx_clone.send(downstream) {
+                            tracing::warn!("downstream tx.send 失败（receiver 可能已 drop）：{e:?}");
+                        }
                 }))
                 .await;
         }
@@ -1316,7 +1318,9 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     tokio::spawn(async move {
         let _ = tokio::signal::ctrl_c().await;
         info!("收到 Ctrl+C 信号");
-        let _ = shutdown_tx_clone.send(()).await;
+        if let Err(e) = shutdown_tx_clone.send(()).await {
+            tracing::warn!("shutdown_tx.send（Ctrl+C）失败（receiver 可能已 drop）：{e:?}");
+        }
     });
 
     #[cfg(unix)]
@@ -1328,7 +1332,9 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
             sigterm.recv().await;
             info!("收到 SIGTERM 信号");
-            let _ = shutdown_tx_clone.send(()).await;
+            if let Err(e) = shutdown_tx_clone.send(()).await {
+                tracing::warn!("shutdown_tx.send（SIGTERM）失败（receiver 可能已 drop）：{e:?}");
+            }
         });
     }
 
