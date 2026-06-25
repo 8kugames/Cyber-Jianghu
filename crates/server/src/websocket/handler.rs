@@ -14,7 +14,7 @@ use axum::{
     body::Bytes,
     extract::{
         Query, State,
-        ws::{Message, WebSocket, WebSocketUpgrade},
+        ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
     },
     response::Response,
 };
@@ -43,6 +43,17 @@ use super::types::{WebSocketQuery, build_game_rules_from_config, load_world_buil
 // ============================================================================
 // WebSocket 升级处理
 // ============================================================================
+
+fn rebind_device_agent(
+    agent_to_device: &mut std::collections::HashMap<uuid::Uuid, uuid::Uuid>,
+    agent_id: uuid::Uuid,
+    device_id: uuid::Uuid,
+) {
+    agent_to_device.retain(|existing_agent_id, existing_device_id| {
+        *existing_device_id != device_id || *existing_agent_id == agent_id
+    });
+    agent_to_device.insert(agent_id, device_id);
+}
 
 /// WebSocket 升级处理器
 ///
@@ -140,7 +151,9 @@ pub async fn websocket_handler(
     );
 
     // 升级到 WebSocket
-    ws.on_upgrade(move |socket| {
+    ws.max_message_size(1024 * 1024) // 1MB limit
+        .max_frame_size(1024 * 1024)
+        .on_upgrade(move |socket| {
         handle_websocket(socket, agent_id, query.device_id, agent_name, state)
     })
 }
@@ -214,7 +227,7 @@ async fn handle_websocket(
     // 重要：WebSocket 重连时需要更新映射，因为 agent_register 只在首次注册时调用
     if agent_id != uuid::Uuid::nil() {
         let mut agent_to_device = state.agent_to_device_map.write().await;
-        agent_to_device.insert(agent_id, device_id);
+        rebind_device_agent(&mut agent_to_device, agent_id, device_id);
         info!(
             "Updated agent_to_device_map on WebSocket connect: {} → {}",
             agent_id, device_id
@@ -526,64 +539,49 @@ async fn handle_websocket(
                     );
                 }
 
-                // 加载初始背包物品
-                let initial_inventory =
-                    match InventoryManager::get_all_items(&state.db_pool, agent_id).await {
-                        Ok(items) => items
-                            .into_iter()
-                            .map(|item| {
-                                let config = ItemRegistry::get(&item.item_id);
-                                let name = config
-                                    .as_ref()
-                                    .map(|c| c.name.clone())
-                                    .unwrap_or_else(|| item.item_id.clone());
-                                let item_type = config
-                                    .as_ref()
-                                    .map(|c| c.item_type.clone())
-                                    .unwrap_or_default();
-                                crate::models::InventoryItem {
-                                    item_id: item.item_id,
-                                    name,
-                                    quantity: item.quantity,
-                                    is_equipped: item.is_equipped,
-                                    item_type,
-                                }
-                            })
-                            .collect(),
-                        Err(e) => {
-                            warn!("加载 Agent {} 初始背包失败: {}", agent_id, e);
-                            vec![]
-                        }
-                    };
+                // 加载初始背包物品：失败时直接关闭连接，不构造假 WorldState
+                let initial_inventory = match load_initial_inventory(
+                    &state.db_pool,
+                    agent_id,
+                )
+                .await
+                {
+                    Ok(items) => items,
+                    Err(e) => {
+                        error!(
+                            "加载 Agent {} 初始背包失败，关闭 WebSocket: {:#}",
+                            agent_id, e
+                        );
+                        let _ = tx
+                            .send(Message::Close(Some(CloseFrame {
+                                code: 1011,
+                                reason: axum::extract::ws::Utf8Bytes::from_static(
+                                    "initial_inventory_load_failed",
+                                ),
+                            })))
+                            .await;
+                        return;
+                    }
+                };
 
                 // 加载当前节点地面物品
                 let nearby_items =
-                    match crate::db::get_ground_items_by_node(&state.db_pool, &agent_state.node_id)
-                        .await
-                    {
-                        Ok(items) => items
-                            .into_iter()
-                            .map(|gi| {
-                                let config = ItemRegistry::get(&gi.item_id);
-                                let name = config
-                                    .as_ref()
-                                    .map(|c| c.name.clone())
-                                    .unwrap_or_else(|| gi.item_id.clone());
-                                let item_type = config
-                                    .as_ref()
-                                    .map(|c| c.item_type.clone())
-                                    .unwrap_or_default();
-                                cyber_jianghu_protocol::SceneItem {
-                                    item_id: gi.item_id,
-                                    name,
-                                    quantity: gi.quantity,
-                                    item_type,
-                                }
-                            })
-                            .collect(),
+                    match load_nearby_ground_items(&state.db_pool, &agent_state.node_id).await {
+                        Ok(items) => items,
                         Err(e) => {
-                            warn!("加载 Agent {} 地面物品失败: {}", agent_id, e);
-                            vec![]
+                            error!(
+                                "加载 Agent {} 节点地面物品失败，关闭 WebSocket: {:#}",
+                                agent_id, e
+                            );
+                            let _ = tx
+                                .send(Message::Close(Some(CloseFrame {
+                                    code: 1011,
+                                    reason: axum::extract::ws::Utf8Bytes::from_static(
+                                        "nearby_ground_items_load_failed",
+                                    ),
+                                })))
+                                .await;
+                            return;
                         }
                     };
 
@@ -744,9 +742,10 @@ async fn handle_websocket(
                                         message,
                                         current_tick_id,
                                     };
-                                    if let Ok(json) = serde_json::to_string(&error_msg) {
-                                        let _ = tx.send(Message::Text(json.into())).await;
-                                    }
+                                    if let Ok(json) = serde_json::to_string(&error_msg)
+                                        && let Err(e) = tx.send(Message::Text(json.into())).await {
+                                            tracing::warn!("ws error_msg.send 失败（receiver 可能已 drop）：{e:?}");
+                                        }
                                 }
                             }
                             Err(e) => {
@@ -762,16 +761,19 @@ async fn handle_websocket(
                                     message: format!("Invalid message format: {}", e),
                                     current_tick_id: None,
                                 };
-                                if let Ok(json) = serde_json::to_string(&error_msg) {
-                                    let _ = tx.send(Message::Text(json.into())).await;
-                                }
+                                if let Ok(json) = serde_json::to_string(&error_msg)
+                                    && let Err(e) = tx.send(Message::Text(json.into())).await {
+                                        tracing::warn!("ws error_msg.send（site 2）失败（receiver 可能已 drop）：{e:?}");
+                                    }
                             }
                         }
                     }
                     Message::Ping(data) => {
                         debug!("Received Ping from agent '{}'", agent_name_for_recv);
                         // 回复 Pong
-                        let _ = tx.send(Message::Pong(data)).await;
+                        if let Err(e) = tx.send(Message::Pong(data)).await {
+                            tracing::warn!("ws Pong.send 失败（receiver 可能已 drop）：{e:?}");
+                        }
                     }
                     Message::Pong(_) => {
                         pings_without_pong_for_recv.store(0, Ordering::Relaxed);
@@ -1406,9 +1408,10 @@ async fn handle_dialogue_message(
             };
             if let Some(device_id) = device_id {
                 let connections = state.connection_manager.read().await;
-                if let Some(connection) = connections.get(&device_id) {
-                    let _ = connection.send(Message::Text(json.into())).await;
-                }
+                if let Some(connection) = connections.get(&device_id)
+                    && let Err(e) = connection.send(Message::Text(json.into())).await {
+                        tracing::warn!("ws connection.send（broadcast）失败（receiver 可能已 drop）：{e:?}");
+                    }
             }
         }
     }
@@ -1538,4 +1541,130 @@ async fn handle_daily_summary(
     );
 
     Ok(())
+}
+
+/// 加载并规范化 Agent 初始背包物品。
+///
+/// 之前在 DB 失败时静默回退为 `vec![]`，会让 Agent 在"空背包"假状态下决策。
+/// 现改为：任何错误（DB 抖动、列漂移、Schema 异常）必须显式返回 Err，
+/// 由 caller 决定是否关闭连接。
+pub(crate) async fn load_initial_inventory(
+    db_pool: &sqlx::PgPool,
+    agent_id: uuid::Uuid,
+) -> anyhow::Result<Vec<crate::models::InventoryItem>> {
+    let raw_items = InventoryManager::get_all_items(db_pool, agent_id)
+        .await
+        .context("query agent inventory")?;
+    Ok(raw_items
+        .into_iter()
+        .map(|item| {
+            let config = ItemRegistry::get(&item.item_id);
+            let name = config
+                .as_ref()
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| item.item_id.clone());
+            let item_type = config
+                .as_ref()
+                .map(|c| c.item_type.clone())
+                .unwrap_or_default();
+            crate::models::InventoryItem {
+                item_id: item.item_id,
+                name,
+                quantity: item.quantity,
+                is_equipped: item.is_equipped,
+                item_type,
+            }
+        })
+        .collect())
+}
+
+/// 加载并规范化当前节点地面物品。
+pub(crate) async fn load_nearby_ground_items(
+    db_pool: &sqlx::PgPool,
+    node_id: &str,
+) -> anyhow::Result<Vec<cyber_jianghu_protocol::SceneItem>> {
+    let raw_items = crate::db::get_ground_items_by_node(db_pool, node_id)
+        .await
+        .context("query ground items")?;
+    Ok(raw_items
+        .into_iter()
+        .map(|gi| {
+            let config = ItemRegistry::get(&gi.item_id);
+            let name = config
+                .as_ref()
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| gi.item_id.clone());
+            let item_type = config
+                .as_ref()
+                .map(|c| c.item_type.clone())
+                .unwrap_or_default();
+            cyber_jianghu_protocol::SceneItem {
+                item_id: gi.item_id,
+                name,
+                quantity: gi.quantity,
+                item_type,
+            }
+        })
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rebind_device_agent;
+    use std::collections::HashMap;
+    use uuid::Uuid;
+
+    #[test]
+    fn test_rebind_device_agent_removes_stale_agents_for_same_device() {
+        let device_id = Uuid::new_v4();
+        let stale_agent = Uuid::new_v4();
+        let current_agent = Uuid::new_v4();
+        let other_device = Uuid::new_v4();
+        let unrelated_agent = Uuid::new_v4();
+        let mut map = HashMap::from([
+            (stale_agent, device_id),
+            (unrelated_agent, other_device),
+        ]);
+
+        rebind_device_agent(&mut map, current_agent, device_id);
+
+        assert_eq!(map.get(&current_agent), Some(&device_id));
+        assert!(!map.contains_key(&stale_agent));
+        assert_eq!(map.get(&unrelated_agent), Some(&other_device));
+    }
+
+    /// 验证 P1-7：初始背包加载失败时，helper 显式返回 Err，
+    /// 不再向 caller 静默返回空 Vec。
+    /// 真实 DB 抖动由 caller 决定是否关闭 WebSocket。
+    #[tokio::test]
+    async fn test_load_initial_inventory_propagates_db_error() {
+        // 构造一个连接到无效地址的 PgPool —— 任何 query 都会失败
+        let pool: sqlx::PgPool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_millis(50))
+            .connect_lazy("postgres://invalid:invalid@127.0.0.1:1/nonexistent")
+            .expect("lazy pool init should not connect");
+
+        let result = super::load_initial_inventory(&pool, Uuid::new_v4()).await;
+        assert!(
+            result.is_err(),
+            "load_initial_inventory must not silently fall back to empty Vec on DB error"
+        );
+    }
+
+    /// 验证 P1-7：地面物品加载失败也必须显式 Err。
+    #[tokio::test]
+    async fn test_load_nearby_ground_items_propagates_db_error() {
+        let pool: sqlx::PgPool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_millis(50))
+            .connect_lazy("postgres://invalid:invalid@127.0.0.1:1/nonexistent")
+            .expect("lazy pool init should not connect");
+
+        let result = super::load_nearby_ground_items(&pool, "some-node").await;
+        assert!(
+            result.is_err(),
+            "load_nearby_ground_items must not silently fall back to empty Vec on DB error"
+        );
+    }
 }

@@ -19,98 +19,87 @@ fn mask_token(token: &str) -> String {
     }
 }
 
-/// 从 URI 查询参数中提取 token
-fn extract_token_from_uri(uri: &axum::http::Uri) -> Option<String> {
-    uri.query()
-        .and_then(|query| {
-            query
-                .split('&')
-                .find(|pair| pair.starts_with("token="))
-                .and_then(|pair| pair.strip_prefix("token="))
-        })
-        .map(|s| s.to_string())
+/// 严格鉴权：仅接受 `Authorization: Bearer <token>` Header。
+///
+/// 之前的实现会接受 `?token=...` URL 参数，导致 token 写入浏览器历史、
+/// nginx access log、代理日志、上游 CDN 缓存等可观察位置，属于主动泄露。
+/// 现彻底移除 query 路径，无论 URL 是否带 token，都必须走 Header。
+pub(crate) fn authenticate_admin_token(
+    headers: &axum::http::HeaderMap,
+    expected_read: &str,
+    expected_write: &str,
+    require_write: bool,
+) -> bool {
+    let Some(auth_header) = headers.get(header::AUTHORIZATION) else {
+        return false;
+    };
+    let Ok(auth_str) = auth_header.to_str() else {
+        return false;
+    };
+    let Some(token) = auth_str.strip_prefix("Bearer ") else {
+        return false;
+    };
+    check_token_value(token, expected_read, expected_write, require_write)
 }
 
 /// 验证读权限 (R)
 ///
-/// 允许 R 或 RW Token
+/// 允许 R 或 RW Token；只接受 Authorization Header。
 pub async fn require_read_token(
     State(state): State<Arc<AppState>>,
     req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let query_token = extract_token_from_uri(req.uri());
-
     info!(
-        "require_read_token called: token={}, uri={}",
-        query_token
-            .as_ref()
-            .map(|t| mask_token(t))
-            .unwrap_or_default(),
+        "require_read_token called: uri={}",
         req.uri()
     );
 
-    if check_token(&state, &req, &query_token, false) {
+    if authenticate_admin_token(
+        req.headers(),
+        &state.admin_read_token,
+        &state.admin_write_token,
+        false,
+    ) {
         Ok(next.run(req).await)
     } else {
-        warn!("Read access denied: Invalid token");
+        warn!("Read access denied: Invalid or missing Bearer token");
         Err(StatusCode::UNAUTHORIZED)
     }
 }
 
 /// 验证读写权限 (RW)
 ///
-/// 仅允许 RW Token
+/// 仅允许 RW Token；只接受 Authorization Header。
 pub async fn require_write_token(
     State(state): State<Arc<AppState>>,
     req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let query_token = extract_token_from_uri(req.uri());
-
     info!(
-        "require_write_token called: token={}, uri={}",
-        query_token
-            .as_ref()
-            .map(|t| mask_token(t))
-            .unwrap_or_default(),
+        "require_write_token called: uri={}",
         req.uri()
     );
 
-    if check_token(&state, &req, &query_token, true) {
+    if authenticate_admin_token(
+        req.headers(),
+        &state.admin_read_token,
+        &state.admin_write_token,
+        true,
+    ) {
         Ok(next.run(req).await)
     } else {
-        warn!("Write access denied: Invalid token");
+        warn!("Write access denied: Invalid or missing Bearer token");
         Err(StatusCode::UNAUTHORIZED)
     }
 }
 
-fn check_token(
-    state: &AppState,
-    req: &Request,
-    query_token: &Option<String>,
+fn check_token_value(
+    token: &str,
+    expected_read: &str,
+    expected_write: &str,
     require_write: bool,
 ) -> bool {
-    // 1. 检查 Query Param
-    if let Some(token) = query_token
-        && check_token_value(state, token, require_write)
-    {
-        return true;
-    }
-
-    // 2. 检查 Header (Authorization: Bearer <token>)
-    if let Some(auth_header) = req.headers().get(header::AUTHORIZATION)
-        && let Ok(auth_str) = auth_header.to_str()
-        && let Some(token) = auth_str.strip_prefix("Bearer ")
-        && check_token_value(state, token, require_write)
-    {
-        return true;
-    }
-
-    false
-}
-
-fn check_token_value(state: &AppState, token: &str, require_write: bool) -> bool {
     info!(
         "Checking token: provided={}, require_write={}",
         mask_token(token),
@@ -118,13 +107,13 @@ fn check_token_value(state: &AppState, token: &str, require_write: bool) -> bool
     );
 
     // RW Token 拥有所有权限
-    if token == state.admin_write_token {
+    if token == expected_write {
         info!("Token authenticated as WRITE token");
         return true;
     }
 
     // 如果不需要写权限，R Token 也可以
-    if !require_write && token == state.admin_read_token {
+    if !require_write && token == expected_read {
         info!("Token authenticated as READ token");
         return true;
     }
@@ -174,5 +163,75 @@ pub async fn require_device_token(
             warn!("Device auth error: {}", e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::authenticate_admin_token;
+    use axum::http::{HeaderMap, HeaderValue, header};
+
+    const READ_TOKEN: &str = "r-token-aaaaaaaaaaaaaaaa";
+    const WRITE_TOKEN: &str = "w-token-bbbbbbbbbbbbbbbb";
+
+    fn headers_with_bearer(token: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+        h
+    }
+
+    /// 验证 P1-20：合法 Bearer Header 必须能过 RW 鉴权。
+    #[test]
+    fn test_authenticate_admin_token_accepts_bearer_header() {
+        let h = headers_with_bearer(WRITE_TOKEN);
+        assert!(authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, true));
+        assert!(authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, false));
+    }
+
+    /// 验证 P1-20：读权限允许 R 或 RW。
+    #[test]
+    fn test_authenticate_admin_token_read_accepts_read_or_write() {
+        let h_read = headers_with_bearer(READ_TOKEN);
+        let h_write = headers_with_bearer(WRITE_TOKEN);
+        assert!(authenticate_admin_token(&h_read, READ_TOKEN, WRITE_TOKEN, false));
+        assert!(authenticate_admin_token(&h_write, READ_TOKEN, WRITE_TOKEN, false));
+    }
+
+    /// 验证 P1-20：写权限只允许 RW；R Token 必须被拒。
+    #[test]
+    fn test_authenticate_admin_token_write_rejects_read_token() {
+        let h_read = headers_with_bearer(READ_TOKEN);
+        assert!(!authenticate_admin_token(&h_read, READ_TOKEN, WRITE_TOKEN, true));
+    }
+
+    /// 验证 P1-20：缺 Header 直接拒绝。
+    /// 即便 URL 拼了 `?token=...`，也不会被接受 —— 这是 P1-20 修复的核心契约。
+    #[test]
+    fn test_authenticate_admin_token_rejects_missing_header() {
+        let h = HeaderMap::new();
+        assert!(!authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, false));
+        assert!(!authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, true));
+    }
+
+    /// 验证 P1-20：错值 Header 必须被拒。
+    #[test]
+    fn test_authenticate_admin_token_rejects_invalid_value() {
+        let h = headers_with_bearer("not-a-token");
+        assert!(!authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, false));
+        assert!(!authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, true));
+    }
+
+    /// 验证 P1-20：非 Bearer 前缀必须被拒。
+    #[test]
+    fn test_authenticate_admin_token_rejects_non_bearer_scheme() {
+        let mut h = HeaderMap::new();
+        h.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Basic dXNlcjpwYXNz"),
+        );
+        assert!(!authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, false));
     }
 }

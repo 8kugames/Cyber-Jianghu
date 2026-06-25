@@ -1,7 +1,7 @@
 use anyhow::Result;
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{ConnectInfo, Path, State},
     http::StatusCode,
 };
 use sha2::Digest;
@@ -33,8 +33,9 @@ use crate::state::AppState;
 ///    - 分配默认初始物品
 /// 4. 构建并返回游戏规则
 ///
-/// 注意：根据架构原则，服务器只负责世界状态和规则。
-/// Agent人设Prompt应由客户端（Agent SDK）提供，服务器仅存储。
+/// 注意（P0-15 修复）：system_prompt 由服务器根据 payload 字段统一生成
+/// （`payload.generate_system_prompt()`），而非直接接受客户端提交的 prompt 字符串。
+/// 这是从协议层根治 prompt injection——客户端无法注入"忽略所有指令"等覆盖性内容。
 pub async fn agent_register(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<AgentRegisterRequest>,
@@ -63,16 +64,13 @@ pub async fn agent_register(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // 3. 获取并验证 system_prompt（必需）
-    let system_prompt = payload.system_prompt.ok_or_else(|| {
-        error!("Missing required field: system_prompt");
-        StatusCode::BAD_REQUEST
-    })?;
+    // 3. 强制由服务端统一生成 system_prompt，防御客户端注入
+    let system_prompt = payload.generate_system_prompt();
 
-    // 验证 system_prompt 长度，防止滥用
+    // 验证 system_prompt 长度，防止构造过长的属性导致截断或攻击
     if system_prompt.is_empty() || system_prompt.len() > get_max_system_prompt_length() {
         error!(
-            "Invalid system_prompt length: {} bytes",
+            "Generated system_prompt length exceeds limit: {} bytes",
             system_prompt.len()
         );
         return Err(StatusCode::BAD_REQUEST);
@@ -251,6 +249,7 @@ pub async fn agent_register(
         game_rules,
         narrative_config,
         narrative_config_hash: nc_hash,
+        system_prompt,
         initial_attributes,
     }))
 }
@@ -359,10 +358,6 @@ pub struct AutoRebirthRequest {
     pub auth_token: String,
     /// 旧 Agent ID（已死亡的角色）
     pub old_agent_id: uuid::Uuid,
-    /// 角色名称
-    pub name: String,
-    /// 系统提示词
-    pub system_prompt: String,
 }
 
 /// 自动重生响应（转世）
@@ -375,6 +370,7 @@ pub struct AutoRebirthResponse {
     /// 旧 Agent ID（已 retired）
     pub old_agent_id: String,
     pub spawn_location: String,
+    pub system_prompt: String,
 }
 
 /// Agent 自动重生接口（转世）
@@ -395,6 +391,21 @@ pub async fn agent_auto_rebirth(
         payload.old_agent_id, payload.device_id
     );
 
+    // P1-10 F1：前置拦截 nil UUID
+    if let Err(e) = db::ensure_old_agent_id_not_nil(payload.old_agent_id) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(AutoRebirthResponse {
+                success: false,
+                message: e.to_string(),
+                new_agent_id: String::new(),
+                old_agent_id: payload.old_agent_id.to_string(),
+                spawn_location: String::new(),
+                system_prompt: String::new(),
+            }),
+        ));
+    }
+
     // 验证设备认证
     let valid = verify_device_token(&state.db_pool, payload.device_id, &payload.auth_token)
         .await
@@ -408,6 +419,7 @@ pub async fn agent_auto_rebirth(
                     new_agent_id: String::new(),
                     old_agent_id: payload.old_agent_id.to_string(),
                     spawn_location: String::new(),
+                    system_prompt: String::new(),
                 }),
             )
         })?;
@@ -421,6 +433,7 @@ pub async fn agent_auto_rebirth(
                 new_agent_id: String::new(),
                 old_agent_id: payload.old_agent_id.to_string(),
                 spawn_location: String::new(),
+                system_prompt: String::new(),
             }),
         ));
     }
@@ -470,14 +483,34 @@ pub async fn agent_auto_rebirth(
         })
         .unwrap_or(true);
 
+    // P1-5 修复：从内存原子变量取当前世界 tick；未启动 scheduler 时回退到 DB。
+    // 之前 auto_rebirth_agent 内部用 `MAX(agent_states.tick_id) WHERE agent_id = old + 1`
+    // 会在"死亡到重生之间世界已推进 N tick"时让新角色 state 落后世界 N tick。
+    let world_tick = {
+        let live = state
+            .current_accepting_tick_id
+            .load(std::sync::atomic::Ordering::Acquire);
+        if live > 0 {
+            live
+        } else {
+            db::get_current_world_tick_id(&state.db_pool)
+                .await
+                .unwrap_or(0)
+        }
+    };
+
     // 执行转世重生（单事务）
     let result = db::auto_rebirth_agent(
         &state.db_pool,
         payload.old_agent_id,
-        &spawn_location,
-        &initial_items_data,
-        starting_age_ticks,
-        reset_recipes,
+        payload.device_id, // P1-10 F2：传入 caller device_id，DB 层强制归属校验
+        db::AutoRebirthParams {
+            spawn_location: &spawn_location,
+            initial_items: &initial_items_data,
+            starting_age_ticks,
+            reset_recipes,
+            world_tick,
+        },
     )
     .await
     .map_err(|e| {
@@ -493,26 +526,14 @@ pub async fn agent_auto_rebirth(
                 new_agent_id: String::new(),
                 old_agent_id: payload.old_agent_id.to_string(),
                 spawn_location: String::new(),
+                system_prompt: String::new(),
             }),
         )
     })?;
 
-    // 更新 DashMap（内存缓存）— 移除旧 agent 缓存
-    state.agent_state_cache.remove(&payload.old_agent_id);
-    let new_state = crate::models::AgentState::new(
-        result.agent_id,
-        crate::db::get_current_world_tick_id(&state.db_pool)
-            .await
-            .unwrap_or(0),
-    );
-    state.agent_state_cache.insert(result.agent_id, new_state);
-
-    // 更新 agent_to_device_map（清理旧映射 + 建立新映射）
-    {
-        let mut map = state.agent_to_device_map.write().await;
-        map.remove(&payload.old_agent_id);
-        map.insert(result.agent_id, payload.device_id);
-    }
+    // 不在 HTTP handler 中旁路改写内存态。
+    // 新角色的 state_cache / agent_to_device_map 由 DB + WebSocket 重连路径恢复，
+    // 避免与 IntentWorker 的单写模型形成代际竞态。
 
     // 重生后重新分配初始配方
     {
@@ -551,6 +572,7 @@ pub async fn agent_auto_rebirth(
         new_agent_id: result.agent_id.to_string(),
         old_agent_id: payload.old_agent_id.to_string(),
         spawn_location: result.spawn_location,
+        system_prompt: result.system_prompt,
     }))
 }
 
@@ -574,6 +596,12 @@ pub struct GrantItem {
     pub quantity: i32,
 }
 
+#[derive(Debug, sqlx::FromRow)]
+struct AuditInventorySnapshotRow {
+    item_id: String,
+    quantity: i32,
+}
+
 /// 库存注入响应
 #[derive(Debug, serde::Serialize)]
 pub struct GrantItemsResponse {
@@ -589,8 +617,11 @@ pub struct GrantItemsResponse {
 /// 为指定 Agent 注入物品库存（用于 Vendor 补货等管理操作）。
 pub async fn agent_grant_items(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<GrantItemsRequest>,
 ) -> Result<Json<GrantItemsResponse>, (StatusCode, Json<GrantItemsResponse>)> {
+    let audit_ctx = crate::db::build_audit_request_context(&headers, addr);
     if payload.items.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -625,6 +656,22 @@ pub async fn agent_grant_items(
             ));
         }
     }
+
+    let before_state = sqlx::query_as::<_, AuditInventorySnapshotRow>(
+        "SELECT item_id, quantity FROM agent_inventory WHERE agent_id = $1 ORDER BY item_id ASC",
+    )
+    .bind(payload.agent_id)
+    .fetch_all(&state.db_pool)
+    .await
+    .ok()
+    .map(|items| {
+        serde_json::json!(
+            items
+                .into_iter()
+                .map(|item| serde_json::json!({"item_id": item.item_id, "quantity": item.quantity}))
+                .collect::<Vec<_>>()
+        )
+    });
 
     let mut granted = 0usize;
     for item in &payload.items {
@@ -697,6 +744,44 @@ pub async fn agent_grant_items(
             .entry(payload.agent_id)
             .or_default()
             .push(event);
+    }
+
+    if granted > 0
+        && let Err(e) = crate::db::insert_audit_log(
+            &state.db_pool,
+            crate::db::AuditLogEntry {
+                event_type: "agent.grant_items",
+                actor_type: "admin",
+                token_type: Some("write"),
+                resource_type: "agent_inventory",
+                resource_id: Some(payload.agent_id.to_string()),
+                endpoint: "/api/v1/agent/grant-items",
+                method: "POST",
+                result: "success",
+                reason: None,
+                payload: serde_json::json!({
+                    "agent_id": payload.agent_id,
+                    "granted_count": granted,
+                    "items": payload.items.iter().map(|item| serde_json::json!({
+                        "item_id": item.item_id,
+                        "quantity": item.quantity,
+                    })).collect::<Vec<_>>(),
+                }),
+                request_id: Some(audit_ctx.request_id),
+                ip: audit_ctx.ip,
+                user_agent: audit_ctx.user_agent,
+                before_state,
+                after_state: Some(serde_json::json!(
+                    payload.items.iter().map(|item| serde_json::json!({
+                        "item_id": item.item_id,
+                        "quantity_delta": item.quantity,
+                    })).collect::<Vec<_>>()
+                )),
+            },
+        )
+        .await
+    {
+        error!("audit_log 写入失败(agent.grant_items): {}", e);
     }
 
     Ok(Json(GrantItemsResponse {

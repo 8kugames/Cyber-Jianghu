@@ -378,7 +378,11 @@ pub(crate) async fn update_llm_config_handler(
     if let Err(e) = config.save_to_file(&state.config_path) {
         error!("[llm] 保存配置文件失败: {}", e);
         // 尝试恢复备份
-        let _ = backup.save_to_file(&state.config_path);
+        if let Err(e) = backup.save_to_file(&state.config_path) {
+            tracing::warn!(
+                "llm_config: 备份文件保存失败（旧配置保留，但已修改的新配置生效）：{e:?}"
+            );
+        }
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(LlmConfigUpdateResponse {
