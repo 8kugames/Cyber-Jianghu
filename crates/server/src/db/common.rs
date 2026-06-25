@@ -5,12 +5,56 @@
 // 本模块提供数据库连接池初始化和共享工具函数
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
+use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use rand::RngExt;
+
+#[derive(Debug, Clone, Default)]
+pub struct DbRuntimeHealth {
+    pub is_available: bool,
+    pub last_probe_at: Option<DateTime<Utc>>,
+    pub last_failure_at: Option<DateTime<Utc>>,
+    pub last_recovery_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+}
+
+pub type DbRuntimeHealthState = Arc<RwLock<DbRuntimeHealth>>;
+
+pub fn create_db_runtime_health_state() -> DbRuntimeHealthState {
+    Arc::new(RwLock::new(DbRuntimeHealth {
+        is_available: true,
+        ..DbRuntimeHealth::default()
+    }))
+}
+
+pub fn record_db_probe_result(
+    health: &mut DbRuntimeHealth,
+    current_ok: bool,
+    now: DateTime<Utc>,
+    error_message: Option<String>,
+) {
+    let was_available = health.is_available;
+    health.is_available = current_ok;
+    health.last_probe_at = Some(now);
+
+    if current_ok {
+        if !was_available {
+            health.last_recovery_at = Some(now);
+        }
+        health.last_error = None;
+    } else {
+        if was_available || health.last_failure_at.is_none() {
+            health.last_failure_at = Some(now);
+        }
+        health.last_error = error_message;
+    }
+}
 
 // ============================================================================
 // 数据库连接池初始化
@@ -19,7 +63,7 @@ use rand::RngExt;
 /// 初始化数据库连接池
 ///
 /// # 参数
-/// - database_url: PostgreSQL连接URL
+/// - database: PostgreSQL 连接池配置
 ///
 /// # 返回
 /// - Ok(PgPool): 数据库连接池
@@ -28,26 +72,32 @@ use rand::RngExt;
 /// # 示例
 /// ```rust,no_run
 /// use cyber_jianghu_server::init_db_pool;
+/// use cyber_jianghu_server::config::Config;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> anyhow::Result<()> {
-/// let pool = init_db_pool("postgres://user:pass@localhost/db", 5, 2).await?;
+/// let config = Config::default();
+/// let pool = init_db_pool(&config.database).await?;
 /// # Ok(())
 /// # }
 /// ```
-pub async fn init_db_pool(
-    database_url: &str,
-    max_retries: u32,
-    retry_delay_secs: u64,
-) -> Result<PgPool> {
+pub async fn init_db_pool(database: &crate::config::DatabaseConfig) -> Result<PgPool> {
     // 隐藏密码用于日志输出
-    let safe_url = database_url.split('@').next_back().unwrap_or("unknown");
+    let safe_url = database.url.split('@').next_back().unwrap_or("unknown");
     info!("初始化数据库连接池: {}", safe_url);
 
-    let retry_delay = Duration::from_secs(retry_delay_secs);
+    let retry_delay = Duration::from_secs(database.retry_delay_secs);
 
-    for attempt in 1..=max_retries {
-        match PgPool::connect(database_url).await {
+    for attempt in 1..=database.max_retries {
+        let options = PgPoolOptions::new()
+            .max_connections(database.max_connections)
+            .min_connections(database.min_connections)
+            .acquire_timeout(Duration::from_secs(database.acquire_timeout_secs))
+            .idle_timeout(Some(Duration::from_secs(database.idle_timeout_secs)))
+            .max_lifetime(Some(Duration::from_secs(database.max_lifetime_secs)))
+            .test_before_acquire(true);
+
+        match options.connect(&database.url).await {
             Ok(pool) => {
                 // 测试连接
                 match sqlx::query("SELECT 1").fetch_one(&pool).await {
@@ -57,12 +107,12 @@ pub async fn init_db_pool(
                     }
                     Err(e) => {
                         warn!("数据库测试查询失败: {}", e);
-                        if attempt < max_retries {
+                        if attempt < database.max_retries {
                             info!(
                                 "{} 秒后重试... ({}/{})",
                                 retry_delay.as_secs(),
                                 attempt,
-                                max_retries
+                                database.max_retries
                             );
                             tokio::time::sleep(retry_delay).await;
                         }
@@ -71,18 +121,18 @@ pub async fn init_db_pool(
             }
             Err(e) => {
                 warn!("数据库连接失败: {}", e);
-                if attempt < max_retries {
+                if attempt < database.max_retries {
                     info!(
                         "{} 秒后重试... ({}/{})",
                         retry_delay.as_secs(),
                         attempt,
-                        max_retries
+                        database.max_retries
                     );
                     tokio::time::sleep(retry_delay).await;
                 } else {
                     return Err(e).context(format!(
                         "Failed to connect to PostgreSQL after {} attempts",
-                        max_retries
+                        database.max_retries
                     ));
                 }
             }
@@ -90,6 +140,40 @@ pub async fn init_db_pool(
     }
 
     Err(anyhow::anyhow!("Failed to connect to database"))
+}
+
+/// 启动数据库运行期健康探针
+pub fn start_db_health_probe(
+    pool: PgPool,
+    health_state: DbRuntimeHealthState,
+    probe_interval: Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(probe_interval);
+
+        loop {
+            interval.tick().await;
+            let probe_result = sqlx::query("SELECT 1").execute(&pool).await;
+            let current_ok = probe_result.is_ok();
+            let error_message = probe_result.err().map(|e| e.to_string());
+            let now = Utc::now();
+
+            let mut health = health_state.write().expect("db runtime health lock poisoned");
+            let previous_ok = health.is_available;
+            record_db_probe_result(&mut health, current_ok, now, error_message.clone());
+
+            if current_ok != previous_ok {
+                if current_ok {
+                    info!("数据库运行期健康探针恢复正常");
+                } else {
+                    error!(
+                        "数据库运行期健康探针失败，连接可能已中断: {}",
+                        error_message.as_deref().unwrap_or("unknown")
+                    );
+                }
+            }
+        }
+    })
 }
 
 // ============================================================================
@@ -118,6 +202,7 @@ pub fn generate_secure_token() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{TimeZone, Utc};
 
     #[tokio::test]
     #[ignore] // 需要数据库连接，默认忽略
@@ -125,7 +210,18 @@ mod tests {
         // 使用环境变量 DATABASE_URL，便于 CI/CD 和本地测试
         let database_url =
             std::env::var("DATABASE_URL").expect("DATABASE_URL environment variable must be set");
-        let result = init_db_pool(&database_url, 5, 2).await;
+        let config = crate::config::DatabaseConfig {
+            url: database_url,
+            max_retries: 5,
+            retry_delay_secs: 2,
+            max_connections: 20,
+            min_connections: 1,
+            acquire_timeout_secs: 5,
+            idle_timeout_secs: 300,
+            max_lifetime_secs: 1800,
+            probe_interval_secs: 30,
+        };
+        let result = init_db_pool(&config).await;
         assert!(result.is_ok());
     }
 
@@ -136,5 +232,104 @@ mod tests {
         let parts: Vec<&str> = token.split('_').collect();
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[1].len(), 16);
+    }
+
+    #[test]
+    fn test_record_db_probe_failure_sets_failure_metadata() {
+        let mut health = DbRuntimeHealth::default();
+        let now = Utc.with_ymd_and_hms(2026, 6, 24, 12, 0, 0).unwrap();
+
+        record_db_probe_result(&mut health, false, now, Some("db down".to_string()));
+
+        assert!(!health.is_available);
+        assert_eq!(health.last_probe_at, Some(now));
+        assert_eq!(health.last_failure_at, Some(now));
+        assert_eq!(health.last_recovery_at, None);
+        assert_eq!(health.last_error.as_deref(), Some("db down"));
+    }
+
+    #[test]
+    fn test_record_db_probe_recovery_clears_error_and_sets_recovery_time() {
+        let failure_at = Utc.with_ymd_and_hms(2026, 6, 24, 12, 0, 0).unwrap();
+        let recovery_at = Utc.with_ymd_and_hms(2026, 6, 24, 12, 5, 0).unwrap();
+        let mut health = DbRuntimeHealth {
+            is_available: false,
+            last_probe_at: Some(failure_at),
+            last_failure_at: Some(failure_at),
+            last_recovery_at: None,
+            last_error: Some("db down".to_string()),
+        };
+
+        record_db_probe_result(&mut health, true, recovery_at, None);
+
+        assert!(health.is_available);
+        assert_eq!(health.last_probe_at, Some(recovery_at));
+        assert_eq!(health.last_failure_at, Some(failure_at));
+        assert_eq!(health.last_recovery_at, Some(recovery_at));
+        assert_eq!(health.last_error, None);
+    }
+
+    /// 验证 P1-17：必须存在迁移文件 `019_agent_daily_summaries_fk.sql`，
+    /// 且包含 `agent_daily_summaries.agent_id` → `agents(agent_id)` 的
+    /// `ON DELETE CASCADE` 外键约束，闭环孤儿行问题。
+    #[test]
+    fn test_p1_17_agent_daily_summaries_fk_migration_has_cascade() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let migration = manifest_dir
+            .join("migrations")
+            .join("019_agent_daily_summaries_fk.sql");
+        let sql = std::fs::read_to_string(&migration).unwrap_or_else(|e| {
+            panic!(
+                "P1-17 修复缺失：未找到迁移文件 {}（{}）",
+                migration.display(),
+                e
+            )
+        });
+
+        let lower = sql.to_lowercase();
+        assert!(
+            lower.contains("alter table agent_daily_summaries"),
+            "019 迁移必须 ALTER agent_daily_summaries 表，实际内容:\n{sql}"
+        );
+        assert!(
+            lower.contains("references agents(agent_id)"),
+            "019 迁移必须 REFERENCES agents(agent_id)，实际内容:\n{sql}"
+        );
+        assert!(
+            lower.contains("on delete cascade"),
+            "019 迁移必须包含 ON DELETE CASCADE，避免孤儿行；实际内容:\n{sql}"
+        );
+    }
+
+    /// 验证 P1-12：必须存在迁移文件 `020_device_token_rotation.sql`，
+    /// 为 `devices` 表加 `token_created_at` 与 `token_rotated_at` 列。
+    /// 解决"设备 token 一次生成终身有效"的真实风险。
+    #[test]
+    fn test_p1_12_device_token_rotation_migration_adds_columns() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let migration = manifest_dir
+            .join("migrations")
+            .join("020_device_token_rotation.sql");
+        let sql = std::fs::read_to_string(&migration).unwrap_or_else(|e| {
+            panic!(
+                "P1-12 修复缺失：未找到迁移文件 {}（{}）",
+                migration.display(),
+                e
+            )
+        });
+
+        let lower = sql.to_lowercase();
+        assert!(
+            lower.contains("alter table devices"),
+            "020 迁移必须 ALTER devices 表，实际内容:\n{sql}"
+        );
+        assert!(
+            lower.contains("token_created_at"),
+            "020 迁移必须包含 token_created_at 列，实际内容:\n{sql}"
+        );
+        assert!(
+            lower.contains("token_rotated_at"),
+            "020 迁移必须包含 token_rotated_at 列（可空），实际内容:\n{sql}"
+        );
     }
 }
