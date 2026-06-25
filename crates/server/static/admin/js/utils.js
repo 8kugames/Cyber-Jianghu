@@ -37,28 +37,15 @@ function isShoutAtype(at, ad) {
 // authVerified may be declared in auth.js (loaded after utils.js), so window guard needed
 var authVerified = typeof window.authVerified !== "undefined" ? window.authVerified : false;
 
-// Check for token in URL
-var urlParams = new URLSearchParams(window.location.search);
-if (urlParams.has("token")) {
-    authToken = urlParams.get("token");
-    localStorage.setItem("admin_token", authToken);
-    window.history.replaceState({}, document.title, window.location.pathname);
-    // Resolve token type async; only mark as verified after server confirms token is valid
-    fetch(API.ADMIN + "/session", { headers: { Authorization: "Bearer " + authToken } })
-        .then(function (r) { return r.ok ? r.json() : {}; })
-        .then(function (data) {
-            if (data.authenticated) {
-                authVerified = true;
-                if (typeof window !== "undefined") window.authVerified = true;
-            }
-            if (data.token_type) {
-                authTokenType = data.token_type;
-                localStorage.setItem("admin_token_type", authTokenType);
-            }
-        })
-        .catch(function (e) {
-            console.error("[Session] URL token validation failed:", e);
-        });
+// P1-20 修复：禁止从 URL ?token=... bootstrap token。
+// 之前会把 token 写入浏览器历史、access log、CDN 缓存、分享链接。
+// 现在的唯一登录入口：登录页输入 token，存入 localStorage 与 sessionStorage。
+// 如果用户在 URL 携带了 token，提示其走登录页重新认证。
+if (new URLSearchParams(window.location.search).has("token")) {
+    console.warn(
+        "[Security] URL token bootstrap has been disabled for security. " +
+        "Please log in via the login page; tokens are no longer accepted from URL parameters."
+    );
 }
 
 // ============================================================================

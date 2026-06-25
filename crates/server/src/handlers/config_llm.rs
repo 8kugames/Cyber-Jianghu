@@ -3,9 +3,11 @@
 //! 提供友好的表单式 LLM 配置界面，与通用 YAML 编辑器区分
 
 use axum::Json;
+use axum::extract::{ConnectInfo, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use cyber_jianghu_protocol::{DEFAULT_CONTEXT_WINDOW_TOKENS, DEFAULT_LLM_MAX_TOKENS};
@@ -95,12 +97,16 @@ impl Default for LlmConfigWrapper {
     }
 }
 
+fn parse_llm_config(content: &str) -> Result<LlmConfigWrapper, StatusCode> {
+    serde_yaml::from_str(content).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
 fn read_llm_config_raw() -> Result<LlmConfigWrapper, StatusCode> {
     let config_path = crate::paths::get_config_dir().join("llm.yaml");
     if config_path.exists() {
         let content =
             fs::read_to_string(&config_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        Ok(serde_yaml::from_str(&content).unwrap_or_default())
+        parse_llm_config(&content)
     } else {
         Ok(LlmConfigWrapper::default())
     }
@@ -141,12 +147,28 @@ pub async fn get_llm_config()
 
 /// POST /api/config/llm - 保存 LLM 配置
 pub async fn save_llm_config(
+    State(state): State<std::sync::Arc<crate::state::AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: axum::http::HeaderMap,
     Json(mut config): Json<LlmConfigWrapper>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let audit_ctx = crate::db::build_audit_request_context(&headers, addr);
     let config_dir = crate::paths::get_config_dir();
     fs::create_dir_all(&config_dir)
         .map_err(|_| json_err(StatusCode::INTERNAL_SERVER_ERROR, "创建配置目录失败"))?;
     let config_path = config_dir.join("llm.yaml");
+    let before_state = read_llm_config_raw().ok().map(|existing| {
+        serde_json::json!({
+            "enabled": existing.data.enabled,
+            "provider": existing.data.provider,
+            "base_url": existing.data.base_url,
+            "model": existing.data.model,
+            "temperature": existing.data.temperature,
+            "max_tokens": existing.data.max_tokens,
+            "context_window_tokens": existing.data.context_window_tokens,
+            "has_api_key": !existing.data.api_key.is_empty(),
+        })
+    });
 
     if config.data.api_key.is_empty()
         && let Ok(existing) = read_llm_config_raw()
@@ -160,6 +182,48 @@ pub async fn save_llm_config(
         .map_err(|_| json_err(StatusCode::INTERNAL_SERVER_ERROR, "写入配置文件失败"))?;
 
     tracing::info!("LLM 配置已保存至 {:?}", config_path);
+    if let Err(e) = crate::db::insert_audit_log(
+        &state.db_pool,
+        crate::db::AuditLogEntry {
+            event_type: "llm.config.save",
+            actor_type: "admin",
+            token_type: Some("write"),
+            resource_type: "llm_config",
+            resource_id: Some("llm.yaml".to_string()),
+            endpoint: "/api/config/llm",
+            method: "POST",
+            result: "success",
+            reason: None,
+            payload: serde_json::json!({
+                "enabled": config.data.enabled,
+                "provider": config.data.provider,
+                "base_url": config.data.base_url,
+                "model": config.data.model,
+                "temperature": config.data.temperature,
+                "max_tokens": config.data.max_tokens,
+                "context_window_tokens": config.data.context_window_tokens,
+                "has_api_key": !config.data.api_key.is_empty(),
+            }),
+            request_id: Some(audit_ctx.request_id),
+            ip: audit_ctx.ip,
+            user_agent: audit_ctx.user_agent,
+            before_state,
+            after_state: Some(serde_json::json!({
+                "enabled": config.data.enabled,
+                "provider": config.data.provider,
+                "base_url": config.data.base_url,
+                "model": config.data.model,
+                "temperature": config.data.temperature,
+                "max_tokens": config.data.max_tokens,
+                "context_window_tokens": config.data.context_window_tokens,
+                "has_api_key": !config.data.api_key.is_empty(),
+            })),
+        },
+    )
+    .await
+    {
+        tracing::error!("audit_log 写入失败(llm.config.save): {}", e);
+    }
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -228,12 +292,12 @@ pub async fn get_llm_status() -> Json<serde_json::Value> {
         Ok(response) => Json(serde_json::json!({
             "enabled": true,
             "connected": false,
-            "message": format!("连接失败: HTTP {}", response.status())
+            "message": format!("连接失败: HTTP {}", response.status().as_u16())
         })),
-        Err(e) => Json(serde_json::json!({
+        Err(_e) => Json(serde_json::json!({
             "enabled": true,
             "connected": false,
-            "message": format!("连接失败: {}", e)
+            "message": "连接失败".to_string()
         })),
     }
 }
@@ -248,8 +312,12 @@ pub async fn get_llm_enabled() -> Json<serde_json::Value> {
 
 /// POST /api/config/llm/enabled - 设置 LLM 启用状态
 pub async fn set_llm_enabled(
+    State(state): State<std::sync::Arc<crate::state::AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    let audit_ctx = crate::db::build_audit_request_context(&headers, addr);
     let enabled = req
         .get("enabled")
         .and_then(|v| v.as_bool())
@@ -260,6 +328,7 @@ pub async fn set_llm_enabled(
         Ok(c) => c,
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
     };
+    let previous_enabled = config_wrapper.data.enabled;
     let mut config = config_wrapper;
     config.data.enabled = enabled;
 
@@ -271,9 +340,43 @@ pub async fn set_llm_enabled(
     fs::write(&config_path, yaml).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     tracing::info!("LLM 启用状态已设置为: {}", enabled);
+    if let Err(e) = crate::db::insert_audit_log(
+        &state.db_pool,
+        crate::db::AuditLogEntry {
+            event_type: "llm.enabled.set",
+            actor_type: "admin",
+            token_type: Some("write"),
+            resource_type: "llm_config",
+            resource_id: Some("llm.yaml".to_string()),
+            endpoint: "/api/config/llm/enabled",
+            method: "POST",
+            result: "success",
+            reason: None,
+            payload: serde_json::json!({ "enabled": enabled }),
+            request_id: Some(audit_ctx.request_id),
+            ip: audit_ctx.ip,
+            user_agent: audit_ctx.user_agent,
+            before_state: Some(serde_json::json!({ "enabled": previous_enabled })),
+            after_state: Some(serde_json::json!({ "enabled": enabled })),
+        },
+    )
+    .await
+    {
+        tracing::error!("audit_log 写入失败(llm.enabled.set): {}", e);
+    }
 
     Ok(Json(serde_json::json!({
         "success": true,
         "enabled": enabled
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_llm_config;
+
+    #[test]
+    fn test_parse_llm_config_rejects_invalid_yaml() {
+        assert!(parse_llm_config("version: [").is_err());
+    }
 }

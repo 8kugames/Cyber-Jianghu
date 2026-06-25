@@ -34,19 +34,24 @@ use axum::{
     body::Body,
     routing::{delete, get, post},
 };
+use std::fs::OpenOptions;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use tokio::task::JoinHandle;
-use tracing::{Level, error, info, warn};
-use tracing_subscriber::FmtSubscriber;
+use tracing::{error, info, warn};
+use tracing_subscriber::EnvFilter;
 
 // ============================================================================
 // Tick引擎启动
 // ============================================================================
 
 fn serve_admin_file(path: &str) -> Result<axum::response::Response<Body>, StatusCode> {
-    let static_dir = crate::paths::get_static_dir().join("admin");
+    let static_dir = match std::fs::canonicalize(crate::paths::get_static_dir().join("admin")) {
+        Ok(dir) => dir,
+        Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+    };
 
     let file_path = if path.is_empty() || path == "index.html" {
         static_dir.join("index.html")
@@ -54,18 +59,124 @@ fn serve_admin_file(path: &str) -> Result<axum::response::Response<Body>, Status
         static_dir.join(path)
     };
 
-    if !file_path.exists() || !file_path.is_file() {
+    let resolved_path = match std::fs::canonicalize(&file_path) {
+        Ok(p) => p,
+        Err(_) => return Err(StatusCode::NOT_FOUND),
+    };
+
+    if !resolved_path.starts_with(&static_dir) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    if !resolved_path.is_file() {
         return Err(StatusCode::NOT_FOUND);
     }
 
-    let mime = mime_guess::from_path(&file_path).first_or_octet_stream();
+    let mime = mime_guess::from_path(&resolved_path).first_or_octet_stream();
     let body =
-        Body::from(std::fs::read(&file_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?);
+        Body::from(std::fs::read(&resolved_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?);
     Ok(axum::response::Response::builder()
         .status(StatusCode::OK)
         .header(axum::http::header::CONTENT_TYPE, mime.as_ref())
         .body(body)
         .unwrap_or_else(|_| axum::response::Response::new(Body::empty())))
+}
+
+fn render_admin_token_file_content(
+    read_token_source: &str,
+    admin_read_token: &str,
+    write_token_source: &str,
+    admin_write_token: &str,
+) -> String {
+    format!(
+        "========================================\n\
+Cyber-Jianghu 管理员访问凭证\n\
+========================================\n\
+Read Token (只读): [{read_token_source}]\n\
+  {admin_read_token}\n\
+Write Token (读写): [{write_token_source}]\n\
+  {admin_write_token}\n\
+\n\
+========================================\n"
+    )
+}
+
+#[cfg(unix)]
+fn ensure_admin_token_permissions(path: &Path) -> Result<()> {
+    use std::fs::Permissions;
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::set_permissions(path, Permissions::from_mode(0o600))
+        .with_context(|| format!("设置admin token文件权限失败: {}", path.display()))?;
+    let mode = std::fs::metadata(path)
+        .with_context(|| format!("读取admin token文件元数据失败: {}", path.display()))?
+        .permissions()
+        .mode()
+        & 0o777;
+    if mode != 0o600 {
+        anyhow::bail!(
+            "admin token文件权限异常: {} 实际为 {:o}，预期 600",
+            path.display(),
+            mode
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_admin_token_permissions(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+fn write_admin_token_file(
+    path: &Path,
+    read_token_source: &str,
+    admin_read_token: &str,
+    write_token_source: &str,
+    admin_write_token: &str,
+) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("创建admin token目录失败: {}", parent.display()))?;
+    }
+
+    #[cfg(unix)]
+    let mut file = {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o600)
+            .open(path)
+            .with_context(|| format!("无法创建admin token文件 {}: {}", path.display(), "open failed"))?
+    };
+
+    #[cfg(not(unix))]
+    let mut file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(path)
+        .with_context(|| format!("无法创建admin token文件: {}", path.display()))?;
+
+    ensure_admin_token_permissions(path)?;
+
+    let content = render_admin_token_file_content(
+        read_token_source,
+        admin_read_token,
+        write_token_source,
+        admin_write_token,
+    );
+    use std::io::Write;
+    file.write_all(content.as_bytes())
+        .with_context(|| format!("写入admin token文件失败: {}", path.display()))?;
+    file.flush()
+        .with_context(|| format!("刷新admin token文件失败: {}", path.display()))?;
+
+    Ok(())
 }
 
 /// /admin/ → serve index.html (no path parameter to extract)
@@ -303,13 +414,26 @@ async fn init_governance(
 #[tokio::main]
 #[allow(clippy::await_holding_lock)]
 async fn main() -> Result<()> {
-    // 1. 初始化日志
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
+    // 1. 先加载 .env，确保 RUST_LOG 等环境变量对日志 subscriber 生效（P1-F2 修复）
+    let _ = dotenv::dotenv();
+
+    // 2. 初始化日志（P1-F2 修复：EnvFilter::try_from_default_env 消费 RUST_LOG，替代硬编码 Level::INFO）
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+    // JSON 切换：CYBER_JIANGHU_LOG_JSON=1 → .json()；默认 .compact() 输出人可读
+    let log_json = std::env::var("CYBER_JIANGHU_LOG_JSON")
+        .ok()
+        .as_deref()
+        == Some("1");
+    let fmt_builder = tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
         .with_target(false)
-        .with_thread_ids(false)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)?;
+        .with_thread_ids(false);
+    if log_json {
+        fmt_builder.json().init();
+    } else {
+        fmt_builder.init();
+    }
 
     info!(
         "OpenClaw Cyber-Jianghu MVP Server v{}",
@@ -335,13 +459,14 @@ async fn main() -> Result<()> {
     info!("配置验证通过");
 
     // 5. 初始化数据库连接池
-    let db_pool = init_db_pool(
-        &config.database.url,
-        config.database.max_retries,
-        config.database.retry_delay_secs,
-    )
-    .await?;
+    let db_pool = init_db_pool(&config.database).await?;
     info!("数据库连接池初始化成功");
+    let db_runtime_health = crate::db::create_db_runtime_health_state();
+    let _db_probe_handle = crate::db::start_db_health_probe(
+        db_pool.clone(),
+        db_runtime_health.clone(),
+        std::time::Duration::from_secs(config.database.probe_interval_secs),
+    );
 
     // 6. 加载游戏数据配置
     let game_data = game_data::load_game_data()?;
@@ -394,6 +519,7 @@ async fn main() -> Result<()> {
     let connection_manager = websocket::create_connection_manager();
     let agent_to_device_map = websocket::create_agent_to_device_map();
     let rate_limiter = create_rate_limiter();
+    let device_register_limiter = cyber_jianghu_server::state::create_device_register_limiter();
     info!("WebSocket 和速率限制器初始化成功");
 
     // 7.2 初始化 Agent 状态内存缓存（从 DB 加载）
@@ -450,29 +576,14 @@ async fn main() -> Result<()> {
         "自动生成"
     };
 
-    use std::fs::File;
-    use std::io::Write;
-
     let token_path = crate::paths::get_logs_dir().join("cyber_jianghu_admin.tmp");
-    if let Some(parent) = token_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    {
-        let mut file = File::create(&token_path).map_err(|e| {
-            anyhow::anyhow!("无法创建admin token文件 {}: {}", token_path.display(), e)
-        })?;
-
-        writeln!(file, "========================================")?;
-        writeln!(file, "🔐 Cyber-Jianghu 管理员访问凭证")?;
-        writeln!(file, "========================================")?;
-        writeln!(file, "Read Token (只读): [{}]", read_token_source)?;
-        writeln!(file, "  {}", admin_read_token)?;
-        writeln!(file, "Write Token (读写): [{}]", write_token_source)?;
-        writeln!(file, "  {}", admin_write_token)?;
-        writeln!(file)?;
-        writeln!(file, "========================================")?;
-    }
+    write_admin_token_file(
+        &token_path,
+        read_token_source,
+        &admin_read_token,
+        write_token_source,
+        &admin_write_token,
+    )?;
 
     info!("管理员访问凭证已保存到: {}", token_path.display());
     info!("查看凭证: cat {}", token_path.display());
@@ -511,11 +622,13 @@ async fn main() -> Result<()> {
     // 9.3 创建应用状态
     let state = Arc::new(AppState::new(
         db_pool.clone(),
+        db_runtime_health,
         connection_manager.clone(),
         agent_to_device_map.clone(),
         agent_state_cache.clone(),
         worker_tx.clone(),
         rate_limiter.clone(),
+        device_register_limiter,
         game_data_cache.clone(),
         dialogue_manager.clone(),
         admin_read_token,
@@ -983,15 +1096,27 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
     // 13. 注册信号处理（优雅关闭）
-    let shutdown_signal = async {
-        // 监听 Ctrl+C (SIGINT)
+    // P1-9 修复：用单一 watch::channel 把 shutdown 信号广播给 axum::serve 与主 select!。
+    // 之前 shutdown_signal 是只被一个分支消费的 async block，axum::serve 没挂上
+    // .with_graceful_shutdown(...) → SIGTERM 触发时 in-flight HTTP 请求被截断。
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    // 给 axum 用的 receiver（独立 clone，避免主 select! 抢先消费）
+    let axum_shutdown_rx = shutdown_rx.clone();
+    let axum_shutdown = async move {
+        let mut rx = axum_shutdown_rx;
+        let _ = rx.changed().await;
+    };
+    // 给主 select! 用的 receiver
+    let mut main_shutdown_rx = shutdown_rx;
+
+    // 后台任务：监听 SIGINT/SIGTERM，触发时给 watch channel 发送 true，
+    // 唤醒 axum 的 graceful_shutdown 与主 select! 的 shutdown 分支。
+    tokio::spawn(async move {
         let ctrl_c = async {
             tokio::signal::ctrl_c()
                 .await
                 .expect("Failed to install Ctrl+C handler");
         };
-
-        // 监听 SIGTERM (Docker stop / Kubernetes pod termination)
         #[cfg(unix)]
         let terminate = async {
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
@@ -999,26 +1124,30 @@ async fn main() -> Result<()> {
                 .recv()
                 .await;
         };
-
         #[cfg(not(unix))]
         let terminate = std::future::pending::<()>();
-
         tokio::select! {
             _ = ctrl_c => info!("收到 SIGINT 信号 (Ctrl+C)"),
             _ = terminate => info!("收到 SIGTERM 信号"),
         }
-    };
+        if let Err(e) = shutdown_tx.send(true) {
+            tracing::warn!("shutdown_tx.send 失败（receiver 可能已 drop）：{e:?}");
+        }
+    });
 
     // 14. 等待服务器结束、Tick引擎失败、治理轮询失败或关闭信号
     tokio::select! {
-        // 关闭信号
-        _ = shutdown_signal => {
+        // 关闭信号（P1-9：与 axum::serve.with_graceful_shutdown 共用 watch channel）
+        _ = async {
+            let _ = main_shutdown_rx.changed().await;
+        } => {
             info!("正在关闭服务...");
             info!("服务已优雅关闭");
         }
 
-        // Web服务器运行
-        result = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()) => {
+        // Web服务器运行（P1-9：挂上 .with_graceful_shutdown 让 in-flight 请求 drain）
+        result = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+            .with_graceful_shutdown(axum_shutdown) => {
             if let Err(e) = result {
                 error!("Web服务器错误: {}", e);
             }
@@ -1066,4 +1195,129 @@ async fn main() -> Result<()> {
 
     info!("服务停止");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{render_admin_token_file_content, write_admin_token_file};
+
+    #[test]
+    fn test_render_admin_token_file_content_is_ascii_without_emoji_header() {
+        let content = render_admin_token_file_content("自动生成", "read-token", "配置", "write-token");
+        assert!(!content.contains("🔐"));
+        assert!(content.contains("Cyber-Jianghu 管理员访问凭证"));
+    }
+
+    /// 验证 P1-9：axum::serve 必须链式调用 `.with_graceful_shutdown(...)`，
+    /// 否则 SIGTERM/SIGINT 触发时 in-flight HTTP 请求会被截断，
+    /// DB 写入半完成、Saga 状态不一致（高风险）。
+    #[test]
+    fn test_p1_9_axum_serve_uses_graceful_shutdown() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let source = std::fs::read_to_string(manifest_dir.join("src/main.rs"))
+            .expect("read main.rs source");
+        // 仅扫描生产代码段（`mod tests` 之前），避免测试自身字符串假阳性
+        let tests_marker = source
+            .find("#[cfg(test)]")
+            .expect("main.rs should have a #[cfg(test)] block");
+        let prod_slice = &source[..tests_marker];
+        let serve_idx = prod_slice
+            .find("axum::serve(")
+            .expect("must call axum::serve in production code");
+        let tail = &prod_slice[serve_idx..];
+        let next_400 = tail.get(..400).unwrap_or(tail);
+        assert!(
+            next_400.contains(".with_graceful_shutdown("),
+            "P1-9 修复缺失：axum::serve 必须链式调用 .with_graceful_shutdown(...)，\n\
+             否则 SIGTERM/SIGINT 触发时 in-flight HTTP 请求会被截断，\n\
+             DB 写入半完成、Saga 状态不一致。\n\
+             当前 axum::serve 后续 400 字符片段：\n{next_400}"
+        );
+    }
+
+    /// 验证 P1-F2：tracing subscriber 必须消费 `RUST_LOG` 环境变量，
+    /// 而不是硬编码 `Level::INFO`。同时 `.env` 加载必须在 subscriber init 之前，
+    /// 否则 `.env` 里的 `RUST_LOG=debug` 不会生效。
+    #[test]
+    fn test_p1_f2_tracing_uses_env_filter_and_dotenv_first() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let source = std::fs::read_to_string(manifest_dir.join("src/main.rs"))
+            .expect("read main.rs source");
+        let tests_marker = source
+            .find("#[cfg(test)]")
+            .expect("main.rs should have a #[cfg(test)] block");
+        let prod = &source[..tests_marker];
+
+        // 1. 必须使用 EnvFilter::try_from_default_env
+        assert!(
+            prod.contains("EnvFilter::try_from_default_env"),
+            "P1-F2 修复缺失：tracing subscriber 必须消费 RUST_LOG；\
+             用 `EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(\"info\"))` 替代硬编码 `Level::INFO`"
+        );
+        // 2. 不应在生产路径上继续用 FmtSubscriber::builder().with_max_level(Level::INFO) 硬编码
+        assert!(
+            !prod.contains(".with_max_level(Level::INFO)"),
+            "P1-F2 修复：禁止继续用 `.with_max_level(Level::INFO)` 硬编码日志级别"
+        );
+
+        // 3. dotenv 必须在 tracing subscriber 初始化之前
+        //    新代码用 `.init()`，旧代码用 `set_global_default`，都接受。
+        let dotenv_idx = prod
+            .find("dotenv::dotenv()")
+            .expect("must call dotenv::dotenv()");
+        let init_idx = prod
+            .find("tracing_subscriber::fmt()")
+            .or_else(|| prod.find("FmtSubscriber::builder"))
+            .or_else(|| prod.find("set_global_default"))
+            .expect("must initialize tracing subscriber");
+        assert!(
+            dotenv_idx < init_idx,
+            "P1-F2 修复：dotenv::dotenv() 必须在 tracing subscriber 初始化之前调用，\
+             否则 .env 里的 RUST_LOG 不会生效。\
+             dotenv_idx={dotenv_idx}, init_idx={init_idx}"
+        );
+    }
+
+    /// 验证 P1-F2：workspace Cargo.toml 的 tracing-subscriber 必须启用 `json` feature，
+    /// 否则代码里写 `.json()` 编译失败。
+    #[test]
+    fn test_p1_f2_workspace_tracing_subscriber_enables_json_feature() {
+        // workspace root is ../../ from crates/server
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let workspace_toml = manifest_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("crates/server should be inside a workspace")
+            .join("Cargo.toml");
+        let content = std::fs::read_to_string(&workspace_toml)
+            .expect("read workspace Cargo.toml");
+        // 找 tracing-subscriber = {...} 这行
+        let ts_line = content
+            .lines()
+            .find(|l| l.contains("tracing-subscriber") && l.contains("="))
+            .expect("workspace must declare tracing-subscriber");
+        assert!(
+            ts_line.contains("\"json\""),
+            "P1-F2 修复：workspace Cargo.toml 的 tracing-subscriber 必须启用 \"json\" feature（用于 JSON 化日志），当前行：\n{ts_line}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_write_admin_token_file_enforces_0600_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let file_path = dir.path().join("admin_tokens.txt");
+
+        write_admin_token_file(&file_path, "自动生成", "read-token", "配置", "write-token")
+            .expect("write admin token file");
+
+        let mode = std::fs::metadata(&file_path)
+            .expect("read metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+    }
 }

@@ -10,7 +10,13 @@
 // 配合 agent 端 `ensure_device` 的 fail-fast 验证，形成完整生命周期。
 // ============================================================================
 
-use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use axum::{
+    Json,
+    extract::{ConnectInfo, State},
+    http::StatusCode,
+    response::IntoResponse,
+};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -112,7 +118,28 @@ pub async fn device_verify(
 /// 失败 → 5xx + 结构化 JSON body（与 verify 错误响应对称）
 pub async fn device_register(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<DeviceRegisterErrorResponse>)> {
+    let min_interval = std::time::Duration::from_secs(
+        crate::game_data::registry::NetworkRegistry::device_register().rate_limit_secs,
+    );
+    if !crate::state::check_device_register_rate_limit(
+        &state.device_register_limiter,
+        addr.ip(),
+        std::time::Instant::now(),
+        min_interval,
+    )
+    .await
+    {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(DeviceRegisterErrorResponse {
+                error: "rate_limited",
+                message: "设备注册过于频繁，请稍后重试".to_string(),
+            }),
+        ));
+    }
+
     let result = db::register_device(&state.db_pool).await.map_err(|e| {
         warn!("设备显式注册失败: {}", e);
         (

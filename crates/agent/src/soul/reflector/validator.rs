@@ -325,8 +325,8 @@ impl ReflectorSoul {
             Ok(ValidationResult::Approved { .. }) => Ok(()),
             Ok(ValidationResult::Rejected { reason, .. }) => Err(reason),
             Err(e) => {
-                tracing::warn!("RuleEngine error, bypassing: {}", e);
-                Ok(())
+                tracing::warn!("RuleEngine error, rejecting: {}", e);
+                Err(format!("RuleEngine 内部错误: {}", e))
             }
         }
     }
@@ -389,16 +389,13 @@ impl ReflectorSoul {
         let llm_result = match self.validate_llm(request.clone()).await {
             Ok(result) => result,
             Err(e) => {
+                let reason = format!("LLM error, rejecting: {}", e);
                 layers.push(LayerResult {
                     layer: "layer3",
-                    passed: true,
-                    detail: Some(format!("LLM error, bypassed: {}", e)),
+                    passed: false,
+                    detail: Some(reason.clone()),
                 });
-                return Ok(PipelineValidationResult::Approved {
-                    intent: request.intent,
-                    layers,
-                    narrative: None,
-                });
+                return Ok(PipelineValidationResult::Rejected { reason, layers });
             }
         };
 

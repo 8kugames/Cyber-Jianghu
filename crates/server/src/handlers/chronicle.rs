@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{ConnectInfo, Path, Query, State};
 use serde::Deserialize;
 
 use crate::chronicle;
@@ -99,8 +99,11 @@ pub struct GenerateRequest {
 /// POST /api/dashboard/chronicles/generate
 pub async fn generate_chronicle(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
     Json(params): Json<GenerateRequest>,
 ) -> Result<Json<chronicle::Chronicle>, (axum::http::StatusCode, Json<serde_json::Value>)> {
+    let audit_ctx = crate::db::build_audit_request_context(&headers, addr);
     let current_tick = crate::db::get_current_world_tick_id(&state.db_pool)
         .await
         .unwrap_or(0);
@@ -111,12 +114,45 @@ pub async fn generate_chronicle(
         .unwrap_or_else(|| chronicle::calculate_period_start(period_end));
 
     match chronicle::generate_and_store(period_start, period_end, &state.db_pool).await {
-        Ok(chronicle) => Ok(Json(chronicle)),
+        Ok(chronicle) => {
+            if let Err(e) = crate::db::insert_audit_log(
+                &state.db_pool,
+                crate::db::AuditLogEntry {
+                    event_type: "chronicle.generate.manual",
+                    actor_type: "admin",
+                    token_type: Some("write"),
+                    resource_type: "chronicle",
+                    resource_id: Some(chronicle.id.to_string()),
+                    endpoint: "/api/dashboard/chronicles/generate",
+                    method: "POST",
+                    result: "success",
+                    reason: None,
+                    payload: serde_json::json!({
+                        "period_start": period_start,
+                        "period_end": period_end,
+                    }),
+                    request_id: Some(audit_ctx.request_id),
+                    ip: audit_ctx.ip,
+                    user_agent: audit_ctx.user_agent,
+                    before_state: None,
+                    after_state: Some(serde_json::json!({
+                        "chronicle_id": chronicle.id,
+                        "period_start": period_start,
+                        "period_end": period_end,
+                    })),
+                },
+            )
+            .await
+            {
+                tracing::error!("audit_log 写入失败(chronicle.generate.manual): {}", e);
+            }
+            Ok(Json(chronicle))
+        }
         Err(e) => {
             tracing::error!("生成 chronicle 失败: {}", e);
             Err((
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": e.to_string()})),
+                Json(serde_json::json!({"error": "Internal Server Error"})),
             ))
         }
     }

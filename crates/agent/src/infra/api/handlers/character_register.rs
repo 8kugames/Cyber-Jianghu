@@ -44,9 +44,6 @@ pub struct CharacterRegisterRequest {
     /// 目标
     #[serde(default)]
     pub goals: GoalsRequest,
-    /// 系统提示词（可选）
-    #[serde(default)]
-    pub system_prompt: Option<String>,
 }
 
 /// POST /api/v1/character/generate 请求体
@@ -643,23 +640,7 @@ pub(crate) async fn register_character_handler(
         }
     };
 
-    // 5. Generate default system_prompt
-    let system_prompt = payload.system_prompt.clone().unwrap_or_else(|| {
-        format!(
-            "你是{}，{}岁，{}。{}{}你的目标是探索这个江湖世界，与各路侠客交流，并在武林中闯出自己的一片天地。",
-            payload.name,
-            payload.age,
-            payload.identity.as_deref().unwrap_or("江湖中人"),
-            payload.appearance.as_deref().map(|a| a.to_string()).unwrap_or_default(),
-            if !payload.personality.is_empty() {
-                format!("性格特点：{}。", payload.personality.join("、"))
-            } else {
-                String::new()
-            }
-        )
-    });
-
-    // 6. 构建发送到 Server 的请求
+    // 5. 构建发送到 Server 的请求。system_prompt 由 Server 统一生成，Agent 不再本地拼装。
     let server_request = serde_json::json!({
         "device_id": device_id,
         "auth_token": auth_token,
@@ -672,10 +653,9 @@ pub(crate) async fn register_character_handler(
         "values": payload.values,
         "language_style": payload.language_style,
         "goals": payload.goals,
-        "system_prompt": system_prompt,
     });
 
-    // 7. 转发到 Server
+    // 6. 转发到 Server
     let client = Client::new();
     let server_http_url = state.server_http_url.read().await.clone();
     let server_url = format!("{}/api/v1/agent/register", server_http_url);
@@ -696,7 +676,7 @@ pub(crate) async fn register_character_handler(
         }
     };
 
-    // 8. 处理 Server 响应
+    // 7. 处理 Server 响应
     if !response.status().is_success() {
         let status = response.status();
 
@@ -745,7 +725,6 @@ pub(crate) async fn register_character_handler(
                 "values": payload.values,
                 "language_style": payload.language_style,
                 "goals": payload.goals,
-                "system_prompt": system_prompt,
             });
 
             let retry_response = match client.post(&server_url).json(&server_request).send().await {
@@ -795,7 +774,7 @@ pub(crate) async fn register_character_handler(
         }
     }
 
-    // 9. 解析成功响应
+    // 8. 解析成功响应
     #[derive(Deserialize)]
     struct ServerRegisterResponse {
         agent_id: String,
@@ -804,6 +783,7 @@ pub(crate) async fn register_character_handler(
         game_rules: Option<cyber_jianghu_protocol::GameRules>,
         narrative_config: Option<cyber_jianghu_protocol::NarrativeConfig>,
         narrative_config_hash: Option<String>,
+        system_prompt: String,
         #[serde(default)]
         initial_attributes: std::collections::HashMap<String, i32>,
     }
@@ -812,7 +792,7 @@ pub(crate) async fn register_character_handler(
         Ok(result) => {
             info!("角色注册成功: {} -> {}", payload.name, result.agent_id);
 
-            // 10. 保存 narrative_config 到本地配置目录（hash skip-optimization）
+            // 9. 保存 narrative_config 到本地配置目录（hash skip-optimization）
             if let Some(ref narrative_config) = result.narrative_config {
                 // 内存始终更新
                 *state.narrative_config.write().await = result.narrative_config.clone();
@@ -824,7 +804,7 @@ pub(crate) async fn register_character_handler(
                 }
             }
 
-            // 11. 创建并保存角色配置到文件系统
+            // 10. 创建并保存角色配置到文件系统
             let mut config_warning = None;
             let agent_uuid = match uuid::Uuid::parse_str(&result.agent_id) {
                 Ok(id) => id,
@@ -859,7 +839,7 @@ pub(crate) async fn register_character_handler(
                     short_term: payload.goals.short_term.clone(),
                     long_term: payload.goals.long_term.clone(),
                 },
-                system_prompt: Some(system_prompt.clone()),
+                system_prompt: Some(result.system_prompt.clone()),
                 registered_at: Some(chrono::Utc::now()),
                 birth_attributes: if result.initial_attributes.is_empty() {
                     None
@@ -878,7 +858,7 @@ pub(crate) async fn register_character_handler(
                 config_warning = Some(format!("角色配置保存失败: {}", e));
             }
 
-            // 12. 更新运行时 agent_id（使后续 Intent 提交使用新角色）
+            // 11. 更新运行时 agent_id（使后续 Intent 提交使用新角色）
             {
                 let mut id = state.agent_id.write().await;
                 *id = agent_uuid;
