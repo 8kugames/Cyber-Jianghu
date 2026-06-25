@@ -264,7 +264,9 @@ async fn send_server_error(
 
     if let Ok(json) = serde_json::to_string(&error_msg) {
         let mut tx = ws_tx.lock().await;
-        let _ = tx.send(Message::Text(json.into())).await;
+        if let Err(e) = tx.send(Message::Text(json.into())).await {
+            tracing::warn!("validation ws_tx.send 失败（receiver 可能已 drop）：{e:?}");
+        }
     }
 }
 

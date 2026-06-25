@@ -505,11 +505,11 @@ impl Default for RuntimeConfig {
 // 单一来源原则: 改默认值仅需改 protocol/src/lib.rs 一处。
 pub(crate) use cyber_jianghu_protocol::{
     DEFAULT_CONTEXT_WINDOW_TOKENS, DEFAULT_ENABLE_STREAMING, DEFAULT_EXECUTION_RESULT_TIMEOUT_MS,
-    DEFAULT_IDLE_ROTATE_THRESHOLD, DEFAULT_KEEP_RECENT_TURNS, DEFAULT_LLM_MAX_TOKENS,
-    DEFAULT_LLM_PROVIDER, DEFAULT_LLM_TEMPERATURE, DEFAULT_NARRATIVE_WINDOW_SIZE,
-    DEFAULT_RECONNECT_DELAY_SECS, DEFAULT_SEMANTIC_DEDUP_HISTORY,
-    DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS, DEFAULT_SOUL_CYCLE_REPORT_RETRIES,
-    DEFAULT_SUMMARY_TRIGGER_RATIO,
+    DEFAULT_IDLE_ROTATE_THRESHOLD, DEFAULT_KEEP_RECENT_TURNS, DEFAULT_LLM_CONNECT_TIMEOUT_SECS,
+    DEFAULT_LLM_MAX_TOKENS, DEFAULT_LLM_PROVIDER, DEFAULT_LLM_REQUEST_TIMEOUT_SECS,
+    DEFAULT_LLM_TEMPERATURE, DEFAULT_NARRATIVE_WINDOW_SIZE, DEFAULT_RECONNECT_DELAY_SECS,
+    DEFAULT_SEMANTIC_DEDUP_HISTORY, DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS,
+    DEFAULT_SOUL_CYCLE_REPORT_RETRIES, DEFAULT_SUMMARY_TRIGGER_RATIO,
 };
 
 /// 单个模型的独立配置（允许 per-model max_tokens）
@@ -591,6 +591,15 @@ pub struct LlmConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_thinking: Option<bool>,
 
+    /// P1-F6 端到端：LLM HTTP 请求整体超时（秒）。Agent 端 LLM 调用最坏耗时 = `max_retries × request_timeout_secs`，
+    /// 默认 120s（与 Server LlmConfig 对齐），用户改 `agent.yaml` 即生效。
+    #[serde(default = "default_llm_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+
+    /// P1-F6 端到端：LLM HTTP 连接超时（秒），默认 30s。
+    #[serde(default = "default_llm_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
+
     /// Cache 诊断配置 (Phase 0 测量用)
     #[serde(default)]
     pub cache_diagnostics: CacheDiagnosticsConfig,
@@ -667,6 +676,14 @@ fn default_llm_max_tokens() -> u32 {
     DEFAULT_LLM_MAX_TOKENS
 }
 
+fn default_llm_request_timeout_secs() -> u64 {
+    DEFAULT_LLM_REQUEST_TIMEOUT_SECS
+}
+
+fn default_llm_connect_timeout_secs() -> u64 {
+    DEFAULT_LLM_CONNECT_TIMEOUT_SECS
+}
+
 pub(crate) fn env_or<T: std::str::FromStr>(key: &str, fallback: T) -> T {
     std::env::var(key)
         .ok()
@@ -723,6 +740,14 @@ impl Default for LlmConfig {
             ),
             enable_streaming: env_or("CYBER_JIANGHU_ENABLE_STREAMING", DEFAULT_ENABLE_STREAMING),
             enable_thinking: None,
+            request_timeout_secs: env_or(
+                "CYBER_JIANGHU_LLM_REQUEST_TIMEOUT_SECS",
+                DEFAULT_LLM_REQUEST_TIMEOUT_SECS,
+            ),
+            connect_timeout_secs: env_or(
+                "CYBER_JIANGHU_LLM_CONNECT_TIMEOUT_SECS",
+                DEFAULT_LLM_CONNECT_TIMEOUT_SECS,
+            ),
             cache_diagnostics: CacheDiagnosticsConfig::default(),
         }
     }

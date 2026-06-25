@@ -198,6 +198,10 @@ pub struct DirectLlmClientConfig {
     pub context_window_tokens: u32,
     /// Prompt 配置（D8 reasoning 剥离 + D9 schema 规范化开关）
     pub prompt: PromptConfig,
+    /// P1-F6：HTTP 请求整体超时（与 Server LlmConfig.request_timeout_secs 对齐，默认 120s）
+    pub request_timeout_secs: u64,
+    /// P1-F6：HTTP 连接超时（与 Server LlmConfig.connect_timeout_secs 对齐，默认 30s）
+    pub connect_timeout_secs: u64,
 }
 
 /// Prompt 配置（D8 reasoning 剥离 + D9 schema 规范化开关）
@@ -248,7 +252,22 @@ impl DirectLlmClientConfig {
             enable_thinking: None,
             context_window_tokens: 32768,
             prompt: PromptConfig::default(),
+            request_timeout_secs: crate::config::DEFAULT_LLM_REQUEST_TIMEOUT_SECS,
+            connect_timeout_secs: crate::config::DEFAULT_LLM_CONNECT_TIMEOUT_SECS,
         }
+    }
+
+    /// P1-F6：覆盖 HTTP 请求整体超时（秒）。
+    /// 设置过低会导致长上下文请求被截断；设置过高会让 cognitive retry 雪崩。
+    pub fn with_request_timeout_secs(mut self, secs: u64) -> Self {
+        self.request_timeout_secs = secs;
+        self
+    }
+
+    /// P1-F6：覆盖 HTTP 连接超时（秒）。
+    pub fn with_connect_timeout_secs(mut self, secs: u64) -> Self {
+        self.connect_timeout_secs = secs;
+        self
     }
 
     /// 从 OpenClaw 配置文件加载配置（仅对 OpenClaw provider 有效）
@@ -408,6 +427,12 @@ impl Clone for DirectLlmClient {
 }
 
 impl DirectLlmClient {
+    /// 读取内部 LLM 客户端配置（只读）。
+    /// P1-F6 测试需要断言 LlmConfig 字段是否被端到端传到这里。
+    pub fn config(&self) -> &DirectLlmClientConfig {
+        &self.config
+    }
+
     /// 创建新的 Direct LLM 客户端
     pub fn new(mut config: DirectLlmClientConfig) -> Result<Self> {
         // 对于 OpenClaw，自动加载配置文件
@@ -546,8 +571,12 @@ impl DirectLlmClient {
 
     /// 构建 HTTP 客户端
     fn build_http_client(&self) -> Result<reqwest::Client> {
+        // P1-F6 修复：超时从 config 消费，替代之前硬编码 120s。
         reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(std::time::Duration::from_secs(self.config.request_timeout_secs))
+            .connect_timeout(std::time::Duration::from_secs(
+                self.config.connect_timeout_secs,
+            ))
             .build()
             .context("Failed to build HTTP client")
     }
@@ -1648,6 +1677,29 @@ mod tests {
         assert!(!LlmProvider::Ollama.requires_api_key());
         assert!(!LlmProvider::Ollama.requires_base_url());
         assert!(!LlmProvider::Ollama.requires_model());
+    }
+
+    /// 验证 P1-F6：DirectLlmClientConfig 默认 120s/30s timeout，并提供
+    /// `with_request_timeout_secs` / `with_connect_timeout_secs` builder。
+    /// 修复前 `build_http_client` 硬编码 120s，agent 端 `cognitive_decision_with_chain`
+    /// 最坏耗时 = 12 retries × 120s = 24min，无外部闸门。
+    #[test]
+    fn test_p1_f6_config_default_timeouts_and_builder() {
+        let config = DirectLlmClientConfig::new(LlmProvider::Ollama, None::<String>);
+        assert_eq!(
+            config.request_timeout_secs, 120,
+            "P1-F6 默认 request_timeout_secs 必须 120s（与 Server LlmConfig 对齐）"
+        );
+        assert_eq!(
+            config.connect_timeout_secs, 30,
+            "P1-F6 默认 connect_timeout_secs 必须 30s（与 Server LlmConfig 对齐）"
+        );
+
+        let config = DirectLlmClientConfig::new(LlmProvider::Ollama, None::<String>)
+            .with_request_timeout_secs(60)
+            .with_connect_timeout_secs(15);
+        assert_eq!(config.request_timeout_secs, 60);
+        assert_eq!(config.connect_timeout_secs, 15);
     }
 
     #[test]

@@ -7,8 +7,20 @@ impl super::super::Agent {
     ) {
         let tick_id_for_report = final_intent.tick_id;
         if let Some(recorder) = self.soul_recorder().await {
-            let records = recorder.get_by_tick(tick_id_for_report).await;
-            let immediate_records = recorder.get_immediate_by_tick(tick_id_for_report).await;
+            let records = match recorder.get_by_tick(tick_id_for_report).await {
+                Ok(r) => r,
+                Err(e) => {
+                    warn!("report_soul_cycle: get_by_tick({tick_id_for_report}) 失败（best-effort 继续）: {e:?}");
+                    Vec::new()
+                }
+            };
+            let immediate_records = match recorder.get_immediate_by_tick(tick_id_for_report).await {
+                Ok(r) => r,
+                Err(e) => {
+                    warn!("report_soul_cycle: get_immediate_by_tick({tick_id_for_report}) 失败（best-effort 继续）: {e:?}");
+                    Vec::new()
+                }
+            };
 
             let world_time = records.first().and_then(|r| r.world_time.clone());
 
