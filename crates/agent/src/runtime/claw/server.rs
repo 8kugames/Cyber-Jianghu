@@ -148,7 +148,9 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
 
                                 if let Ok(json) = serde_json::to_string(&error_msg) {
                                     let mut tx = ws_tx.lock().await;
-                                    let _ = tx.send(Message::Text(json.into())).await;
+                                    if let Err(e) = tx.send(Message::Text(json.into())).await {
+                                        tracing::warn!("claw ws_tx.send(error) 失败（receiver 可能已 drop）：{e:?}");
+                                    }
                                 }
 
                                 warn!(
@@ -169,7 +171,9 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
                 Ok(Message::Ping(data)) => {
                     debug!("Ping received");
                     let mut tx = ws_tx.lock().await;
-                    let _ = tx.send(Message::Pong(data)).await;
+                    if let Err(e) = tx.send(Message::Pong(data)).await {
+                        tracing::warn!("claw ws_tx.send(Pong) 失败（receiver 可能已 drop）：{e:?}");
+                    }
                 }
                 Err(e) => {
                     error!("WebSocket error: {}", e);
@@ -295,7 +299,9 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
                             };
                             if let Ok(json) = serde_json::to_string(&missed_msg) {
                                 let mut tx = ws_tx.lock().await;
-                                let _ = tx.send(Message::Text(json.into())).await;
+                                if let Err(e) = tx.send(Message::Text(json.into())).await {
+                                    tracing::warn!("claw ws_tx.send(missed_msg) 失败（receiver 可能已 drop）：{e:?}");
+                                }
                             }
                         }
                     }
@@ -366,7 +372,13 @@ pub async fn run_ws_server(
         .with_state(ws_state);
 
     // HTTP API 路由（复用 http 模块）
-    let api_router = create_api_router().with_state(api_state);
+    // P0-11(b)：API 端点必须携带 device auth_token（与 run_http_server 一致）
+    let api_router = create_api_router()
+        .layer(axum::middleware::from_fn_with_state(
+            api_state.clone(),
+            crate::infra::api::auth::require_device_token,
+        ))
+        .with_state(api_state);
 
     // 合并路由
     let app = Router::new().merge(ws_router).merge(api_router);

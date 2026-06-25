@@ -1,7 +1,7 @@
 // Entry: router init, global state, SSE connection
 
 import * as router from './router.js';
-import { API, get } from './api.js';
+import { API, get, refreshAuthToken } from './api.js';
 
 // Page modules (loaded on demand)
 import { dashboardPage } from './dashboard.js';
@@ -58,6 +58,10 @@ async function init() {
     router.register('dashboard', dashboardPage);
     router.register('characters', characterPage);
     router.register('settings', settingsPage);
+
+    // P0-11(b)：从 setup/status（公开端点）获取 auth_token 并缓存到 localStorage。
+    // 必须在任何受保护 API 调用之前完成。refreshAuthToken 内部调用 get(SETUP_STATUS)。
+    await refreshAuthToken();
 
     // Check setup status
     try {

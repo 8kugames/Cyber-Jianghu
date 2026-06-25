@@ -253,4 +253,9 @@ pub struct SetupStatusResponse {
     pub is_dead: bool,
     /// HTTP API 服务器实际端口
     pub actual_port: u16,
+    /// P0-11(b)：device auth_token，供本地 Web 面板在后续 API 调用中
+    /// 携带 `Authorization: Bearer <token>` 头。仅在 device_config 已初始化时存在。
+    /// 安全前提：API 仅绑 127.0.0.1（P0-11(a)），本端点为本地信任域。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_token: Option<String>,
 }
