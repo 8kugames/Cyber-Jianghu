@@ -219,6 +219,14 @@ pub(crate) async fn get_actions_handler() -> impl IntoResponse {
 
 /// GET /api/v1/setup/status - 返回引导状态
 pub(crate) async fn setup_status_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
+    // P0-11(b)：暴露 auth_token 供本地 Web 面板后续 API 调用认证
+    let auth_token = state
+        .device_config
+        .read()
+        .await
+        .as_ref()
+        .map(|c| c.auth_token.clone());
+
     let config = match crate::config::Config::from_file(&state.config_path) {
         Ok(c) => c,
         Err(_) => {
@@ -230,6 +238,7 @@ pub(crate) async fn setup_status_handler(State(state): State<HttpApiState>) -> i
                 current_character: None,
                 is_dead: false,
                 actual_port: state.actual_port,
+                auth_token,
             })
             .into_response();
         }
@@ -261,6 +270,7 @@ pub(crate) async fn setup_status_handler(State(state): State<HttpApiState>) -> i
         current_character,
         is_dead,
         actual_port: state.actual_port,
+        auth_token,
     })
     .into_response()
 }

@@ -38,6 +38,9 @@ pub(crate) mod handlers;
 pub mod service;
 pub mod soul_cycle_recorder;
 pub mod thinking_log;
+pub mod auth;
+#[cfg(test)]
+mod warn_contract_tests;
 
 use axum::{
     Router,
@@ -187,6 +190,8 @@ pub struct HttpApiState {
     pub rebirth_notify: std::sync::Arc<tokio::sync::Notify>,
     /// auto-rebirth 产出的 new_agent_id（task 写入，main loop 读取）
     pub pending_rebirth_agent_id: Arc<RwLock<Option<uuid::Uuid>>>,
+    /// auto-rebirth 产出的服务端权威 system_prompt
+    pub pending_rebirth_system_prompt: Arc<RwLock<Option<String>>>,
     /// 自动重生开关（运行时可热切换）
     pub auto_rebirth: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// HTTP API 服务器实际端口（用于 Web 面板链接）
@@ -305,7 +310,9 @@ pub fn http_decision(
             state.api_state.maybe_update_narratives(&world_state).await;
 
             // 广播 Tick 更新事件（供 Web Panel SSE 实时刷新）
-            let _ = state.api_state.tick_update_tx.send(world_state.tick_id);
+            if let Err(e) = state.api_state.tick_update_tx.send(world_state.tick_id) {
+                tracing::warn!("tick_update_tx.send 失败（receiver 可能已 drop）：{e:?}");
+            }
 
             if let Some(ref ws_state) = state.ws_shared_state {
                 ws_state.broadcast_tick(&world_state);
@@ -609,11 +616,17 @@ async fn static_file_handler(
 /// 则返回 503 SERVICE_UNAVAILABLE 错误
 pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Result<()> {
     let static_dir = get_static_serve_dir();
+    // P0-11(b)：所有 API 端点必须携带有效 device auth_token。
+    // 镜像 server 端 `require_*_token` 模式。白名单（health/静态资源）由中间件内部判定。
     let app = create_api_router()
+        .layer(axum::middleware::from_fn_with_state(
+            api_state.clone(),
+            auth::require_device_token,
+        ))
         .with_state(api_state.clone())
         .fallback(move |req: axum::extract::Request| static_file_handler(req, static_dir.clone()));
 
-    let addr = format!("0.0.0.0:{}", port);
+    let addr = format!("127.0.0.1:{}", port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => l,
         Err(e) => {
@@ -844,6 +857,7 @@ pub fn create_http_state(
         rebirth_delay_ticks: std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0)),
         rebirth_notify: std::sync::Arc::new(tokio::sync::Notify::new()),
         pending_rebirth_agent_id: Arc::new(RwLock::new(None)),
+        pending_rebirth_system_prompt: Arc::new(RwLock::new(None)),
         auto_rebirth: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(auto_rebirth_init)),
         actual_port,
         llm_container: std::sync::Arc::new(tokio::sync::RwLock::new(None)),

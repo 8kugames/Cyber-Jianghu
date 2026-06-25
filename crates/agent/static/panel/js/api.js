@@ -121,7 +121,7 @@ export async function get(path, options = {}) {
     const retries = options.retries ?? MAX_RETRIES;
     const response = await fetchWithRetry(`${API_BASE}${path}`, {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildHeaders(),
     }, retries, timeout);
     const data = await parseResponse(response);
     if (!response.ok) throw new Error(data?.message || data?.error || `服务器错误: ${response.status}`);
@@ -133,10 +133,56 @@ export async function post(path, body, options = {}) {
     const retries = options.retries ?? MAX_RETRIES;
     const response = await fetchWithRetry(`${API_BASE}${path}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildHeaders(),
         body: JSON.stringify(body),
     }, retries, timeout);
     const data = await parseResponse(response);
     if (!response.ok) throw new Error(data?.message || data?.error || `服务器错误: ${response.status}`);
     return data ?? {};
+}
+
+// P0-11(b)：device auth_token 管理
+// 从 setup/status 获取 token（本地信任域，API 仅绑 127.0.0.1），缓存到 localStorage
+const AUTH_TOKEN_KEY = 'cj_auth_token';
+
+function buildHeaders() {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = getStoredAuthToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return headers;
+}
+
+export function getStoredAuthToken() {
+    try {
+        return localStorage.getItem(AUTH_TOKEN_KEY) || null;
+    } catch (_) {
+        return null;
+    }
+}
+
+export function setStoredAuthToken(token) {
+    try {
+        if (token) {
+            localStorage.setItem(AUTH_TOKEN_KEY, token);
+        } else {
+            localStorage.removeItem(AUTH_TOKEN_KEY);
+        }
+    } catch (_) {
+        // localStorage 不可用（隐私模式），忽略——后续 API 调用会被 401 拒绝
+    }
+}
+
+/// 从 /api/v1/setup/status（公开端点）拉取 auth_token 并缓存。
+/// 在面板启动时调用一次。
+export async function refreshAuthToken() {
+    try {
+        const data = await get(API.SETUP_STATUS, { timeout: 3000, retries: 0 });
+        if (data?.auth_token) {
+            setStoredAuthToken(data.auth_token);
+            return data.auth_token;
+        }
+    } catch (_) {
+        // setup/status 不可用或未配置 device，保持现有 token（若有）
+    }
+    return getStoredAuthToken();
 }

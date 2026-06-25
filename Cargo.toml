@@ -30,8 +30,9 @@ rand = "0.10"
 
 # 日志
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.1"
+tracing-test = "0.2"
 
 # 协议 crate
 cyber-jianghu-protocol = { path = "crates/protocol" }
