@@ -18,7 +18,7 @@ impl InventoryManager {
     ///
     /// 如果物品已存在，增加数量；否则创建新记录
     pub async fn add_item(
-        pool: &PgPool,
+        conn: &mut sqlx::PgConnection,
         agent_id: Uuid,
         item_id: &str,
         quantity: i32,
@@ -34,7 +34,7 @@ impl InventoryManager {
         )
         .bind(agent_id)
         .bind(item_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *conn)
         .await
         .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
 
@@ -58,14 +58,14 @@ impl InventoryManager {
             sqlx::query("UPDATE agent_inventory SET quantity = $1 WHERE id = $2")
                 .bind(new_quantity)
                 .bind(item.id)
-                .execute(pool)
+                .execute(&mut *conn)
                 .await
                 .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
 
             info!("更新物品数量: {} x{}", item_id, new_quantity);
         } else {
             // 不存在，检查背包是否有空位
-            let slot_count = Self::get_slot_count(pool, agent_id).await?;
+            let slot_count = Self::get_slot_count(&mut *conn, agent_id).await?;
 
             if slot_count >= get_max_slots() {
                 // 检查是否可以堆叠到现有物品
@@ -79,7 +79,7 @@ impl InventoryManager {
             .bind(agent_id)
             .bind(item_id)
             .bind(quantity)
-            .execute(pool)
+            .execute(&mut *conn)
             .await
             .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
 
@@ -93,7 +93,7 @@ impl InventoryManager {
     ///
     /// 如果数量不足，返回错误
     pub async fn remove_item(
-        pool: &PgPool,
+        conn: &mut sqlx::PgConnection,
         agent_id: Uuid,
         item_id: &str,
         quantity: i32,
@@ -108,7 +108,7 @@ impl InventoryManager {
         )
         .bind(agent_id)
         .bind(item_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *conn)
         .await
         .map_err(|e| InventoryError::DatabaseError(e.to_string()))?
         .ok_or_else(|| InventoryError::ItemNotFound(item_id.to_string()))?;
@@ -126,7 +126,7 @@ impl InventoryManager {
             // 数量为0，删除记录
             sqlx::query("DELETE FROM agent_inventory WHERE id = $1")
                 .bind(item.id)
-                .execute(pool)
+                .execute(&mut *conn)
                 .await
                 .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
 
@@ -136,7 +136,7 @@ impl InventoryManager {
             sqlx::query("UPDATE agent_inventory SET quantity = $1 WHERE id = $2")
                 .bind(new_quantity)
                 .bind(item.id)
-                .execute(pool)
+                .execute(&mut *conn)
                 .await
                 .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
 
@@ -147,12 +147,12 @@ impl InventoryManager {
     }
 
     /// 获取Agent背包占用的格子数
-    pub async fn get_slot_count(pool: &PgPool, agent_id: Uuid) -> Result<i32, InventoryError> {
+    pub async fn get_slot_count(conn: &mut sqlx::PgConnection, agent_id: Uuid) -> Result<i32, InventoryError> {
         let count = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM agent_inventory WHERE agent_id = $1",
         )
         .bind(agent_id)
-        .fetch_one(pool)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
 
@@ -203,7 +203,7 @@ impl InventoryManager {
     /// 从一个Agent转移到另一个Agent
     /// 使用事务保证原子性：要么全部成功，要么全部失败
     pub async fn transfer_item(
-        pool: &PgPool,
+        conn: &mut sqlx::PgConnection,
         from_agent: Uuid,
         to_agent: Uuid,
         item_id: &str,
@@ -214,18 +214,13 @@ impl InventoryManager {
             from_agent, to_agent, item_id, quantity
         );
 
-        // 使用事务保证原子性
-        let mut tx = pool.begin().await.map_err(|e| {
-            InventoryError::DatabaseError(format!("Failed to begin transaction: {}", e))
-        })?;
-
         // 1. 检查来源是否有足够物品（使用 FOR UPDATE 锁定行）
         let available: Option<i32> = sqlx::query_scalar(
             "SELECT quantity FROM agent_inventory WHERE agent_id = $1 AND item_id = $2 FOR UPDATE",
         )
         .bind(from_agent)
         .bind(item_id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut *conn)
         .await
         .map_err(|e| InventoryError::DatabaseError(format!("Failed to query item: {}", e)))?;
 
@@ -243,7 +238,7 @@ impl InventoryManager {
             sqlx::query("DELETE FROM agent_inventory WHERE agent_id = $1 AND item_id = $2")
                 .bind(from_agent)
                 .bind(item_id)
-                .execute(&mut *tx)
+                .execute(&mut *conn)
                 .await
                 .map_err(|e| {
                     InventoryError::DatabaseError(format!("Failed to delete item: {}", e))
@@ -255,7 +250,7 @@ impl InventoryManager {
             .bind(new_quantity)
             .bind(from_agent)
             .bind(item_id)
-            .execute(&mut *tx)
+            .execute(&mut *conn)
             .await
             .map_err(|e| InventoryError::DatabaseError(format!("Failed to update item: {}", e)))?;
         }
@@ -266,7 +261,7 @@ impl InventoryManager {
         )
         .bind(to_agent)
         .bind(item_id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut *conn)
         .await
         .map_err(|e| {
             InventoryError::DatabaseError(format!("Failed to query target item: {}", e))
@@ -292,41 +287,30 @@ impl InventoryManager {
             .bind(new_qty)
             .bind(to_agent)
             .bind(item_id)
-            .execute(&mut *tx)
+            .execute(&mut *conn)
             .await
             .map_err(|e| {
                 InventoryError::DatabaseError(format!("Failed to update target item: {}", e))
             })?;
         } else {
-            // 目标没有该物品，检查背包格子数
-            let slot_count: i64 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM agent_inventory WHERE agent_id = $1")
-                    .bind(to_agent)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(|e| {
-                        InventoryError::DatabaseError(format!("Failed to check slots: {}", e))
-                    })?;
-
-            if slot_count as i32 >= get_max_slots() {
+            // 目标没有该物品，检查槽位上限
+            let slot_count = Self::get_slot_count(&mut *conn, to_agent).await?;
+            if slot_count >= get_max_slots() {
                 return Err(InventoryError::InventoryFull);
             }
 
             sqlx::query(
-                "INSERT INTO agent_inventory (agent_id, item_id, quantity, is_equipped) VALUES ($1, $2, $3, false)"
+                "INSERT INTO agent_inventory (agent_id, item_id, quantity, is_equipped) VALUES ($1, $2, $3, false)",
             )
             .bind(to_agent)
             .bind(item_id)
             .bind(quantity)
-            .execute(&mut *tx)
+            .execute(&mut *conn)
             .await
-            .map_err(|e| InventoryError::DatabaseError(format!("Failed to insert item: {}", e)))?;
+            .map_err(|e| {
+                InventoryError::DatabaseError(format!("Failed to insert target item: {}", e))
+            })?;
         }
-
-        // 提交事务
-        tx.commit().await.map_err(|e| {
-            InventoryError::DatabaseError(format!("Failed to commit transaction: {}", e))
-        })?;
 
         info!(
             "物品转移成功: {} x{} 从 {} 到 {}",
@@ -337,58 +321,87 @@ impl InventoryManager {
 
     /// 装备物品
     pub async fn equip_item(
-        pool: &PgPool,
+        conn: &mut sqlx::PgConnection,
         agent_id: Uuid,
         item_id: &str,
     ) -> Result<(), InventoryError> {
-        // 1. 检查物品是否存在
-        let item = sqlx::query_as::<_, InventoryItem>(
+        debug!("装备物品: agent={}, item={}", agent_id, item_id);
+
+        let existing = sqlx::query_as::<_, InventoryItem>(
             "SELECT id, agent_id, item_id, quantity, is_equipped FROM agent_inventory WHERE agent_id = $1 AND item_id = $2"
         )
         .bind(agent_id)
         .bind(item_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| InventoryError::DatabaseError(e.to_string()))?
-        .ok_or_else(|| InventoryError::ItemNotFound(item_id.to_string()))?;
-
-        if item.is_equipped {
-            return Ok(());
-        }
-
-        // 2. 卸下其他已装备的武器 (简化：只支持单武器装备)
-        sqlx::query(
-            "UPDATE agent_inventory SET is_equipped = false WHERE agent_id = $1 AND is_equipped = true"
-        )
-        .bind(agent_id)
-        .execute(pool)
+        .fetch_optional(&mut *conn)
         .await
         .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
 
-        // 3. 装备新物品
-        sqlx::query("UPDATE agent_inventory SET is_equipped = true WHERE id = $1")
-            .bind(item.id)
-            .execute(pool)
-            .await
-            .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
+        if let Some(item) = existing {
+            if item.is_equipped {
+                return Ok(()); // 已经装备了
+            }
 
-        Ok(())
+            // 当前数据模型只有 item_type，没有细分 equip_slot。
+            // 先按大类约束为 weapon/armor，避免继续依赖不存在的配置字段。
+            if let Some(config) = crate::game_data::ItemRegistry::get(item_id) {
+                if matches!(config.item_type.as_str(), "weapon" | "armor") {
+                    sqlx::query("UPDATE agent_inventory SET is_equipped = false WHERE agent_id = $1")
+                        .bind(agent_id)
+                        .execute(&mut *conn)
+                        .await
+                        .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
+
+                    // 装备新物品
+                    sqlx::query("UPDATE agent_inventory SET is_equipped = true WHERE id = $1")
+                        .bind(item.id)
+                    .execute(&mut *conn)
+                    .await
+                    .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
+
+                    info!("成功装备物品: {}", item_id);
+                    Ok(())
+                } else {
+                    Err(InventoryError::DatabaseError(format!(
+                        "物品类型 {} 不支持装备",
+                        config.item_type
+                    )))
+                }
+            } else {
+                Err(InventoryError::ItemNotFound(item_id.to_string()))
+            }
+        } else {
+            Err(InventoryError::ItemNotFound(item_id.to_string()))
+        }
     }
 
-    /// 清空Agent背包（死亡时掉落）
+    /// 清空Agent的所有物品（通常用于死亡掉落）
+    ///
+    /// 返回被清空的物品列表
     pub async fn clear_inventory(
-        pool: &PgPool,
+        conn: &mut sqlx::PgConnection,
         agent_id: Uuid,
     ) -> Result<Vec<InventoryItem>, InventoryError> {
-        let items = Self::get_all_items(pool, agent_id).await?;
+        debug!("清空背包: agent={}", agent_id);
 
-        sqlx::query("DELETE FROM agent_inventory WHERE agent_id = $1")
-            .bind(agent_id)
-            .execute(pool)
-            .await
-            .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
+        // 获取所有物品
+        let items = sqlx::query_as::<_, InventoryItem>(
+            "SELECT id, agent_id, item_id, quantity, is_equipped FROM agent_inventory WHERE agent_id = $1"
+        )
+        .bind(agent_id)
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
 
-        info!("清空背包: agent={}, 物品数={}", agent_id, items.len());
+        if !items.is_empty() {
+            sqlx::query("DELETE FROM agent_inventory WHERE agent_id = $1")
+                .bind(agent_id)
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
+
+            info!("成功清空背包: {} 个物品", items.len());
+        }
+
         Ok(items)
     }
 }

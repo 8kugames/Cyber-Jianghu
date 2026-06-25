@@ -143,8 +143,14 @@ async fn collect_soul_cycle_timeline(
         .context("soul cycle recorder not found")?;
 
     // 获取全部 tick_id 列表
-    let (tick_ids, _total) = recorder.get_tick_ids_page(1, 1000).await;
-    let all_records = recorder.get_by_ticks(&tick_ids).await;
+    let (tick_ids, _total) = recorder
+        .get_tick_ids_page(1, 1000)
+        .await
+        .context("biography: get_tick_ids_page 失败")?;
+    let all_records = recorder
+        .get_by_ticks(&tick_ids)
+        .await
+        .context("biography: get_by_ticks 失败")?;
 
     let mut lines: Vec<String> = Vec::new();
     // 按 tick_id 正序排列（原始是倒序）

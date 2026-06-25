@@ -1,12 +1,11 @@
 use tracing::{error, warn};
 
 use crate::actions::StateChange;
-use crate::db::DbPool;
 use crate::models::{AgentState, WorldEvent, WorldEventType};
 
 /// 应用状态变更的回退逻辑
 pub async fn apply_state_change(
-    db_pool: &DbPool,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tick_id: i64,
     change: &StateChange,
     intent_id: Option<uuid::Uuid>,
@@ -34,7 +33,7 @@ pub async fn apply_state_change(
             quantity,
         } => {
             let result = crate::inventory::InventoryManager::transfer_item(
-                db_pool, *from, *to, item_id, *quantity,
+                tx, *from, *to, item_id, *quantity,
             )
             .await;
 
@@ -98,7 +97,7 @@ pub async fn apply_state_change(
             effects,
         } => {
             let remove_result =
-                crate::inventory::InventoryManager::remove_item(db_pool, *agent_id, item_id, 1)
+                crate::inventory::InventoryManager::remove_item(tx, *agent_id, item_id, 1)
                     .await;
 
             if let Err(e) = remove_result {
@@ -204,18 +203,18 @@ pub async fn apply_state_change(
                 "ground" => {
                     if let Some(state) = agent_states.iter().find(|s| s.agent_id == *agent_id) {
                         let node_id = state.node_id.clone();
-                        match crate::db::remove_ground_item(db_pool, &node_id, item_id, *quantity)
+                        match crate::db::remove_ground_item(tx, &node_id, item_id, *quantity)
                             .await
                         {
                             Ok(true) => {
                                 if let Err(e) = crate::inventory::InventoryManager::add_item(
-                                    db_pool, *agent_id, item_id, *quantity,
+                                    tx, *agent_id, item_id, *quantity,
                                 )
                                 .await
                                 {
                                     warn!("拾取物品添加到背包失败: {}，尝试放回地面", e);
                                     if let Err(rollback_e) = crate::db::add_ground_item(
-                                        db_pool, &node_id, item_id, *quantity, None,
+                                        tx, &node_id, item_id, *quantity, None,
                                     )
                                     .await
                                     {
@@ -275,7 +274,7 @@ pub async fn apply_state_change(
                 }
                 "resource" => {
                     if let Err(e) = crate::inventory::InventoryManager::add_item(
-                        db_pool, *agent_id, item_id, *quantity,
+                        tx, *agent_id, item_id, *quantity,
                     )
                     .await
                     {
@@ -298,7 +297,7 @@ pub async fn apply_state_change(
                 }
                 "effect" => {
                     if let Err(e) = crate::inventory::InventoryManager::add_item(
-                        db_pool, *agent_id, item_id, *quantity,
+                        tx, *agent_id, item_id, *quantity,
                     )
                     .await
                     {
@@ -321,7 +320,7 @@ pub async fn apply_state_change(
             location,
         } => {
             if let Err(e) = crate::inventory::InventoryManager::remove_item(
-                db_pool, *agent_id, item_id, *quantity,
+                tx, *agent_id, item_id, *quantity,
             )
             .await
             {
@@ -329,7 +328,7 @@ pub async fn apply_state_change(
                 false
             } else {
                 if let Err(e) = crate::db::add_ground_item(
-                    db_pool,
+                    tx,
                     location,
                     item_id,
                     *quantity,
@@ -339,7 +338,7 @@ pub async fn apply_state_change(
                 {
                     warn!("丢弃物品添加到地面失败，回滚背包: {}", e);
                     if let Err(re) = crate::inventory::InventoryManager::add_item(
-                        db_pool, *agent_id, item_id, *quantity,
+                        tx, *agent_id, item_id, *quantity,
                     )
                     .await
                     {
@@ -389,18 +388,13 @@ pub async fn apply_state_change(
 
             if let Some(recipe) = recipe_to_craft {
                 let craft_result = async {
-                    let mut tx = match db_pool.begin().await {
-                        Ok(tx) => tx,
-                        Err(e) => return Err(format!("无法开启事务: {}", e)),
-                    };
-
                     for mat in &recipe.materials {
                         let count: i32 = sqlx::query_scalar(
                             "SELECT quantity FROM agent_inventory WHERE agent_id = $1 AND item_id = $2 FOR UPDATE",
                         )
                         .bind(*agent_id)
                         .bind(&mat.item_id)
-                        .fetch_optional(&mut *tx)
+                        .fetch_optional(&mut **tx)
                         .await
                         .map_err(|e| format!("查询材料失败: {}", e))?
                         .unwrap_or(0);
@@ -419,7 +413,7 @@ pub async fn apply_state_change(
                         )
                         .bind(*agent_id)
                         .bind(&mat.item_id)
-                        .fetch_one(&mut *tx)
+                        .fetch_one(&mut **tx)
                         .await
                         .map_err(|e| format!("获取材料数量失败: {}", e))?;
 
@@ -430,7 +424,7 @@ pub async fn apply_state_change(
                             )
                             .bind(*agent_id)
                             .bind(&mat.item_id)
-                            .execute(&mut *tx)
+                            .execute(&mut **tx)
                             .await
                             .map_err(|e| format!("删除材料失败: {}", e))?;
                         } else {
@@ -440,7 +434,7 @@ pub async fn apply_state_change(
                             .bind(new_qty)
                             .bind(*agent_id)
                             .bind(&mat.item_id)
-                            .execute(&mut *tx)
+                            .execute(&mut **tx)
                             .await
                             .map_err(|e| format!("更新材料数量失败: {}", e))?;
                         }
@@ -451,7 +445,7 @@ pub async fn apply_state_change(
                     )
                     .bind(*agent_id)
                     .bind(item_id)
-                    .fetch_optional(&mut *tx)
+                    .fetch_optional(&mut **tx)
                     .await
                     .map_err(|e| format!("查询成品失败: {}", e))?;
 
@@ -462,7 +456,7 @@ pub async fn apply_state_change(
                         .bind(qty + quantity)
                         .bind(*agent_id)
                         .bind(item_id)
-                        .execute(&mut *tx)
+                        .execute(&mut **tx)
                         .await
                         .map_err(|e| format!("更新成品数量失败: {}", e))?;
                     } else {
@@ -470,7 +464,7 @@ pub async fn apply_state_change(
                             "SELECT COUNT(*) FROM agent_inventory WHERE agent_id = $1",
                         )
                         .bind(*agent_id)
-                        .fetch_one(&mut *tx)
+                        .fetch_one(&mut **tx)
                         .await
                         .map_err(|e| format!("检查背包格子失败: {}", e))?;
 
@@ -484,14 +478,10 @@ pub async fn apply_state_change(
                         .bind(*agent_id)
                         .bind(item_id)
                         .bind(*quantity)
-                        .execute(&mut *tx)
+                        .execute(&mut **tx)
                         .await
                         .map_err(|e| format!("插入成品失败: {}", e))?;
                     }
-
-                    tx.commit()
-                        .await
-                        .map_err(|e| format!("提交事务失败: {}", e))?;
 
                     Ok(())
                 }
@@ -551,7 +541,7 @@ pub async fn apply_state_change(
         }
         StateChange::ItemEquipped { agent_id, item_id } => {
             if let Err(e) =
-                crate::inventory::InventoryManager::equip_item(db_pool, *agent_id, item_id).await
+                crate::inventory::InventoryManager::equip_item(tx, *agent_id, item_id).await
             {
                 warn!("装备物品失败: {}", e);
                 false
@@ -647,13 +637,13 @@ pub async fn apply_state_change(
                 if was_alive && !state.inventory_cleared_this_tick {
                     state.inventory_cleared_this_tick = true;
                     let location = state.node_id.clone();
-                    match crate::inventory::InventoryManager::clear_inventory(db_pool, *agent_id)
+                    match crate::inventory::InventoryManager::clear_inventory(tx, *agent_id)
                         .await
                     {
                         Ok(items) => {
                             for item in items {
                                 if let Err(e) = crate::db::add_ground_item(
-                                    db_pool,
+                                    tx,
                                     &location,
                                     &item.item_id,
                                     item.quantity,
@@ -691,7 +681,7 @@ pub async fn apply_state_change(
                 state.node_id = new_location.clone();
             }
 
-            if let Err(e) = crate::db::update_agent_location(db_pool, *agent_id, new_location).await
+            if let Err(e) = crate::db::update_agent_location(tx, *agent_id, new_location).await
             {
                 warn!("更新位置失败: {}", e);
                 false
@@ -725,7 +715,7 @@ pub async fn apply_state_change(
             .bind(recipe_id)
             .bind(tick_id)
             .bind(source_str)
-            .execute(db_pool)
+            .execute(&mut **tx)
             .await
             .is_ok()
         }

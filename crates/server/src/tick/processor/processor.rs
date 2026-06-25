@@ -2,7 +2,7 @@
 //!
 //! 协调意图解析、状态变更和事件生成。
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tracing::warn;
 
 use super::{
@@ -63,6 +63,8 @@ impl StateProcessor {
         all_states: &[AgentState],
         pipe_seq: i32,
     ) -> Result<SingleProcessingResult> {
+        let mut tx = self.db_pool.begin().await.context("failed to begin tx")?;
+        
         let executor = ActionExecutor::new(self.db_pool.clone());
         let mut events: Vec<(uuid::Uuid, WorldEvent)> = Vec::new();
 
@@ -109,7 +111,7 @@ impl StateProcessor {
             Ok(parsed) => executor.execute(&resolved_intent, &parsed, &mut agent_state, all_states),
         };
 
-        let execution_failed = !result.success;
+        let mut execution_failed = !result.success;
 
         if result.success {
             // 经验阈值：按 action category 递增计数 + 检查技能习得
@@ -126,23 +128,25 @@ impl StateProcessor {
 
             let mut all_applied = true;
             for change in &result.state_changes {
-                let mut ctx =
-                    MutationContext::new(&self.db_pool, tick_id, result.intent_id, &mut events);
-
                 let mut single_states = vec![agent_state.clone()];
                 let mut applied = false;
-                for mutator in &self.mutators {
-                    if let Ok(true) = mutator.mutate(change, &mut single_states, &mut ctx).await {
-                        applied = true;
-                        agent_state = single_states.into_iter().next().unwrap_or(agent_state);
-                        break;
+                {
+                    let mut ctx =
+                        MutationContext::new(&mut tx, tick_id, result.intent_id, &mut events);
+                    for mutator in &self.mutators {
+                        if let Ok(true) = mutator.mutate(change, &mut single_states, &mut ctx).await
+                        {
+                            applied = true;
+                            agent_state = single_states.into_iter().next().unwrap_or(agent_state);
+                            break;
+                        }
                     }
                 }
 
                 if !applied {
                     let mut single_states = vec![agent_state.clone()];
                     applied = apply_state_change(
-                        &self.db_pool,
+                        &mut tx,
                         tick_id,
                         change,
                         result.intent_id,
@@ -182,26 +186,24 @@ impl StateProcessor {
                     agent_id: intent.agent_id,
                     skill_id: skill_id.clone(),
                 };
-                let mut ctx =
-                    MutationContext::new(&self.db_pool, tick_id, result.intent_id, &mut events);
                 let mut single_states = vec![agent_state.clone()];
-                for mutator in &self.mutators {
-                    if let Ok(true) = mutator.mutate(&change, &mut single_states, &mut ctx).await {
-                        agent_state = single_states.into_iter().next().unwrap_or(agent_state);
-                        break;
+                {
+                    let mut ctx =
+                        MutationContext::new(&mut tx, tick_id, result.intent_id, &mut events);
+                    for mutator in &self.mutators {
+                        if let Ok(true) =
+                            mutator.mutate(&change, &mut single_states, &mut ctx).await
+                        {
+                            agent_state = single_states.into_iter().next().unwrap_or(agent_state);
+                            break;
+                        }
                     }
                 }
             }
 
             if !all_applied {
-                // execution_failed 已在 let execution_failed = !result.success; 设置
+                execution_failed = true;
             }
-        }
-
-        // Sagas: 回滚
-        if execution_failed {
-            agent_state = agent_state_snapshot;
-            events.truncate(events_len_before);
         }
 
         // P0-2: Schema 校验（warning 模式，不阻断执行）
@@ -217,7 +219,7 @@ impl StateProcessor {
             }))
         };
 
-        // 单条 Action log
+        // 单条 Action log 构造（纯数据，无副作用）
         let action_type = ActionType::new(intent.action_type.as_str());
         let action_log = AgentAction {
             id: 0,
@@ -251,12 +253,28 @@ impl StateProcessor {
             pipe_seq,
         };
 
-        let pool = self.db_pool.clone();
-        tokio::spawn(async move {
-            if let Err(e) = crate::db::batch_insert_action_logs(&pool, &[action_log]).await {
-                warn!("Action log 异步写入失败: {:#}", e);
+        // P0-2 修复：action_log 必须在 tx 内写入，与 state mutations 同生命周期。
+        // 若 insert 失败 → execution_failed = true → 走 rollback 分支，state 不落库，
+        // 保证"state 变更 + action_log"要么全成功要么全回滚（Saga 原子性）。
+        if let Err(e) =
+            crate::db::batch_insert_action_logs(&mut tx, &[action_log]).await
+        {
+            warn!("Action log 写入失败（将回滚整个 Saga）: {:#}", e);
+            execution_failed = true;
+        }
+
+        // Sagas: 回滚/提交（action_log 已纳入 tx，commit/rollback 对两者同时生效）
+        if execution_failed {
+            agent_state = agent_state_snapshot;
+            events.truncate(events_len_before);
+            if let Err(e) = tx.rollback().await {
+                warn!("Saga tx 回滚失败: {}", e);
             }
-        });
+        } else {
+            if let Err(e) = tx.commit().await {
+                warn!("Saga tx 提交失败: {}", e);
+            }
+        }
 
         Ok(SingleProcessingResult {
             updated_state: agent_state,
@@ -407,5 +425,53 @@ mod tests {
         let processor = StateProcessor::new(db_pool);
         // 测试创建成功
         assert!(processor.mutators.len() >= 3);
+    }
+
+    /// 验证 P0-2：`batch_insert_action_logs` 必须在 `tx.commit()` **之前**调用，
+    /// 且传入 `&mut tx`（而非 `&self.db_pool`）。
+    ///
+    /// 之前 action_log insert 在 commit 之后、用 pool 直写——若 insert 失败，
+    /// state 已提交、log 丢失（observability 缺口，违反 Saga 原子性）。
+    ///
+    /// 本测试为源码契约测试（无 DB 环境下验证 tx 边界的唯一可行方式），
+    /// 参考 `test_p1_9_axum_serve_uses_graceful_shutdown` 模式。
+    #[test]
+    fn test_p0_2_action_log_insert_before_commit_and_uses_tx() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let source = std::fs::read_to_string(manifest_dir.join("src/tick/processor/processor.rs"))
+            .expect("read processor.rs source");
+        let tests_marker = source
+            .find("#[cfg(test)]")
+            .expect("processor.rs should have a #[cfg(test)] block");
+        let prod_slice = &source[..tests_marker];
+
+        // 1. action_log insert 必须用 tx（不能是 db_pool）
+        //    找 `batch_insert_action_logs(` 调用，看其后 60 字符内是否含 `tx`（而非 `db_pool`）
+        let insert_idx = prod_slice
+            .find("batch_insert_action_logs(")
+            .expect("must call batch_insert_action_logs in production code");
+        let insert_tail = &prod_slice[insert_idx..];
+        let insert_next_60 = insert_tail.get(..60).unwrap_or(insert_tail);
+        assert!(
+            insert_next_60.contains("tx"),
+            "P0-2 修复缺失：batch_insert_action_logs 必须传入 `&mut tx`，\n\
+             而非 `&self.db_pool`。当前调用片段：\n{insert_next_60}"
+        );
+        assert!(
+            !insert_next_60.contains("db_pool"),
+            "P0-2 修复缺失：batch_insert_action_logs 仍在用 db_pool，\n\
+             必须改为 tx 以纳入 Saga 事务。当前调用片段：\n{insert_next_60}"
+        );
+
+        // 2. action_log insert 必须在 commit() 之前
+        //    在 prod 代码中，batch_insert_action_logs 的字节偏移必须 < tx.commit() 的字节偏移
+        let commit_idx = prod_slice
+            .find("tx.commit()")
+            .expect("must call tx.commit() in production code");
+        assert!(
+            insert_idx < commit_idx,
+            "P0-2 修复缺失：batch_insert_action_logs (offset={insert_idx}) 必须在 tx.commit() (offset={commit_idx}) **之前**，\n\
+             否则 action_log 在 Saga 事务外执行，insert 失败时 state 已提交、log 丢失。"
+        );
     }
 }

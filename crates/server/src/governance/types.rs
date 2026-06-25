@@ -30,16 +30,45 @@ pub enum ProposalStatus {
 
 impl std::fmt::Display for ProposalStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = serde_json::to_value(self)
-            .map(|v| v.as_str().unwrap_or("unknown").to_string())
-            .unwrap_or_else(|_| format!("{:?}", self).to_lowercase());
-        write!(f, "{}", s)
+        f.write_str(self.as_str())
     }
 }
 
 impl ProposalStatus {
     pub fn from_db_str(s: &str) -> Self {
         serde_json::from_value(serde_json::Value::String(s.to_string())).unwrap_or(Self::Error)
+    }
+
+    /// 严格反序列化：DB 中若出现非白名单值（漂移、漂大小写、未知），
+    /// 直接返回错误，由上层阻断读取并暴露腐化数据。
+    pub fn try_from_db_str(s: &str) -> anyhow::Result<Self> {
+        match s {
+            "pending_review" => Ok(Self::PendingReview),
+            "under_review" => Ok(Self::UnderReview),
+            "approved" => Ok(Self::Approved),
+            "rejected" => Ok(Self::Rejected),
+            "escalated_admin" => Ok(Self::EscalatedAdmin),
+            "converged" => Ok(Self::Converged),
+            "closed_approved" => Ok(Self::ClosedApproved),
+            "closed_rejected" => Ok(Self::ClosedRejected),
+            "error" => Ok(Self::Error),
+            other => anyhow::bail!("invalid proposal status in db: {other:?}"),
+        }
+    }
+
+    /// 序列化字符串与 DB 列保持一致（snake_case）。不经过 serde_json。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::PendingReview => "pending_review",
+            Self::UnderReview => "under_review",
+            Self::Approved => "approved",
+            Self::Rejected => "rejected",
+            Self::EscalatedAdmin => "escalated_admin",
+            Self::Converged => "converged",
+            Self::ClosedApproved => "closed_approved",
+            Self::ClosedRejected => "closed_rejected",
+            Self::Error => "error",
+        }
     }
 }
 
@@ -55,6 +84,164 @@ pub enum VoteChoice {
     Reject,
     #[allow(dead_code)]
     Abstain,
+}
+
+/// 从 DB 字符串解析投票选择；非法值直接返回错误。
+///
+/// 严格模式：DB 中若出现任何不在白名单内的值（脏数据、漂移大写、空串），
+/// 都不应被静默降级为 Reject —— 上层必须看到错误并阻断读取。
+pub fn parse_vote_str(s: &str) -> anyhow::Result<VoteChoice> {
+    match s {
+        "approve" => Ok(VoteChoice::Approve),
+        "reject" => Ok(VoteChoice::Reject),
+        "abstain" => Ok(VoteChoice::Abstain),
+        other => anyhow::bail!("invalid vote value in db: {other:?}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_vote_str_accepts_approve_reject_abstain() {
+        assert_eq!(parse_vote_str("approve").unwrap(), VoteChoice::Approve);
+        assert_eq!(parse_vote_str("reject").unwrap(), VoteChoice::Reject);
+        assert_eq!(parse_vote_str("abstain").unwrap(), VoteChoice::Abstain);
+    }
+
+    #[test]
+    fn test_parse_vote_str_rejects_invalid_db_value() {
+        for invalid in [
+            "",
+            "Approve",
+            "REJECT",
+            "approved",
+            "yes",
+            "maybe",
+            "0",
+            "1",
+        ] {
+            assert!(
+                parse_vote_str(invalid).is_err(),
+                "expected Err for {invalid:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_proposal_status_try_from_db_str_accepts_all_valid_values() {
+        assert_eq!(
+            ProposalStatus::try_from_db_str("pending_review").unwrap(),
+            ProposalStatus::PendingReview
+        );
+        assert_eq!(
+            ProposalStatus::try_from_db_str("under_review").unwrap(),
+            ProposalStatus::UnderReview
+        );
+        assert_eq!(
+            ProposalStatus::try_from_db_str("approved").unwrap(),
+            ProposalStatus::Approved
+        );
+        assert_eq!(
+            ProposalStatus::try_from_db_str("rejected").unwrap(),
+            ProposalStatus::Rejected
+        );
+        assert_eq!(
+            ProposalStatus::try_from_db_str("escalated_admin").unwrap(),
+            ProposalStatus::EscalatedAdmin
+        );
+        assert_eq!(
+            ProposalStatus::try_from_db_str("converged").unwrap(),
+            ProposalStatus::Converged
+        );
+        assert_eq!(
+            ProposalStatus::try_from_db_str("closed_approved").unwrap(),
+            ProposalStatus::ClosedApproved
+        );
+        assert_eq!(
+            ProposalStatus::try_from_db_str("closed_rejected").unwrap(),
+            ProposalStatus::ClosedRejected
+        );
+        assert_eq!(
+            ProposalStatus::try_from_db_str("error").unwrap(),
+            ProposalStatus::Error
+        );
+    }
+
+    #[test]
+    fn test_proposal_status_try_from_db_str_rejects_invalid_value() {
+        for invalid in [
+            "",
+            "PendingReview",
+            "APPROVED",
+            "approve",
+            "done",
+            "unknown",
+        ] {
+            assert!(
+                ProposalStatus::try_from_db_str(invalid).is_err(),
+                "expected Err for {invalid:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_proposal_status_display_roundtrips_via_as_str() {
+        for status in [
+            ProposalStatus::PendingReview,
+            ProposalStatus::UnderReview,
+            ProposalStatus::Approved,
+            ProposalStatus::Rejected,
+            ProposalStatus::EscalatedAdmin,
+            ProposalStatus::Converged,
+            ProposalStatus::ClosedApproved,
+            ProposalStatus::ClosedRejected,
+            ProposalStatus::Error,
+        ] {
+            assert_eq!(status.as_str(), format!("{status}"));
+            assert_eq!(
+                ProposalStatus::try_from_db_str(status.as_str()).unwrap(),
+                status
+            );
+        }
+    }
+
+    #[test]
+    fn test_proposal_stage_try_from_db_str_accepts_valid_values() {
+        assert_eq!(
+            ProposalStage::try_from_db_str("awaiting_fuxi_initial").unwrap(),
+            ProposalStage::AwaitingFuxiInitial
+        );
+        assert_eq!(
+            ProposalStage::try_from_db_str("awaiting_peer").unwrap(),
+            ProposalStage::AwaitingPeer
+        );
+        assert_eq!(
+            ProposalStage::try_from_db_str("awaiting_fuxi_final").unwrap(),
+            ProposalStage::AwaitingFuxiFinal
+        );
+        assert_eq!(
+            ProposalStage::try_from_db_str("done").unwrap(),
+            ProposalStage::Done
+        );
+    }
+
+    #[test]
+    fn test_proposal_stage_try_from_db_str_rejects_invalid_value() {
+        for invalid in [
+            "",
+            "awaiting_initial",
+            "AwaitingPeer",
+            "DONE",
+            "garbage",
+        ] {
+            assert!(
+                ProposalStage::try_from_db_str(invalid).is_err(),
+                "expected Err for {invalid:?}"
+            );
+        }
+    }
 }
 
 /// 三皇共审管道阶段
@@ -103,6 +290,18 @@ impl ProposalStage {
             "awaiting_fuxi_final" => Self::AwaitingFuxiFinal,
             "done" => Self::Done,
             _ => Self::AwaitingFuxiInitial,
+        }
+    }
+
+    /// 严格反序列化：DB 中若出现非白名单值（漂移、漂大小写、未知），
+    /// 直接返回错误，由上层阻断读取。
+    pub fn try_from_db_str(s: &str) -> anyhow::Result<Self> {
+        match s {
+            "awaiting_fuxi_initial" => Ok(Self::AwaitingFuxiInitial),
+            "awaiting_peer" => Ok(Self::AwaitingPeer),
+            "awaiting_fuxi_final" => Ok(Self::AwaitingFuxiFinal),
+            "done" => Ok(Self::Done),
+            other => anyhow::bail!("invalid proposal stage in db: {other:?}"),
         }
     }
 }

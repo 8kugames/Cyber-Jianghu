@@ -1,7 +1,7 @@
 -- 010_action_evolution.sql
 CREATE TABLE IF NOT EXISTS action_evolution_proposals (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    agent_id            UUID NOT NULL,
+    agent_id            UUID NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
     tick_id             BIGINT NOT NULL,
     actor_arity         SMALLINT NOT NULL DEFAULT 1,
     target_arity        TEXT NOT NULL DEFAULT 'zero_to_many',

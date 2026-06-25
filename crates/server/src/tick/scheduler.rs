@@ -36,7 +36,6 @@ use crate::game_data::loaders::load_actions;
 use crate::paths::get_config_dir;
 use crate::websocket::broadcast_config_update;
 use cyber_jianghu_protocol::ServerMessage;
-use std::fs;
 
 /// Tick调度器
 ///
@@ -102,6 +101,40 @@ pub struct TickScheduler {
     vendor_pending_events: crate::models::VendorPendingEvents,
 }
 
+/// 读取热重载配置文件的 metadata，集中编码"NotFound vs 真错"约定。
+///
+/// 约定（**根因级修复**，消除 12 个站点的 silent swallow）：
+/// - `Ok(Some(SystemTime))`：文件存在，metadata 读成功，caller 继续比 mtime
+/// - `Ok(None)`：NotFound = 文件真的不存在/未配置，无事可做，正常 skip
+/// - `Err(...)`：NotFound 之外的 IO 错（PermissionDenied / InvalidInput / 文件锁 / 磁盘错）= 真错，
+///   必须冒泡让 caller 决定（warn + propagate）
+///
+/// 之前 12 个 hot-reload 站点都用 `Err(_) => return Ok(())` 一刀切，把"权限被篡改"和
+/// "文件未创建"混为"无事可做"，导致运维看不到 hot-reload 被攻击/磁盘满/锁文件等真问题。
+pub(crate) fn read_file_metadata_for_hot_reload(
+    path: &std::path::Path,
+) -> anyhow::Result<Option<std::time::SystemTime>> {
+    let metadata = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "热重载 metadata 读取失败: path={}, err={}",
+                path.display(),
+                e
+            ));
+        }
+    };
+    let modified = metadata.modified().map_err(|e| {
+        anyhow::anyhow!(
+            "热重载 metadata.modified() 失败: path={}, err={}",
+            path.display(),
+            e
+        )
+    })?;
+    Ok(Some(modified))
+}
+
 impl TickScheduler {
     /// 创建新的Tick调度器
     #[allow(clippy::too_many_arguments)]
@@ -161,14 +194,9 @@ impl TickScheduler {
             return Ok(()); // 文件不存在，跳过
         };
 
-        let metadata = match fs::metadata(file_path) {
-            Ok(m) => m,
-            Err(_) => return Ok(()),
-        };
-
-        let modified = match metadata.modified() {
-            Ok(t) => t,
-            Err(_) => return Ok(()),
+        let modified = match read_file_metadata_for_hot_reload(file_path)? {
+            Some(t) => t,
+            None => return Ok(()),
         };
 
         // 检查是否是新文件或已修改
@@ -242,14 +270,9 @@ impl TickScheduler {
             return Ok(()); // 文件不存在，跳过
         };
 
-        let metadata = match fs::metadata(file_path) {
-            Ok(m) => m,
-            Err(_) => return Ok(()),
-        };
-
-        let modified = match metadata.modified() {
-            Ok(t) => t,
-            Err(_) => return Ok(()),
+        let modified = match read_file_metadata_for_hot_reload(file_path)? {
+            Some(t) => t,
+            None => return Ok(()),
         };
 
         // 检查是否是新文件或已修改
@@ -312,14 +335,9 @@ impl TickScheduler {
             return Ok(()); // 文件不存在，跳过
         };
 
-        let metadata = match fs::metadata(file_path) {
-            Ok(m) => m,
-            Err(_) => return Ok(()),
-        };
-
-        let modified = match metadata.modified() {
-            Ok(t) => t,
-            Err(_) => return Ok(()),
+        let modified = match read_file_metadata_for_hot_reload(file_path)? {
+            Some(t) => t,
+            None => return Ok(()),
         };
 
         // 检查是否是新文件或已修改
@@ -427,14 +445,9 @@ impl TickScheduler {
             return Ok(());
         }
 
-        let metadata = match fs::metadata(&prompt_templates_path) {
-            Ok(m) => m,
-            Err(_) => return Ok(()),
-        };
-
-        let modified = match metadata.modified() {
-            Ok(t) => t,
-            Err(_) => return Ok(()),
+        let modified = match read_file_metadata_for_hot_reload(&prompt_templates_path)? {
+            Some(t) => t,
+            None => return Ok(()),
         };
 
         let should_reload = match self.last_prompt_templates_mtime {
@@ -489,14 +502,9 @@ impl TickScheduler {
             return Ok(()); // 目录不存在，跳过
         }
 
-        let metadata = match fs::metadata(&skills_path) {
-            Ok(m) => m,
-            Err(_) => return Ok(()),
-        };
-
-        let modified = match metadata.modified() {
-            Ok(t) => t,
-            Err(_) => return Ok(()),
+        let modified = match read_file_metadata_for_hot_reload(&skills_path)? {
+            Some(t) => t,
+            None => return Ok(()),
         };
 
         // 检查是否是新文件或已修改
@@ -591,14 +599,9 @@ impl TickScheduler {
             return Ok(());
         }
 
-        let metadata = match fs::metadata(&nc_path) {
-            Ok(m) => m,
-            Err(_) => return Ok(()),
-        };
-
-        let modified = match metadata.modified() {
-            Ok(t) => t,
-            Err(_) => return Ok(()),
+        let modified = match read_file_metadata_for_hot_reload(&nc_path)? {
+            Some(t) => t,
+            None => return Ok(()),
         };
 
         let should_reload = match self.last_narrative_config_mtime {
@@ -1090,6 +1093,72 @@ impl TickScheduler {
 mod tests {
     use super::*;
     use chrono::{Datelike, NaiveDate, TimeZone, Timelike};
+    use std::io::Write;
+
+    /// 验证 P0-AUDIT：`read_file_metadata_for_hot_reload` 在文件不存在时返回 Ok(None)，
+    /// 而不是 Err。约定：NotFound = 无事可做（正常 skip），不要混入"真错"路径。
+    #[test]
+    fn test_read_file_metadata_for_hot_reload_returns_none_for_missing_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "scheduler_test_missing_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("does_not_exist.yaml");
+
+        let result = read_file_metadata_for_hot_reload(&missing)
+            .expect("NotFound must not be Err");
+        assert!(
+            result.is_none(),
+            "P0-AUDIT 修复缺失：缺失文件必须返回 Ok(None)，但返回了 Some"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 验证 P0-AUDIT：文件存在时返回 Ok(Some(modified))。
+    #[test]
+    fn test_read_file_metadata_for_hot_reload_returns_some_for_existing_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "scheduler_test_existing_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("actions.yaml");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "version: '1.0'").unwrap();
+        drop(f);
+
+        let result = read_file_metadata_for_hot_reload(&path)
+            .expect("existing file metadata must succeed");
+        assert!(
+            result.is_some(),
+            "P0-AUDIT：已存在文件必须返回 Ok(Some(modified))，但返回了 None"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 验证 P0-AUDIT：NotFound 之外的 IO 错（如路径含 NUL 字节）必须返回 Err，
+    /// 不能吞掉。约定：除 NotFound 外的 IO 错 = 真错（权限/磁盘/文件锁/路径非法），
+    /// 必须显式冒泡让 caller 决策。
+    #[test]
+    fn test_read_file_metadata_for_hot_reload_returns_err_for_invalid_path() {
+        // NUL 字节在 Linux 上是 InvalidInput，不是 NotFound。
+        // 这是测试"非 NotFound 错误必须冒泡"的最便携方式（不依赖 chmod / 平台权限）。
+        let invalid = std::path::Path::new("actions\0bad.yaml");
+
+        let result = read_file_metadata_for_hot_reload(invalid);
+        assert!(
+            result.is_err(),
+            "P0-AUDIT 修复缺失：非 NotFound IO 错必须返回 Err（warn + 冒泡），\
+             而非吞掉返回 Ok(None)。\
+             当前 is_ok={}  is_none={}",
+            result.is_ok(),
+            matches!(result, Ok(None))
+        );
+    }
+
 
     /// 测试东八区时间解析
     ///

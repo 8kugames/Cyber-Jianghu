@@ -629,7 +629,20 @@ pub struct InventoryLimitsData {
 pub struct NetworkConfigData {
     pub websocket: WebSocketConfigData,
     #[serde(default)]
+    pub device_register: DeviceRegisterConfigData,
+    #[serde(default)]
     pub dialogue: DialogueConfigData,
+}
+
+/// 设备注册配置
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct DeviceRegisterConfigData {
+    #[serde(default = "default_device_register_rate_limit_secs")]
+    pub rate_limit_secs: u64,
+}
+
+fn default_device_register_rate_limit_secs() -> u64 {
+    10
 }
 
 /// WebSocket配置数据

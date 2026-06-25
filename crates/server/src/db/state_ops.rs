@@ -271,19 +271,23 @@ pub async fn batch_insert_agent_states(pool: &PgPool, states: &[AgentState]) -> 
 
 /// 单条 Agent 状态持久化（实时模式用）
 ///
-/// UPSERT 语义：同 (agent_id, tick_id) 时更新，否则插入。
+/// UPSERT 语义：同 `(agent_id, tick_id)` 时使用 `state_version` 做 CAS 更新，
+/// 否则插入新行并返回版本号 0。
 /// 用于 IntentWorker 的 per-intent 状态持久化。
-pub async fn upsert_agent_state(pool: &PgPool, state: &AgentState) -> Result<()> {
+pub async fn upsert_agent_state(pool: &PgPool, state: &AgentState) -> Result<i64> {
     let attributes_json = serialize_attributes_with_skills(state)?;
 
-    sqlx::query(
+    let next_version = sqlx::query_scalar::<_, i64>(
         r#"
-        INSERT INTO agent_states (agent_id, tick_id, attributes, node_id, is_alive)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO agent_states (agent_id, tick_id, attributes, node_id, is_alive, state_version)
+        VALUES ($1, $2, $3, $4, $5, 0)
         ON CONFLICT (agent_id, tick_id) DO UPDATE SET
             attributes = EXCLUDED.attributes,
             node_id = EXCLUDED.node_id,
-            is_alive = EXCLUDED.is_alive
+            is_alive = EXCLUDED.is_alive,
+            state_version = agent_states.state_version + 1
+        WHERE agent_states.state_version = $6
+        RETURNING state_version
         "#,
     )
     .bind(state.agent_id)
@@ -291,11 +295,20 @@ pub async fn upsert_agent_state(pool: &PgPool, state: &AgentState) -> Result<()>
     .bind(attributes_json)
     .bind(&state.node_id)
     .bind(state.is_alive)
-    .execute(pool)
+    .bind(state.state_version)
+    .fetch_optional(pool)
     .await
-    .context(format!("单条 UPSERT Agent {} 状态失败", state.agent_id))?;
+    .context(format!("单条 UPSERT Agent {} 状态失败", state.agent_id))?
+    .ok_or_else(|| {
+        anyhow::anyhow!(
+            "Agent {} 状态版本冲突: tick={}, expected_version={}",
+            state.agent_id,
+            state.tick_id,
+            state.state_version
+        )
+    })?;
 
-    Ok(())
+    Ok(next_version)
 }
 
 // ============================================================================
@@ -388,13 +401,21 @@ pub async fn update_tick_log(pool: &PgPool, tick_log: &TickLog) -> Result<()> {
 /// 批量插入Agent动作日志
 ///
 /// # 参数
-/// - pool: 数据库连接池
+/// - conn: 数据库连接（Transaction or Pool，caller 传 `&mut *tx` 或 `&mut pool`）
 /// - actions: Agent动作列表
 ///
 /// # 返回
 /// - Ok(()): 插入成功
 /// - Err: 插入失败
-pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) -> Result<()> {
+///
+/// # P0-2 修复
+/// 签名从 `&PgPool` 改为 `&mut sqlx::PgConnection`，使 action_log 可纳入
+/// `process_single_intent` 的 Saga 事务（与 `clear_inventory`/`add_ground_item`
+/// 等既有约定一致）。若 insert 失败，caller 的 tx 会 rollback，state 不落库。
+pub async fn batch_insert_action_logs(
+    conn: &mut sqlx::PgConnection,
+    actions: &[AgentAction],
+) -> Result<()> {
     if actions.is_empty() {
         debug!("没有动作日志需要插入");
         return Ok(());
@@ -438,18 +459,11 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
          dream_marker = EXCLUDED.dream_marker",
     );
 
-    let sql_result = query_builder.build().execute(pool).await;
-    if let Err(ref e) = sql_result {
-        // RAW DEBUG: log full error chain before context
-        eprintln!(
-            "[RAW-DEBUG-batch] sqlx error type: {}",
-            std::any::type_name::<sqlx::Error>()
-        );
-        eprintln!("[RAW-DEBUG-batch] display: {}", e);
-        eprintln!("[RAW-DEBUG-batch] debug: {:?}", e);
-        eprintln!("[RAW-DEBUG-batch] source: {:?}", e.source());
-    }
-    sql_result.context("批量插入动作日志失败")?;
+    query_builder
+        .build()
+        .execute(&mut *conn)
+        .await
+        .context("批量插入动作日志失败")?;
 
     debug!("批量插入动作日志完成");
     Ok(())
@@ -821,3 +835,4 @@ pub async fn get_agent_daily_action_stats(
         total_actions,
     }))
 }
+
