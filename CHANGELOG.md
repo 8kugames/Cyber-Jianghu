@@ -4,6 +4,52 @@
 
 ## [Unreleased]
 
+### 审计残留 4 项根治（P0-2 / P0-11b / clippy / warn! 测试）
+
+针对 `logs/audit/audit-report-2026-06-24.md` 中 4 项残留问题的第一性原理根治：
+
+- **P0-2 action_log 纳入 Saga 事务**：`batch_insert_action_logs` 签名从 `&PgPool` 改为 `&mut sqlx::PgConnection`，调用点移到 `tx.commit()` **之前**。若 action_log 插入失败，整个 Saga 回滚（state 不落库），消除"state 已提交但 log 丢失"的可观测性缺口。删除 4 行 `[RAW-DEBUG-batch]` 调试残留。新增 `test_p0_2_action_log_insert_before_commit_and_uses_tx` 源码契约测试。
+- **P0-11(b) Agent HTTP API 认证层**：新增 `crates/agent/src/infra/api/auth.rs` 中间件（`require_device_token`），镜像 server 端 `require_*_token` 模式，通过 `Authorization: Bearer <token>` 验证 device auth_token。两个入口点（`run_http_server` + `run_ws_server`）均挂载。白名单：health/静态资源/setup。fail-closed：device 未配置时返 503。`setup/status` 端点暴露 token 供本地 Web 面板（`api.js` 新增 `buildHeaders`/`refreshAuthToken`）。新增 14 个认证测试。**BREAKING**：之前无认证的端点现在需要 Bearer token。
+- **19 个 clippy warning 清零**：14 个 `collapsible_if`（let-chains）、4 个 `explicit_auto_deref`（`&mut *tx` → `&mut tx`）、1 个 `too_many_arguments`（`auto_rebirth_agent` 引入 `AutoRebirthParams` 结构体）。**BREAKING**：`auto_rebirth_agent` 签名变更（后 5 参数打包为结构体）。
+- **42 处 warn! 行为测试**：新增 `tracing-test` dev-dep + 6 个代表性 warn! 契约测试（broadcast/mpsc/watch 三类 channel × 失败/成功两路）。**RED-GREEN 验证**：临时移除 warn! 代码确认测试 FAIL，恢复后确认 PASS。
+
+**验证**：864 测试全绿（agent 495 + server lib 174 + 其他），6 PG 测试 ignored，clippy 0 warning，workspace 编译干净。
+
+### Agent 死亡链路硬化
+
+agent 死亡与转世重生全链路 P0 修复，消除幽灵状态与 auto_rebirth 永久拒绝风险：
+
+- **Path 4 死亡检测**（`e66caafd`）：在原有 `is_dead` 原子标志（WebSocket `AgentDied` 回调）之外，新增从 intent 执行结果 error 字符串检测 `"is dead"` / `"not in cache"` 模式的双路径检测。修复"WebSocket 未收到 AgentDied 消息 → is_dead 永不为 true → agent 空转 + auto_rebirth 不触发"链路（联调测试 0615.docker.1 中 5 次死亡 3 次命中）。
+- **转世重建 MemoryManager + PersonaStore**（`e8a16f96`, #51）：前世记忆/人格在新 agent_id 下未清空导致仍引用旧 DB；重生时清空情景/语义/工作记忆与人格/经验。
+- **active 校验 + action 致死善后**（`a9d91016`）：
+  - `get_all_alive_agents_latest_states` 加 `a.status='active'` 过滤，避免 retired/dead 历史 agent 启动时被加载进 DashMap (#49)
+  - `IntentWorker` 处理前对 DB 二次校验 status='active'，命中残留即自愈移除 DashMap 条目 (#50)
+  - step 11 + subsequent 路径检测 `is_alive=false` 时复用 `handle_deaths` 统一回写 status='dead'
+
+### 武侠化叙事感知
+
+让 LLM 真正以江湖中人视角感知世界，剥离游戏化术语与数值：
+
+- **隐藏属性数值与术语**（`3ce60c09`）：prompt 增加"禁止元游戏术语"约束（HP/SAN/属性/数值/状态栏），`engine_prompts` / `context` 完全移除原始属性名和数值，仅输出叙事描述。
+- **narrative_config 细化低值分段**（`3ce60c09`）：hp / satiation / hydration / sanity 低值分段（10-19 与 0-9 拆分），更精细的叙事化降级。
+- **clippy + fmt 修复**（`f7e96d11`）：`values()` 迭代 + realtime fmt 修正。
+
+### CI/CD 关键修复
+
+- **embedding Dockerfile 致命 bug**（`ffbfbba7`, P0）：复制 workspace `Cargo.toml` + protocol/embedding/server 三个 crate 的 `Cargo.toml`，但缺失 `crates/agent/Cargo.toml`，导致整个 server stack 构建失败（`error: failed to load manifest for workspace member`）。补 COPY 行对齐 server Dockerfile。
+- **Dockerfile.ci 同步**（`dcf8010c`）：同步上述 Dockerfile 修复到 Dockerfile.ci（embedding crate workspace）。
+- **release job 依赖 docker-build**（`22c0000b`）：release job 必须等待 docker-build 成功，防止 docker 失败但 release 幽灵发布。
+
+### 仓库维护
+
+- **untrack Cargo.lock**（`f0834eb7`）：`.gitignore` 已列出但历史 force-added，解除跟踪后 cargo 构建不再污染 working tree。
+
+### 白皮书
+
+- **三皇共治描述顺序调整**（`489e5f58`）：白皮书 `05_宏观模型.md` 段落顺序调整（立场 → 决策机制 → 分权制衡），无内容变更。
+
+---
+
 > **BREAKING**（治理数据流重大重构）：
 > - 删除 `ProposedActionIR` + `IRSource` 类型（protocol crate 0.1.73 → 后续版本）
 > - DB migration 013 删除 `action_evolution_proposals` 表 IR 字段（actor_arity / target_arity / tick_span / phase_count / protocol_kind / effect_refs / requirement_refs）
