@@ -382,6 +382,11 @@ fn init_tracing() -> Result<()> {
 
     let thinking_log_path = thinking_log::init_thinking_log(&data_dir)?;
 
+    // 训练 trace 结构化落盘（与 thinking_log 并列，init 之后）
+    // 若 trace.yaml 缺失或 enabled=false，recorder 不初始化，零开销
+    let config_dir = cyber_jianghu_agent::config::config_dir();
+    cyber_jianghu_agent::infra::api::trace::init_trace_recorder(&config_dir);
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -1301,9 +1306,10 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     let current_tick = 0;
                     if let Some(downstream) =
                         DownstreamMessage::from_server_message(msg, current_tick)
-                        && let Err(e) = tx_clone.send(downstream) {
-                            tracing::warn!("downstream tx.send 失败（receiver 可能已 drop）：{e:?}");
-                        }
+                        && let Err(e) = tx_clone.send(downstream)
+                    {
+                        tracing::warn!("downstream tx.send 失败（receiver 可能已 drop）：{e:?}");
+                    }
                 }))
                 .await;
         }
