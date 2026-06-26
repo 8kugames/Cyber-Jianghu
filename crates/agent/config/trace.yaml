@@ -2,21 +2,31 @@
 # 训练 Trace 配置（结构化 LLM 调用记录）
 # ============================================================================
 #
-# 启用后，agent 的人魂/天魂 LLM 调用会以结构化 JSONL 落盘，作为专用模型
-# 训练的数据基础。与 thinking_log（给人看的文本日志）并列，职责分离。
+# 启用后，agent 的人魂/天魂 LLM 调用以结构化 JSONL 落盘 + 回传 server，
+# 作为专用模型训练的数据基础。
 #
 # 放置位置：$CYBER_JIANGHU_CONFIG_DIR/trace.yaml 或 ~/.cyber-jianghu/config/trace.yaml
-# 输出位置：<data_base_dir>/<base_dir>/soul={renhun,tianhun}/date=YYYY-MM-DD.jsonl
-#
-# 当前覆盖：人魂 + 天魂
-# 地魂不做：run_tool_loop 无 agent_id + 共享路径无法区分 soul_stage（架构限制）
+# 本地输出：<data_base_dir>/<base_dir>/soul={renhun,tianhun}/agent=<id>/date=*.jsonl
+# server 汇聚：回传后 server 侧 traces/ 与 reward/ 同目录树
 # ============================================================================
 
-version: "0.0.1"
-description: "训练 Trace 配置（结构化 LLM 调用记录）"
+version: "0.0.2"
+description: "训练 Trace 配置（结构化 LLM 调用记录 + 回传 + 脱敏）"
 
+# 默认开启（用户要求：支持训练专用模型，默认为开）
 output:
-  # master switch：默认关闭，启用训练数据采集时设为 true
-  enabled: false
-  # 输出目录（相对 data_base_dir）
+  enabled: true
   base_dir: "traces"
+
+# 回传控制：开时回传 server，关时仅本地
+upload:
+  enabled: true
+  batch_size: 32
+
+# 脱敏：玩家输入（角色设定/托梦/私聊）在注入源占位，非事后清洗
+sanitize:
+  enabled: true
+  persona_name_hash: true        # 角色名哈希化
+  persona_description_mask: true # 角色描述占位
+  dream_content_mask: true       # 托梦占位
+  dialogue_content_mask: true    # 玩家私聊占位

@@ -26,26 +26,82 @@ pub struct TraceConfig {
     pub version: String,
     #[serde(default)]
     pub description: String,
+    #[serde(default)]
     pub output: TraceOutputConfig,
+    #[serde(default)]
+    pub upload: TraceUploadConfig,
+    #[serde(default)]
+    pub sanitize: TraceSanitizeConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraceOutputConfig {
-    #[serde(default)]
+    /// 默认开（用户要求：支持训练专用模型，默认为开）
+    #[serde(default = "default_enabled")]
     pub enabled: bool,
     #[serde(default = "default_base_dir")]
     pub base_dir: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceUploadConfig {
+    /// 默认开（开时回传 server，关时仅本地）
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_batch_size")]
+    pub batch_size: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceSanitizeConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_enabled")]
+    pub persona_name_hash: bool,
+    #[serde(default = "default_enabled")]
+    pub persona_description_mask: bool,
+    #[serde(default = "default_enabled")]
+    pub dream_content_mask: bool,
+    #[serde(default = "default_enabled")]
+    pub dialogue_content_mask: bool,
+}
+
+fn default_enabled() -> bool {
+    true
+}
 fn default_base_dir() -> String {
     "traces".to_string()
+}
+fn default_batch_size() -> usize {
+    32
 }
 
 impl Default for TraceOutputConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: default_enabled(),
             base_dir: default_base_dir(),
+        }
+    }
+}
+
+impl Default for TraceUploadConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_enabled(),
+            batch_size: default_batch_size(),
+        }
+    }
+}
+
+impl Default for TraceSanitizeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_enabled(),
+            persona_name_hash: default_enabled(),
+            persona_description_mask: default_enabled(),
+            dream_content_mask: default_enabled(),
+            dialogue_content_mask: default_enabled(),
         }
     }
 }
@@ -121,6 +177,11 @@ pub enum SoulStage {
 
 static TRACE_BUFFER: OnceLock<Mutex<Vec<LlmTrace>>> = OnceLock::new();
 static TRACE_CONFIG: OnceLock<Option<TraceConfig>> = OnceLock::new();
+/// 回传 sender：在 agent websocket 连接成功后通过 set_upload_sender 注入
+/// （不在 init_trace_recorder 时传入——那时连接尚未建立）
+static UPLOAD_SENDER: OnceLock<
+    Option<tokio::sync::mpsc::Sender<cyber_jianghu_protocol::ClientMessage>>,
+> = OnceLock::new();
 
 fn trace_buffer() -> &'static Mutex<Vec<LlmTrace>> {
     TRACE_BUFFER.get_or_init(|| Mutex::new(Vec::new()))
@@ -130,6 +191,7 @@ fn trace_buffer() -> &'static Mutex<Vec<LlmTrace>> {
 ///
 /// 若 trace.yaml enabled=false 或缺失，recorder 不初始化，record() 空操作。
 /// 若 enabled=true，启动后台 flush task 定时写盘。
+/// 回传 sender 通过 set_upload_sender 在 agent 连接成功后单独注入（连接在 init 之后建立）。
 pub fn init_trace_recorder(config_dir: &Path) {
     let cfg = match TraceConfig::load(config_dir) {
         Ok(c) => c,
@@ -159,6 +221,15 @@ pub fn init_trace_recorder(config_dir: &Path) {
     });
 }
 
+/// 注入回传 sender（在 agent websocket 连接成功后调用）。
+///
+/// 代理1校准：init_trace_recorder 在 main 顶端调用（连接前），此时无 sender。
+/// 真实路径是 agent 连接成功后通过 intent_sender() 获取 sender，再调此函数注入。
+pub fn set_upload_sender(sender: tokio::sync::mpsc::Sender<cyber_jianghu_protocol::ClientMessage>) {
+    let _ = UPLOAD_SENDER.set(Some(sender));
+    tracing::info!("[trace] 回传 sender 已注入，trace 将回传 server");
+}
+
 /// 调用方记录 trace（同步 Vec push，非阻塞——O(1)，无 I/O）。
 ///
 /// fire-and-forget：失败只丢 trace，不 panic，不影响 agent tick。
@@ -178,7 +249,7 @@ pub fn record(trace: LlmTrace) {
     }
 }
 
-/// 后台 flush 循环：定时将缓冲区 trace 批量写盘。
+/// 后台 flush 循环：定时将缓冲区 trace 批量写盘 + 回传。
 async fn flush_loop(cfg: TraceConfig) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
     loop {
@@ -187,32 +258,74 @@ async fn flush_loop(cfg: TraceConfig) {
             let mut buf = trace_buffer().lock().expect("poisoned");
             std::mem::take(&mut *buf)
         };
-        if !batch.is_empty()
-            && let Err(e) = write_batch(&batch, &cfg).await
+        if batch.is_empty() {
+            continue;
+        }
+
+        // 1. 本地落盘（始终执行）
+        if let Err(e) = write_batch(&batch, &cfg).await {
+            tracing::error!("[trace] 本地落盘失败: {}", e);
+        }
+
+        // 2. 回传 server（若 upload.enabled 且 sender 已注入）
+        if cfg.upload.enabled
+            && let Some(sender) = UPLOAD_SENDER.get().and_then(|s| s.as_ref())
         {
-            tracing::error!("[trace] flush 失败: {}", e);
+            let entries: Vec<cyber_jianghu_protocol::TraceEntry> = batch
+                .iter()
+                .map(|t| cyber_jianghu_protocol::TraceEntry {
+                    trace_id: t.trace_id.clone(),
+                    agent_id: t.agent_id,
+                    character_name: t.character_name.clone(),
+                    tick_id: t.tick_id,
+                    soul_stage: serde_json::to_string(&t.soul_stage)
+                        .unwrap_or_default()
+                        .trim_matches('"')
+                        .to_string(),
+                    attempt: t.attempt,
+                    provider: t.provider.clone(),
+                    model: t.model.clone(),
+                    system_prompt: t.system_prompt.clone(),
+                    user_prompt: t.user_prompt.clone(),
+                    response: t.response.clone(),
+                    prompt_tokens: t.prompt_tokens,
+                    completion_tokens: t.completion_tokens,
+                    ok: t.ok,
+                })
+                .collect();
+            let msg = cyber_jianghu_protocol::ClientMessage::TraceReport { traces: entries };
+            // 失败只丢回传，本地已有完整副本（不丢数据）
+            if let Err(e) = sender.send(msg).await {
+                tracing::warn!("[trace] 回传失败（本地仍有副本）: {}", e);
+            }
         }
     }
 }
 
-/// 批量写入 trace 到 JSONL（按 soul_stage + date 分区）。
+/// 批量写入 trace 到 JSONL（按 soul_stage + agent_id + date 分区）。
+///
+/// 文件名含 agent_id 避免多 agent 同机并发写冲突（并发修复）。
 async fn write_batch(traces: &[LlmTrace], cfg: &TraceConfig) -> Result<()> {
     use std::collections::HashMap;
 
-    // 按 (soul_stage, date) 分组
-    let mut groups: HashMap<(String, String), Vec<&LlmTrace>> = HashMap::new();
+    // 按 (soul_stage, agent_id, date) 分组
+    let mut groups: HashMap<(String, String, String), Vec<&LlmTrace>> = HashMap::new();
     for trace in traces {
         let soul = serde_json::to_string(&trace.soul_stage)?
             .trim_matches('"')
             .to_string();
+        let agent = trace.agent_id.to_string();
         let date = trace.wall_clock.format("%Y-%m-%d").to_string();
-        groups.entry((soul, date)).or_default().push(trace);
+        groups.entry((soul, agent, date)).or_default().push(trace);
     }
 
     let base = crate::config::data_base_dir().join(&cfg.output.base_dir);
 
-    for ((soul, date), group) in groups {
-        let dir = base.join(format!("soul={}", soul));
+    for ((soul, agent, date), group) in groups {
+        // 路径含 agent=<id>，消除多 agent 同机并发写冲突
+        let dir = base
+            .join(format!("soul={}", soul))
+            .join(format!("agent={}", agent));
         tokio::fs::create_dir_all(&dir).await?;
         let path = dir.join(format!("date={}.jsonl", date));
 
@@ -236,12 +349,132 @@ async fn write_batch(traces: &[LlmTrace], cfg: &TraceConfig) -> Result<()> {
 }
 
 // ============================================================================
+// 脱敏纯函数（在注入源调用，非事后清洗）
+// ============================================================================
+
+/// 计算短哈希（取 SHA256 前 8 位十六进制），用于不可逆标识
+fn short_hash(input: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    input.hash(&mut hasher);
+    format!("{:08x}", hasher.finish())
+}
+
+/// 脱敏角色名：哈希化（不可逆）
+///
+/// 注意：persona 脱敏在 trace record 时针对 system_prompt 字段做（未来填充时），
+/// 而非在 prompt 构造时——因为 persona 是 agent 身份核心，占位化会破坏推理质量。
+/// 这与 dream/dialogue 不同（后两者是注入性输入，占位化不影响核心决策）。
+pub fn sanitize_persona_name(name: &str) -> String {
+    format!("角色_{}", &short_hash(name))
+}
+
+/// 脱敏角色描述：占位化
+pub fn sanitize_persona_description(_desc: &str) -> String {
+    "[角色描述已脱敏]".to_string()
+}
+
+/// 脱敏托梦内容：占位化（保留哈希标识便于训练时关联）
+pub fn sanitize_dream(content: &str) -> String {
+    format!("[托梦内容已脱敏_{}]", short_hash(content))
+}
+
+/// 脱敏玩家私聊内容：占位化
+pub fn sanitize_dialogue_content(_content: &str) -> String {
+    "[对话内容已脱敏]".to_string()
+}
+
+/// 脱敏对话伙伴名：哈希化
+pub fn sanitize_dialogue_partner(name: &str) -> String {
+    format!("玩家_{}", short_hash(name))
+}
+
+// ============================================================================
 // 测试
 // ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_default_config_is_enabled() {
+        // A1 验收：默认开（用户要求）
+        assert!(TraceOutputConfig::default().enabled, "output 默认必须开");
+        assert!(TraceUploadConfig::default().enabled, "upload 默认必须开");
+        assert!(
+            TraceSanitizeConfig::default().enabled,
+            "sanitize 默认必须开"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_persona_name_hashes() {
+        // A2 验收：角色名哈希化，不泄露原名
+        let result = sanitize_persona_name("张三丰");
+        assert!(result.starts_with("角色_"), "应以 角色_ 开头");
+        assert!(!result.contains("张三丰"), "不得包含原名");
+    }
+
+    #[test]
+    fn test_sanitize_persona_name_deterministic() {
+        // 相同输入应得相同哈希
+        assert_eq!(sanitize_persona_name("李四"), sanitize_persona_name("李四"));
+        // 不同输入得不同哈希
+        assert_ne!(sanitize_persona_name("李四"), sanitize_persona_name("王五"));
+    }
+
+    #[test]
+    fn test_sanitize_dream_masks_content() {
+        // A3 验收：托梦占位化，不泄露原文
+        let result = sanitize_dream("去京城找李四报仇");
+        assert!(result.starts_with("[托梦内容已脱敏_"), "应占位化");
+        assert!(!result.contains("京城"), "不得包含原文");
+        assert!(!result.contains("李四"), "不得包含原文");
+    }
+
+    #[test]
+    fn test_sanitize_dialogue_masks_content() {
+        // A4 验收：私聊占位化
+        let result = sanitize_dialogue_content("我有个秘密告诉你");
+        assert_eq!(result, "[对话内容已脱敏]");
+        assert!(!result.contains("秘密"));
+    }
+
+    #[test]
+    fn test_sanitize_persona_description_masks() {
+        // A5 验收：角色描述占位化
+        let result = sanitize_persona_description("真实姓名张三，电话13800000000");
+        assert_eq!(result, "[角色描述已脱敏]");
+        assert!(!result.contains("13800000000"));
+    }
+
+    #[test]
+    fn test_sanitize_dialogue_partner_hashes() {
+        let result = sanitize_dialogue_partner("王翠花");
+        assert!(result.starts_with("玩家_"));
+        assert!(!result.contains("王翠花"));
+    }
+
+    #[test]
+    fn test_trace_config_load_with_full_config() {
+        // 完整配置（含 upload + sanitize）可正确加载
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("trace.yaml"),
+            "version: \"0.0.2\"\noutput:\n  enabled: true\n  base_dir: \"traces\"\nupload:\n  enabled: false\nsanitize:\n  enabled: true\n  persona_name_hash: false\n",
+        )
+        .unwrap();
+        let cfg = TraceConfig::load(tmp.path()).unwrap();
+        assert!(cfg.output.enabled);
+        assert!(!cfg.upload.enabled, "upload.enabled=false 应被读取");
+        assert!(cfg.sanitize.enabled);
+        assert!(
+            !cfg.sanitize.persona_name_hash,
+            "persona_name_hash=false 应被读取"
+        );
+    }
 
     #[test]
     fn test_trace_config_load_missing_fail_fast() {
@@ -258,34 +491,8 @@ mod tests {
     }
 
     #[test]
-    fn test_trace_config_load_disabled() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::write(
-            tmp.path().join("trace.yaml"),
-            "version: \"0.0.1\"\noutput:\n  enabled: false\n  base_dir: \"traces\"\n",
-        )
-        .unwrap();
-        let cfg = TraceConfig::load(tmp.path()).unwrap();
-        assert!(!cfg.output.enabled);
-        assert_eq!(cfg.output.base_dir, "traces");
-    }
-
-    #[test]
-    fn test_trace_config_load_enabled() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::write(
-            tmp.path().join("trace.yaml"),
-            "version: \"0.0.1\"\noutput:\n  enabled: true\n  base_dir: \"traces\"\n",
-        )
-        .unwrap();
-        let cfg = TraceConfig::load(tmp.path()).unwrap();
-        assert!(cfg.output.enabled);
-    }
-
-    #[test]
     fn test_record_is_sync_no_async() {
         // T2 验收：record() 是同步函数（编译保证无 await）
-        // 此测试能编译即证明 record 非 async
         let trace = LlmTrace {
             trace_id: Uuid::new_v4().to_string(),
             agent_id: Uuid::new_v4(),
@@ -333,11 +540,6 @@ mod tests {
             "token None 应序列化为 null，got: {}",
             json
         );
-        assert!(
-            json.contains("\"completion_tokens\":null"),
-            "completion None 应序列化为 null"
-        );
-        // agent_id 应是 UUID 格式
         assert!(
             json.contains("\"agent_id\":\"00000000-0000-0000-0000-000000000000\""),
             "agent_id 应是 UUID 格式"

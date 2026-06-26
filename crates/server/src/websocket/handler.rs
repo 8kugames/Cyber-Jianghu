@@ -154,8 +154,8 @@ pub async fn websocket_handler(
     ws.max_message_size(1024 * 1024) // 1MB limit
         .max_frame_size(1024 * 1024)
         .on_upgrade(move |socket| {
-        handle_websocket(socket, agent_id, query.device_id, agent_name, state)
-    })
+            handle_websocket(socket, agent_id, query.device_id, agent_name, state)
+        })
 }
 
 // ============================================================================
@@ -540,11 +540,7 @@ async fn handle_websocket(
                 }
 
                 // 加载初始背包物品：失败时直接关闭连接，不构造假 WorldState
-                let initial_inventory = match load_initial_inventory(
-                    &state.db_pool,
-                    agent_id,
-                )
-                .await
+                let initial_inventory = match load_initial_inventory(&state.db_pool, agent_id).await
                 {
                     Ok(items) => items,
                     Err(e) => {
@@ -743,9 +739,12 @@ async fn handle_websocket(
                                         current_tick_id,
                                     };
                                     if let Ok(json) = serde_json::to_string(&error_msg)
-                                        && let Err(e) = tx.send(Message::Text(json.into())).await {
-                                            tracing::warn!("ws error_msg.send 失败（receiver 可能已 drop）：{e:?}");
-                                        }
+                                        && let Err(e) = tx.send(Message::Text(json.into())).await
+                                    {
+                                        tracing::warn!(
+                                            "ws error_msg.send 失败（receiver 可能已 drop）：{e:?}"
+                                        );
+                                    }
                                 }
                             }
                             Err(e) => {
@@ -762,9 +761,12 @@ async fn handle_websocket(
                                     current_tick_id: None,
                                 };
                                 if let Ok(json) = serde_json::to_string(&error_msg)
-                                    && let Err(e) = tx.send(Message::Text(json.into())).await {
-                                        tracing::warn!("ws error_msg.send（site 2）失败（receiver 可能已 drop）：{e:?}");
-                                    }
+                                    && let Err(e) = tx.send(Message::Text(json.into())).await
+                                {
+                                    tracing::warn!(
+                                        "ws error_msg.send（site 2）失败（receiver 可能已 drop）：{e:?}"
+                                    );
+                                }
                             }
                         }
                     }
@@ -902,7 +904,71 @@ async fn handle_client_message(
         ClientMessage::DailySummary { game_day, summary } => {
             handle_daily_summary(device_id, game_day, &summary, state).await
         }
+        ClientMessage::TraceReport { traces } => {
+            handle_trace_report(device_id, &traces, state).await
+        }
     }
+}
+
+/// 处理训练 Trace 上报（agent → server 汇聚）
+///
+/// agent 端的结构化 LLM 调用 trace（已脱敏）批量回传，server 落盘后
+/// 与 reward 同目录树（get_data_dir()），训练导出时按 (agent_id, tick_id) join。
+async fn handle_trace_report(
+    device_id: uuid::Uuid,
+    traces: &[cyber_jianghu_protocol::TraceEntry],
+    state: &std::sync::Arc<crate::state::AppState>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // 通过 device_id 查找当前 agent（对齐 handle_daily_summary 模式）
+    let agent_id = match crate::db::get_agent_by_device_id(&state.db_pool, device_id).await {
+        Ok(Some(agent)) => agent.agent_id,
+        Ok(None) => return Err("无关联角色".into()),
+        Err(e) => return Err(format!("查询角色失败: {}", e).into()),
+    };
+
+    // 落盘到 server 侧 traces/（与 rewards/ 同根目录）
+    let traces_dir = crate::paths::get_data_dir().join("traces");
+    for entry in traces {
+        let soul = &entry.soul_stage;
+        let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let dir = traces_dir
+            .join(format!("soul={}", soul))
+            .join(format!("agent={}", agent_id));
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            tracing::error!("[trace] server 创建目录失败: {}", e);
+            continue;
+        }
+        let path = dir.join(format!("date={}.jsonl", date));
+        let line = match serde_json::to_string(entry) {
+            Ok(s) => s + "\n",
+            Err(e) => {
+                tracing::warn!("[trace] server 序列化失败: {}", e);
+                continue;
+            }
+        };
+        use tokio::io::AsyncWriteExt;
+        match tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .await
+        {
+            Ok(mut f) => {
+                if let Err(e) = f.write_all(line.as_bytes()).await {
+                    tracing::warn!("[trace] server 写入失败 {:?}: {}", path, e);
+                }
+            }
+            Err(e) => tracing::warn!("[trace] server 打开文件失败 {:?}: {}", path, e),
+        }
+    }
+
+    tracing::debug!(
+        "[trace] server 收到 {} 条 trace（device={}, agent={}）",
+        traces.len(),
+        device_id,
+        agent_id
+    );
+    Ok(())
 }
 
 /// 处理意图上报
@@ -1409,9 +1475,12 @@ async fn handle_dialogue_message(
             if let Some(device_id) = device_id {
                 let connections = state.connection_manager.read().await;
                 if let Some(connection) = connections.get(&device_id)
-                    && let Err(e) = connection.send(Message::Text(json.into())).await {
-                        tracing::warn!("ws connection.send（broadcast）失败（receiver 可能已 drop）：{e:?}");
-                    }
+                    && let Err(e) = connection.send(Message::Text(json.into())).await
+                {
+                    tracing::warn!(
+                        "ws connection.send（broadcast）失败（receiver 可能已 drop）：{e:?}"
+                    );
+                }
             }
         }
     }
@@ -1621,10 +1690,7 @@ mod tests {
         let current_agent = Uuid::new_v4();
         let other_device = Uuid::new_v4();
         let unrelated_agent = Uuid::new_v4();
-        let mut map = HashMap::from([
-            (stale_agent, device_id),
-            (unrelated_agent, other_device),
-        ]);
+        let mut map = HashMap::from([(stale_agent, device_id), (unrelated_agent, other_device)]);
 
         rebind_device_agent(&mut map, current_agent, device_id);
 

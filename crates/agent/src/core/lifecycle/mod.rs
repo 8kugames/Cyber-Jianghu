@@ -96,6 +96,12 @@ impl super::Agent {
 
         self.setup_client_callbacks().await;
 
+        // 训练 trace 回传 sender 注入（连接成功后 intent_sender 才可用）
+        // 代理1校准：init_trace_recorder 在 main 顶端调用（连接前），sender 此处才注入
+        if let Some(sender) = self.client.intent_sender().await {
+            crate::infra::api::trace::set_upload_sender(sender);
+        }
+
         // 等待注册确认（包含游戏规则）
         // Ok(None) = agent_id 为 nil，等待角色注册（保持连接，不 close/reconnect）
         let (
@@ -648,12 +654,15 @@ impl super::Agent {
                     }
 
                     // 4.4 托梦注入（统一路径：消费 dream 并注入 memory_context）
+                    // 脱敏在注入源做（非事后清洗）：托梦原文是玩家输入，占位化保护隐私
                     let active_dream: Option<String> = if let Some(ref api_state) = self.http_api_state
                         && let Some(dream_thought) = api_state.consume_dream().await
                     {
                         info!("[dream] 托梦注入决策上下文: {}字", dream_thought.chars().count());
+                        // 训练脱敏：占位化托梦原文（保留哈希标识便于训练关联）
+                        let sanitized = crate::infra::api::trace::sanitize_dream(&dream_thought);
                         memory_context.push_str("\n### 托梦\n");
-                        memory_context.push_str(&dream_thought);
+                        memory_context.push_str(&sanitized);
                         memory_context.push('\n');
                         Some(dream_thought)
                     } else {
