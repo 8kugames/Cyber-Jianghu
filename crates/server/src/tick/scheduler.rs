@@ -897,12 +897,8 @@ impl TickScheduler {
                 let game_day = self.current_tick_id / ticks_per_day_real_secs;
                 self.broadcast_daily_summaries(game_day).await;
                 // 生存 Reward 每日结算（旁路，失败只 error 不阻断 tick，P1-8 验收）
-                if let Err(e) = crate::reward::settle_daily(
-                    &self.db_pool,
-                    game_day,
-                    self.current_tick_id,
-                )
-                .await
+                if let Err(e) =
+                    crate::reward::settle_daily(&self.db_pool, game_day, self.current_tick_id).await
                 {
                     error!(
                         "[reward] 每日结算失败 (game_day={}, tick={}): {}",
@@ -919,12 +915,8 @@ impl TickScheduler {
                 let tick_id = self.current_tick_id;
                 // 生存 Reward 周期聚合（旁路，失败只 error 不阻断 tick）
                 let pp_start = period_start;
-                if let Err(e) = crate::reward::settle_periodic(
-                    &self.db_pool,
-                    pp_start,
-                    tick_id,
-                )
-                .await
+                if let Err(e) =
+                    crate::reward::settle_periodic(&self.db_pool, pp_start, tick_id).await
                 {
                     error!(
                         "[reward] 周期聚合失败 (period={}~{}): {}",
@@ -1126,15 +1118,12 @@ mod tests {
     /// 而不是 Err。约定：NotFound = 无事可做（正常 skip），不要混入"真错"路径。
     #[test]
     fn test_read_file_metadata_for_hot_reload_returns_none_for_missing_file() {
-        let dir = std::env::temp_dir().join(format!(
-            "scheduler_test_missing_{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("scheduler_test_missing_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let missing = dir.join("does_not_exist.yaml");
 
-        let result = read_file_metadata_for_hot_reload(&missing)
-            .expect("NotFound must not be Err");
+        let result = read_file_metadata_for_hot_reload(&missing).expect("NotFound must not be Err");
         assert!(
             result.is_none(),
             "P0-AUDIT 修复缺失：缺失文件必须返回 Ok(None)，但返回了 Some"
@@ -1146,18 +1135,16 @@ mod tests {
     /// 验证 P0-AUDIT：文件存在时返回 Ok(Some(modified))。
     #[test]
     fn test_read_file_metadata_for_hot_reload_returns_some_for_existing_file() {
-        let dir = std::env::temp_dir().join(format!(
-            "scheduler_test_existing_{}",
-            uuid::Uuid::new_v4()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("scheduler_test_existing_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("actions.yaml");
         let mut f = std::fs::File::create(&path).unwrap();
         writeln!(f, "version: '1.0'").unwrap();
         drop(f);
 
-        let result = read_file_metadata_for_hot_reload(&path)
-            .expect("existing file metadata must succeed");
+        let result =
+            read_file_metadata_for_hot_reload(&path).expect("existing file metadata must succeed");
         assert!(
             result.is_some(),
             "P0-AUDIT：已存在文件必须返回 Ok(Some(modified))，但返回了 None"
@@ -1185,7 +1172,6 @@ mod tests {
             matches!(result, Ok(None))
         );
     }
-
 
     /// 测试东八区时间解析
     ///

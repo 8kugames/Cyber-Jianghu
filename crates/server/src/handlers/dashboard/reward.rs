@@ -9,7 +9,11 @@
 // 数据来源：rewards/lifetime/*.jsonl 落盘文件（天道账本）
 // ============================================================================
 
-use axum::{Json, extract::{Path, State}, http::StatusCode};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+};
 use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;

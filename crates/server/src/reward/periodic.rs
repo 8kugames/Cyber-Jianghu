@@ -56,11 +56,7 @@ pub async fn settle_periodic(
 /// 聚合某 agent 在 [period_start, period_end] tick 范围内的 daily reward 总和。
 ///
 /// 从已落盘的 daily/*.jsonl 读取（不重复计算），按 tick_id 范围过滤。
-async fn aggregate_daily_for_agent(
-    agent_id: Uuid,
-    period_start: i64,
-    period_end: i64,
-) -> f64 {
+async fn aggregate_daily_for_agent(agent_id: Uuid, period_start: i64, period_end: i64) -> f64 {
     let cfg = match RewardRegistry::get_config() {
         Some(c) => c,
         None => return 0.0,
@@ -79,7 +75,9 @@ async fn aggregate_daily_for_agent(
         Err(_) => return 0.0,
     };
     while let Ok(Some(entry)) = entries.next_entry().await {
-        let content = tokio::fs::read_to_string(entry.path()).await.unwrap_or_default();
+        let content = tokio::fs::read_to_string(entry.path())
+            .await
+            .unwrap_or_default();
         for line in content.lines() {
             if let Ok(record) = serde_json::from_str::<super::types::DailyReward>(line)
                 && record.agent_id == agent_id
@@ -101,8 +99,8 @@ async fn write_periodic_batch(
     period_start: i64,
     period_end: i64,
 ) -> Result<()> {
-    let cfg = RewardRegistry::get_config()
-        .ok_or_else(|| anyhow::anyhow!("reward config not loaded"))?;
+    let cfg =
+        RewardRegistry::get_config().ok_or_else(|| anyhow::anyhow!("reward config not loaded"))?;
     if !cfg.output.enabled {
         return Ok(());
     }

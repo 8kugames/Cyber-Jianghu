@@ -95,14 +95,21 @@ mod tests {
         crate::game_data::init_test_registry();
         let agent = make_test_agent_state(80, 60, true);
         let reward = compute_daily_reward(&agent, 1, None).unwrap();
-        assert!(reward.tianhun_judgment.is_none(), "无天魂数据时 judgment 应为 None");
+        assert!(
+            reward.tianhun_judgment.is_none(),
+            "无天魂数据时 judgment 应为 None"
+        );
     }
 
     /// 构造测试用 AgentState（satiation/hydration/alive 可控）
     ///
     /// 复用 AgentState::new 工厂方法（内部从 registry 读配置），
     /// 再 set 覆盖属性值，避免手搓复杂结构体。
-    fn make_test_agent_state(satiation: i32, hydration: i32, alive: bool) -> crate::models::AgentState {
+    fn make_test_agent_state(
+        satiation: i32,
+        hydration: i32,
+        alive: bool,
+    ) -> crate::models::AgentState {
         let mut state = crate::models::AgentState::new(uuid::Uuid::new_v4(), 720);
         let _ = state.status.set("satiation", satiation);
         let _ = state.status.set("hydration", hydration);
