@@ -369,6 +369,35 @@ pub enum ClientMessage {
         /// 格式化摘要内容（由 session_triage.rs 的 produce_daily_summary 生成）
         summary: String,
     },
+
+    /// 训练 Trace 上报（agent → server）
+    ///
+    /// agent 端的结构化 LLM 调用 trace（已脱敏），批量回传 server 汇聚。
+    /// server 落盘后与 reward 同目录树，训练导出时按 (agent_id, tick_id) join。
+    TraceReport {
+        /// 批量 trace 条目（已脱敏）
+        #[serde(default)]
+        traces: Vec<TraceEntry>,
+    },
+}
+
+/// 训练 Trace 条目（agent 端 LlmTrace 的协议层对应，已脱敏）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceEntry {
+    pub trace_id: String,
+    pub agent_id: Uuid,
+    pub character_name: String,
+    pub tick_id: i64,
+    pub soul_stage: String,
+    pub attempt: i32,
+    pub provider: String,
+    pub model: String,
+    pub system_prompt: String,
+    pub user_prompt: String,
+    pub response: String,
+    pub prompt_tokens: Option<u64>,
+    pub completion_tokens: Option<u64>,
+    pub ok: bool,
 }
 
 /// 三魂循环元数据

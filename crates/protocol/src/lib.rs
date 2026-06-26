@@ -42,7 +42,7 @@ pub mod sqlx_types;
 pub use messages::{
     ClientMessage, DialogueMessage, DialogueSession, EarthToolCall, FinalIntentReport,
     ImmediateIntentReport, LayerReport, PipelineAction, RenhunReport, ServerMessage,
-    SoulCycleAttempt, SoulCycleMetadata, TianhunReport,
+    SoulCycleAttempt, SoulCycleMetadata, TianhunReport, TraceEntry,
 };
 pub use types::*;
 
