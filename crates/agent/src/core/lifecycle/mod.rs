@@ -654,15 +654,13 @@ impl super::Agent {
                     }
 
                     // 4.4 托梦注入（统一路径：消费 dream 并注入 memory_context）
-                    // 脱敏在注入源做（非事后清洗）：托梦原文是玩家输入，占位化保护隐私
+                    // 注意：注入源保持原文（不影响 agent 推理），脱敏在 trace record 时做
                     let active_dream: Option<String> = if let Some(ref api_state) = self.http_api_state
                         && let Some(dream_thought) = api_state.consume_dream().await
                     {
                         info!("[dream] 托梦注入决策上下文: {}字", dream_thought.chars().count());
-                        // 训练脱敏：占位化托梦原文（保留哈希标识便于训练关联）
-                        let sanitized = crate::infra::api::trace::sanitize_dream(&dream_thought);
                         memory_context.push_str("\n### 托梦\n");
-                        memory_context.push_str(&sanitized);
+                        memory_context.push_str(&dream_thought);
                         memory_context.push('\n');
                         Some(dream_thought)
                     } else {

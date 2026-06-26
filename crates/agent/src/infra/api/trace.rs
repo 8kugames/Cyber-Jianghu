@@ -233,20 +233,115 @@ pub fn set_upload_sender(sender: tokio::sync::mpsc::Sender<cyber_jianghu_protoco
 /// 调用方记录 trace（同步 Vec push，非阻塞——O(1)，无 I/O）。
 ///
 /// fire-and-forget：失败只丢 trace，不 panic，不影响 agent tick。
-pub fn record(trace: LlmTrace) {
+/// 脱敏在 record 时对将要落盘/回传的 user_prompt 做（注入源保持原文，不影响 agent 推理）。
+pub fn record(mut trace: LlmTrace) {
     // 配置未加载或未启用 → 空操作
-    if TRACE_CONFIG
+    let cfg = match TRACE_CONFIG
         .get()
         .and_then(|c| c.as_ref())
-        .map(|c| !c.output.enabled)
-        .unwrap_or(true)
     {
-        return;
+        Some(c) if c.output.enabled => c,
+        _ => return,
+    };
+
+    // 脱敏：在 trace 写入前对 user_prompt 做模式替换（注入源原文不影响 agent 推理）
+    if cfg.sanitize.enabled {
+        trace.user_prompt = sanitize_user_prompt(&trace.user_prompt, &cfg.sanitize);
+        trace.character_name = if cfg.sanitize.persona_name_hash {
+            sanitize_persona_name(&trace.character_name)
+        } else {
+            trace.character_name
+        };
     }
 
     if let Ok(mut buf) = trace_buffer().lock() {
         buf.push(trace);
     }
+}
+
+/// 对已拼接的 user_prompt 做脱敏（模式匹配 dream 段 + dialogue 段）。
+///
+/// dream 格式：`### 托梦\n{原文}\n`
+/// dialogue 格式：`## 与{partner}的对话 (session: ...)\n` 段落内的 Partner 行
+///
+/// 注意：此函数只作用于 trace 的副本，不影响 agent 实际推理用的 prompt。
+fn sanitize_user_prompt(prompt: &str, cfg: &TraceSanitizeConfig) -> String {
+    let mut result = prompt.to_string();
+
+    // dream 脱敏：匹配 "### 托梦\n" 到下一个 "\n### " 或 "\n## " 或段落结束
+    if cfg.dream_content_mask {
+        let mut sanitized = String::new();
+        let mut in_dream = false;
+        for line in result.lines() {
+            if line == "### 托梦" {
+                in_dream = true;
+                sanitized.push_str(line);
+                sanitized.push('\n');
+                continue;
+            }
+            if in_dream {
+                if line.starts_with("### ") || line.starts_with("## ") || line.is_empty() {
+                    in_dream = false;
+                    sanitized.push_str(line);
+                    sanitized.push('\n');
+                } else {
+                    // dream 内容行 → 占位化
+                    sanitized.push_str(&sanitize_dream(line));
+                    sanitized.push('\n');
+                }
+            } else {
+                sanitized.push_str(line);
+                sanitized.push('\n');
+            }
+        }
+        result = sanitized;
+    }
+
+    // dialogue 脱敏：partner_name 哈希化 + Partner 发言行占位化
+    // 格式：`## 与{name}的对话` 标题 + `- {name}: {content}` Partner 行
+    if cfg.dialogue_content_mask {
+        let mut sanitized = String::new();
+        let mut current_partner_name: Option<String> = None;
+        let mut current_partner_hash: Option<String> = None;
+        for line in result.lines() {
+            // 匹配对话标题 "## 与{name}的对话 ..."
+            if line.starts_with("## 与") && line.contains("的对话") {
+                let after_prefix = &line["## 与".len()..];
+                if let Some(end_idx) = after_prefix.find("的对话") {
+                    let partner_name = after_prefix[..end_idx].to_string();
+                    let hash = sanitize_dialogue_partner(&partner_name);
+                    current_partner_name = Some(partner_name.clone());
+                    current_partner_hash = Some(hash.clone());
+                    let new_line = line.replacen(&partner_name, &hash, 1);
+                    sanitized.push_str(&new_line);
+                    sanitized.push('\n');
+                    continue;
+                }
+            }
+            // 匹配 Partner 发言行 "- {partner_original_name}: {content}"
+            // 注意：Partner 行用的是原始 name（不是 hash），需用原始 name 匹配
+            if let (Some(name), Some(_hash)) = (&current_partner_name, &current_partner_hash) {
+                let prefix = format!("- {}: ", name);
+                if line.starts_with(&prefix) {
+                    let content = &line[prefix.len()..];
+                    let hash = current_partner_hash.as_ref().unwrap();
+                    sanitized.push_str(&format!("- {}: {}", hash, sanitize_dialogue_content(content)));
+                    sanitized.push('\n');
+                    continue;
+                }
+            }
+            // 新的 ## 标题（非对话标题）重置 partner 上下文
+            if line.starts_with("## ") && !line.contains("的对话") {
+                current_partner_name = None;
+                current_partner_hash = None;
+            }
+            sanitized.push_str(line);
+            sanitized.push('\n');
+        }
+        result = sanitized;
+    }
+
+    result
 }
 
 /// 后台 flush 循环：定时将缓冲区 trace 批量写盘 + 回传。
@@ -397,6 +492,52 @@ pub fn sanitize_dialogue_partner(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sanitize_user_prompt_dream_and_dialogue() {
+        // 集成测试：真实 user_prompt 含 dream + dialogue 段落，脱敏后原文消失
+        let cfg = TraceSanitizeConfig::default();
+        let prompt = "## 附近的人\n- 张三 (ID: abc123)\n\n### 记忆上下文\n### 托梦\n去京城找李四报仇\n\n## 与王翠花的对话 (session: s1)\n- 你: 你好\n- 王翠花: 我有个秘密\n\n## 最近行动";
+        let result = sanitize_user_prompt(prompt, &cfg);
+
+        // dream 原文应被占位化
+        assert!(!result.contains("去京城找李四报仇"), "dream 原文应脱敏");
+        assert!(result.contains("[托梦内容已脱敏_"), "dream 应占位化");
+
+        // dialogue partner_name 应哈希化
+        assert!(!result.contains("王翠花"), "partner_name 应脱敏");
+        assert!(result.contains("玩家_"), "partner 应哈希化");
+
+        // dialogue Partner 发言应占位化
+        assert!(!result.contains("我有个秘密"), "Partner 发言应脱敏");
+        assert!(result.contains("[对话内容已脱敏]"), "Partner 发言应占位化");
+
+        // Own 发言（agent 自己说的）不应脱敏
+        assert!(result.contains("你好"), "Own 发言不应脱敏");
+
+        // 非玩家输入段落应保留
+        assert!(result.contains("张三"), "附近的人（NPC）不应脱敏");
+        assert!(result.contains("abc123"), "NPC ID 不应脱敏");
+    }
+
+    #[test]
+    fn test_sanitize_user_prompt_disabled_preserves_original() {
+        // sanitize.mask 开关控制各入口独立脱敏
+        let prompt = "### 托梦\n秘密内容";
+        let cfg_on = TraceSanitizeConfig {
+            dream_content_mask: true,
+            ..Default::default()
+        };
+        let result = sanitize_user_prompt(prompt, &cfg_on);
+        assert!(!result.contains("秘密内容"), "dream_mask=true 应脱敏");
+
+        let cfg_off = TraceSanitizeConfig {
+            dream_content_mask: false,
+            ..Default::default()
+        };
+        let result = sanitize_user_prompt(prompt, &cfg_off);
+        assert!(result.contains("秘密内容"), "dream_mask=false 应保留原文");
+    }
 
     #[test]
     fn test_default_config_is_enabled() {

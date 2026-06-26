@@ -225,11 +225,10 @@ impl DialogueContextManager {
 
         let mut lines = Vec::new();
         for session in active_sessions {
-            // 训练脱敏：partner_name 哈希化（玩家标识保护）
             let partner_display = if session.partner_name.is_empty() {
                 format!("角色({})", session.partner_id)
             } else {
-                crate::infra::api::trace::sanitize_dialogue_partner(&session.partner_name)
+                session.partner_name.clone()
             };
 
             lines.push(format!(
@@ -238,15 +237,12 @@ impl DialogueContextManager {
             ));
 
             for msg in &session.messages {
-                let (role_str, content) = match msg.role {
-                    DialogueRole::Own => ("你", msg.content.clone()),
-                    // 训练脱敏：Partner 发言（玩家输入）占位化
-                    DialogueRole::Partner => (
-                        partner_display.as_str(),
-                        crate::infra::api::trace::sanitize_dialogue_content(&msg.content),
-                    ),
+                let role_str = match msg.role {
+                    DialogueRole::Own => "你",
+                    DialogueRole::Partner => &partner_display,
                 };
-                lines.push(format!("- {}: {}", role_str, content));
+                // 注意：注入源保持原文（不影响 agent 推理），脱敏在 trace record 时做
+                lines.push(format!("- {}: {}", role_str, msg.content));
             }
             lines.push(String::new());
         }
