@@ -896,6 +896,19 @@ impl TickScheduler {
             if self.current_tick_id > 0 && self.current_tick_id % ticks_per_day_real_secs == 0 {
                 let game_day = self.current_tick_id / ticks_per_day_real_secs;
                 self.broadcast_daily_summaries(game_day).await;
+                // 生存 Reward 每日结算（旁路，失败只 error 不阻断 tick，P1-8 验收）
+                if let Err(e) = crate::reward::settle_daily(
+                    &self.db_pool,
+                    game_day,
+                    self.current_tick_id,
+                )
+                .await
+                {
+                    error!(
+                        "[reward] 每日结算失败 (game_day={}, tick={}): {}",
+                        game_day, self.current_tick_id, e
+                    );
+                }
             }
 
             // 3. 群像传记：每 period_ticks 真实秒 (默认 7 游戏日) 生成一次
@@ -904,6 +917,20 @@ impl TickScheduler {
                 let period_start = self.current_tick_id - period_ticks + 1;
                 let db_pool = self.db_pool.clone();
                 let tick_id = self.current_tick_id;
+                // 生存 Reward 周期聚合（旁路，失败只 error 不阻断 tick）
+                let pp_start = period_start;
+                if let Err(e) = crate::reward::settle_periodic(
+                    &self.db_pool,
+                    pp_start,
+                    tick_id,
+                )
+                .await
+                {
+                    error!(
+                        "[reward] 周期聚合失败 (period={}~{}): {}",
+                        pp_start, tick_id, e
+                    );
+                }
                 tokio::spawn(async move {
                     match crate::chronicle::generate_and_store(period_start, tick_id, &db_pool)
                         .await

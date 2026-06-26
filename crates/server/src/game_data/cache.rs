@@ -480,6 +480,22 @@ mod tests {
                 },
             },
             rules_json: serde_json::Value::Array(vec![]),
+            reward: crate::game_data::types::reward::RewardConfig {
+                version: "0.0.1".to_string(),
+                description: "test".to_string(),
+                daily: crate::game_data::types::reward::DailyRewardConfig {
+                    survival_score: 1.0,
+                    physiological: crate::game_data::types::reward::PhysiologicalConfig {
+                        satiation_weight: 0.25,
+                        hydration_weight: 0.25,
+                    },
+                    tianhun: crate::game_data::types::reward::TianhunConfig::default(),
+                },
+                lifetime: crate::game_data::types::reward::LifetimeRewardConfig {
+                    death_penalty: -50.0,
+                },
+                output: crate::game_data::types::reward::OutputConfig::default(),
+            },
         }
     }
 

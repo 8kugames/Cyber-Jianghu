@@ -791,6 +791,24 @@ async fn main() -> Result<()> {
             ),
         )
         .route(
+            "/api/dashboard/reward/trends",
+            get(handlers::dashboard::get_reward_trends).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/dashboard/reward/lifetime/{id}",
+            get(handlers::dashboard::get_agent_lifetime_reward).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
             "/api/dashboard/agents/offline",
             get(handlers::dashboard::get_offline_agents).layer(
                 axum::middleware::from_fn_with_state(

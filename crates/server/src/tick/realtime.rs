@@ -640,6 +640,15 @@ impl IntentWorker {
         if !dead_agents.is_empty() {
             info!("Tick {}: {} 个 Agent 死亡", tick_id, dead_agents.len());
             self.handle_deaths(death_notifications, tick_id).await;
+            // 生存 Reward 一生结算（旁路，失败只 warn 不阻断 tick；幂等：按 agent_id 覆盖）
+            for dead_id in &dead_agents {
+                if let Err(e) = crate::reward::settle_lifetime(&self.db_pool, *dead_id).await {
+                    warn!(
+                        "[reward] 一生结算失败 (agent={}, tick={}): {}",
+                        dead_id, tick_id, e
+                    );
+                }
+            }
         }
 
         // 6. 关闭所有对话会话（防止 whisper session 泄漏）

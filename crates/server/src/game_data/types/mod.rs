@@ -21,6 +21,7 @@ pub mod items;
 pub mod locations;
 pub mod primary_attributes;
 pub mod recipes;
+pub mod reward;
 pub mod skills;
 pub mod status_component;
 pub mod unified_attributes;

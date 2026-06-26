@@ -459,5 +459,29 @@ pub fn create_test_config_dir() -> TempDir {
     )
     .unwrap();
 
+    // 创建 reward.yaml（生存 Reward 配置，强制配置）
+    fs::write(
+        dir.path().join("reward.yaml"),
+        r#"
+version: "0.0.1"
+description: "测试用 reward 配置"
+daily:
+  survival_score: 1.0
+  physiological:
+    satiation_weight: 0.25
+    hydration_weight: 0.25
+  tianhun:
+    approved_score: 0.5
+    rejected_score: -0.5
+lifetime:
+  death_penalty: -50.0
+output:
+  enabled: true
+  base_dir: "rewards"
+  flush_on_death: true
+"#,
+    )
+    .unwrap();
+
     dir
 }

@@ -1,0 +1,39 @@
+# ============================================================================
+# 生存 Reward 配置（天道账本）
+# ============================================================================
+#
+# 哲学锚点：天道无为。reward 纯锚定生存因果（寿数 + 死亡 penalty），
+# 不含任何主观评判（声望/关系/心境）。身家不计入。
+#
+# 所有数值在此配置驱动，零硬编码。缺失此文件即中止启动（强制配置）。
+# ============================================================================
+
+version: "0.0.1"
+description: "生存 Reward 配置（天道账本）"
+
+# ---------- 每日 reward 分量（每游戏日末结算） ----------
+daily:
+  # 生存分量：该日存活即得
+  survival_score: 1.0
+  # 生理分量：satiation/hydration 当日末值映射为分数
+  # 映射公式：value / max_value × weight
+  # max_value 运行时从 StateRegistry 读 attributes 配置的 max_value_formula 求值，不在此硬编码
+  physiological:
+    satiation_weight: 0.25
+    hydration_weight: 0.25
+  # 天魂审查分量：从 soul_cycle_record.tianhun_result 读
+  # P1 阶段 server 无法读取 agent 端 soul_cycle.db，judgment 暂为 None
+  tianhun:
+    approved_score: 0.5
+    rejected_score: -0.5
+
+# ---------- 一生 reward（死亡结算） ----------
+lifetime:
+  # 统一死亡 penalty（不分死因：死就是死，无高下）
+  death_penalty: -50.0
+
+# ---------- 输出开关 ----------
+output:
+  enabled: true
+  base_dir: "rewards"
+  flush_on_death: true

@@ -6,6 +6,7 @@
 // ============================================================================
 
 use super::display_messages::DisplayMessagesConfig;
+use super::reward::RewardConfig;
 use super::skills::SkillsData;
 use super::unified_attributes::UnifiedAttributesConfig;
 use super::unified_config::*;
@@ -63,4 +64,8 @@ pub struct GameData {
     /// 规则引擎验证规则 (rules.json)
     /// Server 透传 JSON，Agent 反序列化为 Vec<Rule>
     pub rules_json: serde_json::Value,
+
+    /// 生存 Reward 配置 (reward.yaml)
+    /// 天道账本：reward 纯锚定生存因果，配置驱动，零硬编码
+    pub reward: RewardConfig,
 }
