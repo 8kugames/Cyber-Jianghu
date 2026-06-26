@@ -102,13 +102,15 @@ pub struct LlmTrace {
 }
 
 /// 灵魂阶段（训练分类标签）
+///
+/// 注意：地魂不作为独立分类——地魂只是工具池，其 tool-calling 循环是人魂
+/// 带工具调用（complete_json_with_conversation_and_tools）的内部轮次，
+/// 实际调用 LLM 的始终是人魂。故地魂产生的 LLM 调用已包含在人魂 trace 中。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SoulStage {
-    /// 人魂（动机推演与规划）
+    /// 人魂（动机推演与规划，含带工具的 tool-calling 轮次）
     Renhun,
-    /// 地魂（预留，当前不产出——架构限制：run_tool_loop 无 agent_id）
-    Earth,
     /// 天魂（规则与世界观审查）
     Tianhun,
 }
@@ -348,7 +350,5 @@ mod tests {
         assert_eq!(json, "\"renhun\"");
         let json = serde_json::to_string(&SoulStage::Tianhun).unwrap();
         assert_eq!(json, "\"tianhun\"");
-        let json = serde_json::to_string(&SoulStage::Earth).unwrap();
-        assert_eq!(json, "\"earth\"");
     }
 }
