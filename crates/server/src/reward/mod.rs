@@ -101,6 +101,89 @@ mod tests {
         );
     }
 
+    /// F1-1 验收（缺陷1修复）：天魂分量接入——approved/rejected 正确映射为配置分数。
+    /// 强断言：验证具体分值（approved_score=0.5, rejected_score=-0.5），非仅"非 None"。
+    #[test]
+    fn test_tianhun_approved_maps_to_config_score() {
+        crate::game_data::init_test_registry();
+        let cfg = crate::game_data::registry::RewardRegistry::get_config().unwrap();
+        let agent = make_test_agent_state(80, 60, true);
+        let reward = compute_daily_reward(&agent, 1, Some("approved")).unwrap();
+        assert!(
+            (reward.tianhun_judgment.unwrap() - cfg.daily.tianhun.approved_score).abs() < 0.001,
+            "approved 应映射为 cfg.daily.tianhun.approved_score"
+        );
+    }
+
+    #[test]
+    fn test_tianhun_rejected_maps_to_config_score() {
+        crate::game_data::init_test_registry();
+        let cfg = crate::game_data::registry::RewardRegistry::get_config().unwrap();
+        let agent = make_test_agent_state(80, 60, true);
+        let reward = compute_daily_reward(&agent, 1, Some("rejected")).unwrap();
+        assert!(
+            (reward.tianhun_judgment.unwrap() - cfg.daily.tianhun.rejected_score).abs() < 0.001,
+            "rejected 应映射为 cfg.daily.tianhun.rejected_score"
+        );
+    }
+
+    /// F1-1 验收：parse_tianhun_result 纯函数——三类边界（approved/rejected/None）。
+    /// 验证从真实 SoulCycleMetadata JSON 结构正确解析天魂结果。
+    #[test]
+    fn test_parse_tianhun_result_approved() {
+        let metadata = serde_json::json!({
+            "cycles": [{
+                "attempt": 0,
+                "tianhun": { "result": "approved", "layers": [], "reason": null }
+            }]
+        });
+        assert_eq!(
+            daily::parse_tianhun_result(&metadata).as_deref(),
+            Some("approved")
+        );
+    }
+
+    #[test]
+    fn test_parse_tianhun_result_rejected() {
+        let metadata = serde_json::json!({
+            "cycles": [{
+                "attempt": 0,
+                "tianhun": { "result": "rejected", "layers": [], "reason": "违规" }
+            }]
+        });
+        assert_eq!(
+            daily::parse_tianhun_result(&metadata).as_deref(),
+            Some("rejected")
+        );
+    }
+
+    #[test]
+    fn test_parse_tianhun_result_none_when_result_missing() {
+        // result 字段为 null/缺失 → None
+        let metadata = serde_json::json!({
+            "cycles": [{
+                "attempt": 0,
+                "tianhun": { "result": null, "layers": [], "reason": null }
+            }]
+        });
+        assert!(daily::parse_tianhun_result(&metadata).is_none());
+    }
+
+    #[test]
+    fn test_parse_tianhun_result_takes_last_attempt() {
+        // 多次 attempt，取最后一个（当日最终认知状态）
+        let metadata = serde_json::json!({
+            "cycles": [
+                { "attempt": 0, "tianhun": { "result": "rejected", "layers": [], "reason": null } },
+                { "attempt": 1, "tianhun": { "result": "approved", "layers": [], "reason": null } }
+            ]
+        });
+        assert_eq!(
+            daily::parse_tianhun_result(&metadata).as_deref(),
+            Some("approved")
+        );
+    }
+
     /// 构造测试用 AgentState（satiation/hydration/alive 可控）
     ///
     /// 复用 AgentState::new 工厂方法（内部从 registry 读配置），

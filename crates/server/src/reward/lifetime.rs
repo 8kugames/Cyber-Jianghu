@@ -31,8 +31,19 @@ pub async fn settle_lifetime(pool: &DbPool, dead_agent_id: Uuid) -> Result<Lifet
         0
     };
 
-    // 2. 累积 reward：读该 agent 已落盘的 daily reward 求和
-    let cumulative_reward = load_cumulative_daily(dead_agent_id).await.unwrap_or(0.0);
+    // 2. 累积 reward：读该 agent 已落盘的 daily reward 求和（完整日）
+    let mut cumulative_reward = load_cumulative_daily(dead_agent_id).await.unwrap_or(0.0);
+
+    // 2.1 缺陷4修复：补算最后一个不完整日的生存奖励（按存活 tick 比例）
+    //     settle_daily 只在整日边界触发，日中死亡的 agent 最后一日 daily 未生成。
+    //     按 (partial_ticks / ticks_per_day) 比例补生存奖励，忠实"寿数即 reward"。
+    let partial_reward = compute_partial_survival(
+        birth_tick,
+        death_tick,
+        ticks_per_day,
+        cfg.daily.survival_score,
+    );
+    cumulative_reward += partial_reward;
 
     // 3. 死因：从最后一条 agent_states 推断归零属性，再查 DeathInfo
     let (death_cause, death_message) = fetch_death_info(pool, dead_agent_id, death_tick).await?;
@@ -207,4 +218,83 @@ async fn write_lifetime_record(record: &LifetimeReward) -> Result<()> {
         .await
         .with_context(|| format!("写入 lifetime reward 失败: {:?}", path))?;
     Ok(())
+}
+
+/// 纯函数：计算死亡时不足一整日的部分生存奖励（缺陷4修复）。
+///
+/// settle_daily 只在整日边界触发，日中死亡的 agent 最后一日 daily 未生成。
+/// 此函数按存活 tick 比例补算生存奖励，忠实"寿数即 reward"——活多久给多少。
+///
+/// 数学：partial_ticks = (death - birth) % ticks_per_day（不足一日的部分）
+///       partial_reward = survival_score × (partial_ticks / ticks_per_day)
+/// 完整日死亡的 agent partial_ticks=0，补算为 0，不重复计入。
+pub fn compute_partial_survival(
+    birth_tick: i64,
+    death_tick: i64,
+    ticks_per_day: i64,
+    survival_score: f64,
+) -> f64 {
+    if ticks_per_day <= 0 || death_tick <= birth_tick {
+        return 0.0;
+    }
+    let lifespan = death_tick - birth_tick;
+    let partial_ticks = lifespan % ticks_per_day;
+    if partial_ticks == 0 {
+        return 0.0;
+    }
+    let ratio = partial_ticks as f64 / ticks_per_day as f64;
+    survival_score * ratio
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// F4-2 验收：活不过一日的 agent 仍有生存奖励（非恒为 0）
+    #[test]
+    fn test_partial_survival_short_lived_agent() {
+        // 活 100 tick（ticks_per_day=720），survival_score=1.0
+        let reward = compute_partial_survival(0, 100, 720, 1.0);
+        assert!(
+            (reward - (100.0 / 720.0)).abs() < 0.001,
+            "活100tick应得 100/720 比例奖励，got {}",
+            reward
+        );
+        assert!(reward > 0.0, "短命 agent 必须有正的生存奖励");
+    }
+
+    /// F4-1 验收：活半日的 agent 按比例得奖励
+    #[test]
+    fn test_partial_survival_half_day() {
+        // 活 360 tick（半日），应得 0.5
+        let reward = compute_partial_survival(0, 360, 720, 1.0);
+        assert!(
+            (reward - 0.5).abs() < 0.001,
+            "活半日应得 0.5，got {}",
+            reward
+        );
+    }
+
+    /// 完整日死亡的 agent 补算为 0（不重复计入）
+    #[test]
+    fn test_partial_survival_exact_day_is_zero() {
+        let reward = compute_partial_survival(0, 720, 720, 1.0);
+        assert!(
+            (reward - 0.0).abs() < 0.001,
+            "完整日死亡补算应为0，got {}",
+            reward
+        );
+    }
+
+    /// 多日 + 不完整尾部的 agent
+    #[test]
+    fn test_partial_survival_multi_day_plus_partial() {
+        // 活 720*3 + 360 = 2520 tick（3.5 日）
+        let reward = compute_partial_survival(0, 2520, 720, 1.0);
+        assert!(
+            (reward - 0.5).abs() < 0.001,
+            "3.5日的尾部应得0.5，got {}",
+            reward
+        );
+    }
 }

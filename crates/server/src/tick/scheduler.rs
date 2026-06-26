@@ -895,10 +895,18 @@ impl TickScheduler {
                 .unwrap_or(720);
             if self.current_tick_id > 0 && self.current_tick_id % ticks_per_day_real_secs == 0 {
                 let game_day = self.current_tick_id / ticks_per_day_real_secs;
+                let day_start_tick = self.current_tick_id - ticks_per_day_real_secs + 1;
                 self.broadcast_daily_summaries(game_day).await;
-                // 生存 Reward 每日结算（旁路，失败只 error 不阻断 tick，P1-8 验收）
-                if let Err(e) =
-                    crate::reward::settle_daily(&self.db_pool, game_day, self.current_tick_id).await
+                // 生存 Reward 每日结算（旁路，失败只 error 不阻断 tick）
+                // 数据源：agent_state_cache（DashMap，与 broadcast 同源，消除时序竞态）
+                if let Err(e) = crate::reward::settle_daily(
+                    &self.db_pool,
+                    &self.agent_state_cache,
+                    game_day,
+                    self.current_tick_id,
+                    day_start_tick,
+                )
+                .await
                 {
                     error!(
                         "[reward] 每日结算失败 (game_day={}, tick={}): {}",
