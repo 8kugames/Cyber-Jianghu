@@ -97,13 +97,15 @@ pub async fn settle_daily(
 ///
 /// 路径：<data_base_dir>/rewards/daily/day=<game_day>.jsonl
 async fn write_daily_batch(records: &[DailyReward], _tick_id: i64) -> anyhow::Result<()> {
-    let cfg = RewardRegistry::get_config()
-        .ok_or_else(|| anyhow::anyhow!("reward config not loaded"))?;
+    let cfg =
+        RewardRegistry::get_config().ok_or_else(|| anyhow::anyhow!("reward config not loaded"))?;
     if !cfg.output.enabled {
         return Ok(());
     }
 
-    let base = crate::paths::get_data_dir().join(&cfg.output.base_dir).join("daily");
+    let base = crate::paths::get_data_dir()
+        .join(&cfg.output.base_dir)
+        .join("daily");
     tokio::fs::create_dir_all(&base).await?;
 
     // 同一 game_day 追加到同一文件

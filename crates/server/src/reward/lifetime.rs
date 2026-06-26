@@ -19,12 +19,11 @@ use crate::game_data::registry::RewardRegistry;
 /// 触发点：死亡检测（mutator.rs 置 is_alive=false）之后调用。
 /// 幂等：落盘文件按 agent_id 命名，重复触发覆盖不重复。
 pub async fn settle_lifetime(pool: &DbPool, dead_agent_id: Uuid) -> Result<LifetimeReward> {
-    let cfg = RewardRegistry::get_config()
-        .ok_or_else(|| anyhow::anyhow!("reward config not loaded"))?;
+    let cfg =
+        RewardRegistry::get_config().ok_or_else(|| anyhow::anyhow!("reward config not loaded"))?;
 
     // 1. 寿数：birth_tick 与 death_tick
-    let (birth_tick, death_tick, character_name) =
-        fetch_lifetime_span(pool, dead_agent_id).await?;
+    let (birth_tick, death_tick, character_name) = fetch_lifetime_span(pool, dead_agent_id).await?;
     let ticks_per_day = ticks_per_game_day()?;
     let longevity_days = if ticks_per_day > 0 {
         (death_tick - birth_tick).max(0) / ticks_per_day
@@ -76,19 +75,22 @@ pub async fn settle_lifetime(pool: &DbPool, dead_agent_id: Uuid) -> Result<Lifet
 fn ticks_per_game_day() -> Result<i64> {
     use crate::game_data::registry::TimeRegistry;
     use crate::game_data::registry_or_error;
-    let time_cfg = TimeRegistry::get_config()
-        .ok_or_else(|| anyhow::anyhow!("time config not loaded"))?;
+    let time_cfg =
+        TimeRegistry::get_config().ok_or_else(|| anyhow::anyhow!("time config not loaded"))?;
     // registry_or_error 返回 Result<_, String>，转 anyhow
     let registry = registry_or_error().map_err(anyhow::Error::msg)?;
-    let real_seconds_per_tick = registry.get().game_rules.data.agent_state.tick.real_seconds_per_tick as i64;
+    let real_seconds_per_tick = registry
+        .get()
+        .game_rules
+        .data
+        .agent_state
+        .tick
+        .real_seconds_per_tick as i64;
     Ok(time_cfg.ticks_per_hour as i64 * time_cfg.hours_per_day as i64 * real_seconds_per_tick)
 }
 
 /// 取 agent 的 birth_tick / death_tick / name。
-async fn fetch_lifetime_span(
-    pool: &DbPool,
-    agent_id: Uuid,
-) -> Result<(i64, i64, String)> {
+async fn fetch_lifetime_span(pool: &DbPool, agent_id: Uuid) -> Result<(i64, i64, String)> {
     use sqlx::Row;
     // death_tick：该 agent 最后一条 agent_states（is_alive=false 或最新）的 tick_id
     // birth_tick：agents 表的 birth_tick 字段
@@ -134,8 +136,7 @@ async fn fetch_death_info(
 
     // status 是 JSON，解析找归零属性（值 <= 0 且有 death_condition）
     let status_json: serde_json::Value =
-        serde_json::from_value(row.try_get::<serde_json::Value, _>("status")?)
-            .unwrap_or_default();
+        serde_json::from_value(row.try_get::<serde_json::Value, _>("status")?).unwrap_or_default();
 
     // 遍历属性找 <=0 的（候选死因），优先 satiation/hydration/hp
     for attr in ["satiation", "hydration", "hp"] {
@@ -143,8 +144,8 @@ async fn fetch_death_info(
             && val <= 0.0
         {
             // 查该属性的 DeathInfo（GameDataCache::get_death_info）
-            if let Some(info) = crate::game_data::registry::registry()
-                .and_then(|cache| cache.get_death_info(attr))
+            if let Some(info) =
+                crate::game_data::registry::registry().and_then(|cache| cache.get_death_info(attr))
             {
                 return Ok((info.cause, info.message));
             }
@@ -164,8 +165,8 @@ fn unknown_death() -> Result<(String, String)> {
 
 /// 读该 agent 已落盘的所有 daily reward，求 cumulative 之和。
 async fn load_cumulative_daily(agent_id: Uuid) -> Result<f64> {
-    let cfg = RewardRegistry::get_config()
-        .ok_or_else(|| anyhow::anyhow!("reward config not loaded"))?;
+    let cfg =
+        RewardRegistry::get_config().ok_or_else(|| anyhow::anyhow!("reward config not loaded"))?;
     let daily_dir = crate::paths::get_data_dir()
         .join(&cfg.output.base_dir)
         .join("daily");
@@ -177,7 +178,9 @@ async fn load_cumulative_daily(agent_id: Uuid) -> Result<f64> {
     let mut entries = tokio::fs::read_dir(&daily_dir).await?;
     let mut total = 0.0;
     while let Some(entry) = entries.next_entry().await? {
-        let content = tokio::fs::read_to_string(entry.path()).await.unwrap_or_default();
+        let content = tokio::fs::read_to_string(entry.path())
+            .await
+            .unwrap_or_default();
         for line in content.lines() {
             if let Ok(record) = serde_json::from_str::<super::types::DailyReward>(line)
                 && record.agent_id == agent_id
@@ -191,8 +194,8 @@ async fn load_cumulative_daily(agent_id: Uuid) -> Result<f64> {
 
 /// 写入一生 reward 记录（按 agent_id 命名，幂等覆盖）。
 async fn write_lifetime_record(record: &LifetimeReward) -> Result<()> {
-    let cfg = RewardRegistry::get_config()
-        .ok_or_else(|| anyhow::anyhow!("reward config not loaded"))?;
+    let cfg =
+        RewardRegistry::get_config().ok_or_else(|| anyhow::anyhow!("reward config not loaded"))?;
     let dir = crate::paths::get_data_dir()
         .join(&cfg.output.base_dir)
         .join("lifetime");
