@@ -26,6 +26,7 @@ use crate::component::persona::ThreadSafePersona;
 use crate::component::social::RelationshipStore;
 use crate::infra::api::cognitive_context::load_available_actions_from_file;
 use crate::infra::api::thinking_log;
+use crate::infra::api::trace;
 use crate::models::Intent;
 
 use cyber_jianghu_protocol::WorldState;
@@ -996,14 +997,21 @@ impl CognitiveEngine {
         // 0. 端侧"我眼中的江湖"：批量查询附近 entity 的关系认知（一次锁，避免 prompt 构造里逐个查）
         //    完全本地：每个 agent 只查自己的 relationship_store，不知道别人怎么看自己。
         //    尊重不对称：A 注入 A 对 B 的看法，B 注入 B 对 A 的看法，各自独立。
-        let relationships_map: std::collections::HashMap<uuid::Uuid, crate::component::social::RelationshipMemory> = {
+        let relationships_map: std::collections::HashMap<
+            uuid::Uuid,
+            crate::component::social::RelationshipMemory,
+        > = {
             let guard = self.relationship_store.read().expect("rwlock poisoned");
             match guard.as_ref() {
                 Some(store) => world_state
                     .entities
                     .iter()
                     .filter_map(|e| {
-                        store.get_relationship(e.id).ok().flatten().map(|r| (e.id, r))
+                        store
+                            .get_relationship(e.id)
+                            .ok()
+                            .flatten()
+                            .map(|r| (e.id, r))
                     })
                     .collect(),
                 None => std::collections::HashMap::new(),
@@ -1336,6 +1344,25 @@ impl CognitiveEngine {
 
         thinking_log::log_llm(&agent_name, tick_id, "Direct", &tick_msg, &response_json);
 
+        // 训练 trace（与 log_llm 并列，同源数据，不同输出：trace 给训练吃）
+        trace::record(trace::LlmTrace {
+            trace_id: uuid::Uuid::new_v4().to_string(),
+            agent_id,
+            character_name: agent_name.clone(),
+            tick_id,
+            soul_stage: trace::SoulStage::Renhun,
+            attempt: 0,
+            provider: self.llm_client.provider_name(),
+            model: self.llm_client.model_name(),
+            system_prompt: String::new(), // Direct 路径 system 内嵌 tick_msg，单独提取成本高
+            user_prompt: tick_msg.clone(),
+            response: response_json.clone(),
+            prompt_tokens: None, // 架构限制：调用方拿不到 token（在 direct_client 层）
+            completion_tokens: None,
+            ok: true,
+            wall_clock: chrono::Utc::now(),
+        });
+
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
 
         info!(
@@ -1505,6 +1532,25 @@ impl CognitiveEngine {
 
         thinking_log::log_llm(&agent_name, tick_id, "Legacy", &tick_msg, &response_json);
 
+        // 训练 trace（人魂 Legacy 路径）
+        trace::record(trace::LlmTrace {
+            trace_id: uuid::Uuid::new_v4().to_string(),
+            agent_id,
+            character_name: agent_name.clone(),
+            tick_id,
+            soul_stage: trace::SoulStage::Renhun,
+            attempt: 0,
+            provider: self.llm_client.provider_name(),
+            model: self.llm_client.model_name(),
+            system_prompt: String::new(),
+            user_prompt: tick_msg.clone(),
+            response: response_json.clone(),
+            prompt_tokens: None,
+            completion_tokens: None,
+            ok: true,
+            wall_clock: chrono::Utc::now(),
+        });
+
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
 
         info!(
@@ -1583,9 +1629,10 @@ impl CognitiveEngine {
     /// P1-3 修复：mem.record() 现在返回 Result，这里显式处理（warn + best-effort 继续）。
     pub fn record_outcome(&self, record: crate::component::memory::OutcomeRecord) {
         if let Some(ref mem) = self.outcome_memory
-            && let Err(e) = mem.record(record) {
-                tracing::warn!("record_outcome 失败，已 best-effort 忽略：{e:?}");
-            }
+            && let Err(e) = mem.record(record)
+        {
+            tracing::warn!("record_outcome 失败，已 best-effort 忽略：{e:?}");
+        }
     }
 
     /// 设置当前 tick 的对话上下文（由 lifecycle 每轮注入）

@@ -508,6 +508,25 @@ impl ReflectorSoul {
             &format!("{:?}", response),
         );
 
+        // 训练 trace（天魂审查路径）
+        crate::infra::api::trace::record(crate::infra::api::trace::LlmTrace {
+            trace_id: uuid::Uuid::new_v4().to_string(),
+            agent_id: request.intent.agent_id,
+            character_name: format!("Agent({})", request.intent.agent_id),
+            tick_id: request.intent.tick_id,
+            soul_stage: crate::infra::api::trace::SoulStage::Tianhun,
+            attempt: 0,
+            provider: llm_client.provider_name(),
+            model: llm_client.model_name(),
+            system_prompt: self.reflector_prompt.system_prompt().to_string(),
+            user_prompt: prompt.clone(),
+            response: format!("{:?}", response),
+            prompt_tokens: None,
+            completion_tokens: None,
+            ok: true,
+            wall_clock: chrono::Utc::now(),
+        });
+
         let result = response.into_validation_result();
 
         match &result {

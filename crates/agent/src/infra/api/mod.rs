@@ -31,6 +31,7 @@
 // - HTTP API 是辅助功能，WebSocket 是 OpenClaw 与 Agent 的主通道
 // - 并发安全：所有可变状态都使用 tokio 的读写锁保护
 
+pub mod auth;
 pub mod cognitive_context;
 mod context;
 mod dto;
@@ -38,7 +39,7 @@ pub(crate) mod handlers;
 pub mod service;
 pub mod soul_cycle_recorder;
 pub mod thinking_log;
-pub mod auth;
+pub mod trace;
 #[cfg(test)]
 mod warn_contract_tests;
 

@@ -1,0 +1,22 @@
+# ============================================================================
+# 训练 Trace 配置（结构化 LLM 调用记录）
+# ============================================================================
+#
+# 启用后，agent 的人魂/天魂 LLM 调用会以结构化 JSONL 落盘，作为专用模型
+# 训练的数据基础。与 thinking_log（给人看的文本日志）并列，职责分离。
+#
+# 放置位置：$CYBER_JIANGHU_CONFIG_DIR/trace.yaml 或 ~/.cyber-jianghu/config/trace.yaml
+# 输出位置：<data_base_dir>/<base_dir>/soul={renhun,tianhun}/date=YYYY-MM-DD.jsonl
+#
+# 当前覆盖：人魂 + 天魂
+# 地魂不做：run_tool_loop 无 agent_id + 共享路径无法区分 soul_stage（架构限制）
+# ============================================================================
+
+version: "0.0.1"
+description: "训练 Trace 配置（结构化 LLM 调用记录）"
+
+output:
+  # master switch：默认关闭，启用训练数据采集时设为 true
+  enabled: false
+  # 输出目录（相对 data_base_dir）
+  base_dir: "traces"
