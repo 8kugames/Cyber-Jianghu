@@ -15,6 +15,7 @@ pub mod inventory;
 pub mod items;
 pub mod models;
 pub mod paths;
+pub mod reward;
 pub mod state;
 pub mod telemetry;
 pub mod tick;

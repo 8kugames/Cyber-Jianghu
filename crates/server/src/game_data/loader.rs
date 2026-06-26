@@ -51,6 +51,7 @@ impl GameDataLoader {
         let skills = loaders::load_skills(self.config_dir.join("skills"))?;
         let initial_recipes = loaders::load_initial_recipes(&self.config_dir)?;
         let rules_json = loaders::load_rules_json(&self.config_dir)?;
+        let reward = loaders::load_reward(&self.config_dir)?;
 
         Ok(GameData {
             game_rules,
@@ -68,6 +69,7 @@ impl GameDataLoader {
             skills,
             initial_recipes,
             rules_json,
+            reward,
         })
     }
 

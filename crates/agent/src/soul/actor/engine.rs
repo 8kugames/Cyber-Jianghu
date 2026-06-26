@@ -993,6 +993,23 @@ impl CognitiveEngine {
 
         // === 三区域 Prompt 构建 ===
 
+        // 0. 端侧"我眼中的江湖"：批量查询附近 entity 的关系认知（一次锁，避免 prompt 构造里逐个查）
+        //    完全本地：每个 agent 只查自己的 relationship_store，不知道别人怎么看自己。
+        //    尊重不对称：A 注入 A 对 B 的看法，B 注入 B 对 A 的看法，各自独立。
+        let relationships_map: std::collections::HashMap<uuid::Uuid, crate::component::social::RelationshipMemory> = {
+            let guard = self.relationship_store.read().expect("rwlock poisoned");
+            match guard.as_ref() {
+                Some(store) => world_state
+                    .entities
+                    .iter()
+                    .filter_map(|e| {
+                        store.get_relationship(e.id).ok().flatten().map(|r| (e.id, r))
+                    })
+                    .collect(),
+                None => std::collections::HashMap::new(),
+            }
+        };
+
         // 1. tick message (volatile)
         let tick_msg = self.build_tick_message(super::engine_prompts::TickMessageParams {
             world_state,
@@ -1000,6 +1017,11 @@ impl CognitiveEngine {
             validation_feedback,
             focus_summary: focus.as_ref(),
             critical_preload: critical_preload.as_deref(),
+            relationships: if relationships_map.is_empty() {
+                None
+            } else {
+                Some(&relationships_map)
+            },
         })?;
 
         // 2. 读取 semi-static 内容（由 rebuild_semi_static 维护）
@@ -1396,6 +1418,7 @@ impl CognitiveEngine {
             validation_feedback,
             focus_summary: None,
             critical_preload: None,
+            relationships: None, // 降级路径无 entity，无关系数据
         })?;
 
         let temperature = self.config.read().expect("rwlock poisoned").temperature;

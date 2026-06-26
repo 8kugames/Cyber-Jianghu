@@ -66,6 +66,10 @@ pub(super) struct TickMessageParams<'a> {
     pub validation_feedback: Option<&'a str>,
     pub focus_summary: Option<&'a FocusSummary>,
     pub critical_preload: Option<&'a str>,
+    /// 端侧"我眼中的江湖"：附近 entity 的关系认知（agent 自己的主观看法）。
+    /// 完全本地、尊重不对称、不进 reward（万物自化）。
+    /// 由 engine 在构造前批量查询填充，None 表示无关系数据（降级路径）。
+    pub relationships: Option<&'a std::collections::HashMap<uuid::Uuid, crate::component::social::RelationshipMemory>>,
 }
 
 /// Prompt 各 section token 估算
@@ -218,6 +222,7 @@ impl super::CognitiveEngine {
             validation_feedback,
             focus_summary,
             critical_preload,
+            relationships,
         } = params;
 
         let feedback_section = match validation_feedback {
@@ -254,7 +259,7 @@ impl super::CognitiveEngine {
                 }
                 narrative
             }
-            None => self.build_world_state_section(world_state),
+            None => self.build_world_state_section(world_state, relationships),
         };
 
         // dialogue context
@@ -333,6 +338,7 @@ impl super::CognitiveEngine {
     fn build_world_state_section(
         &self,
         world_state: &cyber_jianghu_protocol::WorldState,
+        relationships: Option<&std::collections::HashMap<uuid::Uuid, crate::component::social::RelationshipMemory>>,
     ) -> String {
         let mut ws_parts = Vec::new();
 
@@ -385,10 +391,29 @@ impl super::CognitiveEngine {
         if !world_state.entities.is_empty() {
             ws_parts.push("\n## 附近的人".to_string());
             for entity in &world_state.entities {
+                // 端侧"我眼中的江湖"：注入 agent 对此人的关系认知（主观、本地、万物自化）
+                let rel_desc = relationships
+                    .and_then(|m| m.get(&entity.id))
+                    .map(|rel| {
+                        let (_, label) =
+                            crate::component::social::get_relationship_level(rel.favorability);
+                        let desc_suffix = if rel.self_description.is_empty() {
+                            String::new()
+                        } else {
+                            format!("（{}）", rel.self_description)
+                        };
+                        format!(
+                            "，你的看法：{}（好感度{}）{}",
+                            label, rel.favorability, desc_suffix
+                        )
+                    })
+                    .unwrap_or_else(|| "（你不认识此人）".to_string());
+
                 ws_parts.push(format!(
-                    "- {} (ID: {})",
+                    "- {} (ID: {}){}",
                     entity.name,
-                    cyber_jianghu_protocol::short_id(&entity.id)
+                    cyber_jianghu_protocol::short_id(&entity.id),
+                    rel_desc
                 ));
                 for action in &entity.recent_actions {
                     let content_hint = action
