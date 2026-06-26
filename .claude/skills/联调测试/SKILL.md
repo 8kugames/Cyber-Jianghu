@@ -30,6 +30,51 @@ description: "联调测试一键执行：部署验证→角色创建→运行监
 
 **目标**：跳过已完成步骤，最小化等待时间。每步检测到"已就绪"则直接跳过，不浪费秒。
 
+### 0.0 Agent Endpoints 自动发现（必须最先加载）
+
+从 `.test-agents/docker-compose.yml` 解析所有匹配 `AGENT_PATTERN` 的 service，避免在 skill 内硬编码容器名列表。后续 §0.2/§0.5/§1.7/§2/§3 全部依赖此数组。
+
+可调 env: `COMPOSE_FILE`（默认 `.test-agents/docker-compose.yml`）、`AGENT_PATTERN`（默认 `^agent-`）、`AGENT_INTERNAL_PORT`（默认 `23340`）。
+
+```bash
+COMPOSE_FILE="${COMPOSE_FILE:-.test-agents/docker-compose.yml}"
+AGENT_PATTERN="${AGENT_PATTERN:-^agent-}"
+AGENT_INTERNAL_PORT="${AGENT_INTERNAL_PORT:-23340}"
+
+# 从 compose 提取 (host_port, container_name) 数组，仅匹配 AGENT_PATTERN 的 service
+parse_agent_endpoints() {
+  awk -v pat="$AGENT_PATTERN" -v internal="$AGENT_INTERNAL_PORT" '
+    BEGIN { in_svc=0; cur=""; cn=""; hp="" }
+    /^services:/ { in_svc=1; next }
+    in_svc && /^  [a-z][a-z0-9_-]*:$/ {
+      if (cur!="" && cn!="" && hp!="" && cur ~ pat) print hp, cn
+      cur=$1; sub(/:$/, "", cur); cn=""; hp=""; next
+    }
+    in_svc && /container_name:/ { cn=$2; next }
+    in_svc && hp=="" && /\"/ {
+      # 匹配 "HOST_PORT:INTERNAL" 形式（短语法）
+      n=split($0, q, "\"")
+      for(i=1; i<n; i+=2) {
+        if (q[i+1] ~ ":" internal "$" && q[i+1] !~ "^:") {
+          split(q[i+1], pp, ":")
+          if (pp[1]+0 > 0) { hp=pp[1]; break }
+        }
+      }
+    }
+    END {
+      if (cur!="" && cn!="" && hp!="" && cur ~ pat) print hp, cn
+    }
+  ' "$COMPOSE_FILE"
+}
+
+mapfile -t AGENT_ENDPOINTS < <(parse_agent_endpoints)
+[ ${#AGENT_ENDPOINTS[@]} -eq 0 ] && {
+  echo "FAIL: no agent services matched pattern '$AGENT_PATTERN' in $COMPOSE_FILE"
+  exit 1
+}
+echo "DISCOVERED: ${#AGENT_ENDPOINTS[@]} agent endpoints from $COMPOSE_FILE"
+```
+
 ### 0.1 镜像缓存检测
 
 按 git commit hash 检查已有镜像，避免重复构建（节省 3-6 分钟）。
@@ -64,15 +109,18 @@ else
   echo "NEED SERVER START"
 fi
 
-# Agent 容器检测
-AGENT_COUNT=$(docker ps --filter name=test-agent --filter status=running --format '{{.Names}}' | wc -l | tr -d ' ')
-EXPECTED=6  # 根据 docker-compose.yml 中的 agent 数量
+# Agent 容器检测（容器内 127.0.0.1 bind，必须 docker exec）
+AGENT_COUNT=$(docker ps --filter name=agent- --filter status=running --format '{{.Names}}' | wc -l | tr -d ' ')
+EXPECTED=${#AGENT_ENDPOINTS[@]}  # 由 §0.0 定义
 if [ "$AGENT_COUNT" -ge "$EXPECTED" ]; then
   echo "SKIP AGENT START: ${AGENT_COUNT} containers already running"
-  # 快速健康检查
+  # 快速健康检查（容器内）
   HEALTHY=0
-  for port in 23341 23342 23343 23344 23345 23349; do
-    curl -sf --max-time 5 "http://localhost:$port/api/v1/health" > /dev/null && HEALTHY=$((HEALTHY+1))
+  for entry in "${AGENT_ENDPOINTS[@]}"; do
+    c=$(echo "$entry" | awk '{print $2}')
+    code=$(docker exec "$c" curl -s -o /dev/null -w '%{http_code}' \
+      --max-time 5 http://127.0.0.1:23340/api/v1/health 2>/dev/null || echo "000")
+    [ "$code" = "200" ] && HEALTHY=$((HEALTHY+1))
   done
   echo "Healthy: ${HEALTHY}/${AGENT_COUNT}"
 else
@@ -94,14 +142,90 @@ else
 fi
 ```
 
+### 0.5 API 协议探测 + auth_token 读取
+
+agent HTTP 容器内 bind `127.0.0.1`，所有 curl 走 `docker exec $c curl http://127.0.0.1:23340/...`。探测结果决定 §2/§3 是否带 Bearer token。
+
+```bash
+PROBE_TMPDIR=$(mktemp -d)
+NEED_AUTH=0; UNAVAILABLE=0; LEGACY=0
+for entry in "${AGENT_ENDPOINTS[@]}"; do
+  p=$(echo "$entry" | awk '{print $1}')
+  c=$(echo "$entry" | awk '{print $2}')
+  (
+    code=$(docker exec $c curl -s -o /dev/null -w '%{http_code}' \
+      --max-time 5 http://127.0.0.1:23340/api/v1/character 2>/dev/null || echo "000")
+    echo "$code" > "$PROBE_TMPDIR/$p.code"
+    token=$(docker exec $c grep '^auth_token:' \
+      /app/data/servers/cyber-jianghu-server-23333/device.yaml 2>/dev/null \
+      | awk '{print $2}')
+    echo "$token" > "$PROBE_TMPDIR/$p.token"
+  ) &
+done
+wait
+for entry in "${AGENT_ENDPOINTS[@]}"; do
+  p=$(echo "$entry" | awk '{print $1}')
+  c=$(echo "$entry" | awk '{print $2}')
+  code=$(cat "$PROBE_TMPDIR/$p.code" 2>/dev/null)
+  case "$code" in
+    401) NEED_AUTH=$((NEED_AUTH+1));;           # P0-11(b) 认证层生效
+    503) echo "WARN: $c device 未初始化"; UNAVAILABLE=$((UNAVAILABLE+1));;
+    200) LEGACY=$((LEGACY+1));;                 # 老版本无认证
+    *)   echo "WARN: $c unreachable (code=$code)"; UNAVAILABLE=$((UNAVAILABLE+1));;
+  esac
+done
+rm -rf "$PROBE_TMPDIR"
+if [ "$NEED_AUTH" -gt 0 ]; then
+  echo "PROTOCOL: Bearer auth required ($NEED_AUTH/${#AGENT_ENDPOINTS[@]} agents)"
+elif [ "$LEGACY" -gt 0 ]; then
+  echo "PROTOCOL: legacy no-auth ($LEGACY/${#AGENT_ENDPOINTS[@]} agents)"
+fi
+[ "$UNAVAILABLE" -gt 0 ] && echo "FAIL: $UNAVAILABLE agent(s) unreachable"
+```
+
+### 0.6 镜像陈旧检测
+
+对比 git HEAD commit 时间 vs 镜像创建时间（>24h 视为陈旧），避免跑老镜像导致协议不一致。
+
+```bash
+COMMIT_TS=$(git log -1 --format=%ct HEAD 2>/dev/null || echo 0)
+
+check_image_freshness() {
+  local img="$1"
+  local img_epoch=$(docker inspect "$img" --format='{{.Created}}' 2>/dev/null | \
+    python3 -c "
+import sys, datetime
+t = sys.stdin.read().strip()
+if t:
+    dt = datetime.datetime.fromisoformat(t.replace('Z', '+00:00'))
+    print(int(dt.timestamp()))
+else:
+    print(0)
+" 2>/dev/null || echo 0)
+  if [ -z "$img_epoch" ] || [ "$img_epoch" = "0" ]; then
+    echo "STALE: $img missing"
+  elif [ $((COMMIT_TS - img_epoch)) -gt 86400 ]; then
+    echo "STALE: $img is $(( (COMMIT_TS - img_epoch) / 86400 )) days old"
+  else
+    echo "FRESH: $img within 24h"
+  fi
+}
+
+check_image_freshness cyber-jianghu-server
+check_image_freshness agent-agent:latest
+```
+
 ### 0.4 Pre-flight 决策表
 
 | 检测项 | 已就绪 | 未就绪 |
 |--------|--------|--------|
-| 镜像 | 跳过 Phase 1.4 | 执行构建 + tag |
-| Server | 跳过 Phase 1.3 | 执行启动 |
-| Agent 容器 | 跳过 Phase 1.5-1.6 | 执行清理 + 启动 |
-| 角色 | 跳过 Phase 2 全部 | 执行角色创建 |
+| 镜像 (Phase 0.1) | 跳过 Phase 1.4 | 执行构建 + tag |
+| Server 镜像陈旧 (Phase 0.6) | - | 强制 Phase 1.3 重建 |
+| Agent 镜像陈旧 (Phase 0.6) | - | 强制 Phase 1.4 重建 |
+| Server (Phase 0.2) | 跳过 Phase 1.3 | 执行启动 |
+| Agent 容器 (Phase 0.2) | 跳过 Phase 1.5-1.6 | 执行清理 + 启动 |
+| API 协议 (Phase 0.5) | 走 Bearer token 路径 | 走裸调路径（兼容老版本） |
+| 角色 (Phase 0.3) | 跳过 Phase 2 全部 | 执行角色创建 |
 
 **全部就绪 → 直接跳到 Phase 3（监控）或 Phase 4（报告）。**
 
@@ -183,18 +307,39 @@ docker compose -f .test-agents/docker-compose.yml up -d
 
 ### 1.7 健康检查
 
+容器内 `docker exec + 127.0.0.1`，`/api/v1/health` 公开，无须 Bearer。
+
 ```bash
-PORTS="23341 23342 23343 23344 23345 23349"
 TMPDIR=$(mktemp -d)
-echo $PORTS | tr ' ' '\n' | xargs -P 6 -I{} sh -c '
-  port={}
-  curl -f --max-time 10 -s http://localhost:$port/api/v1/health > /dev/null \
-    && echo "OK $port" > '"$TMPDIR"'/$port \
-    || echo "FAIL $port" > '"$TMPDIR"'/$port
-'
-FAILS=$(grep -l "^FAIL" "$TMPDIR"/* 2>/dev/null | sed "s|$TMPDIR/||")
-[ -n "$FAILS" ] && { for p in $FAILS; do docker logs --tail 50 test-agent-$((p-23340)) 2>&1 | tail -20; done; exit 1; }
+for entry in "${AGENT_ENDPOINTS[@]}"; do
+  p=$(echo "$entry" | awk '{print $1}')
+  c=$(echo "$entry" | awk '{print $2}')
+  (
+    code=$(docker exec $c curl -s -o /dev/null -w '%{http_code}' \
+      --max-time 10 http://127.0.0.1:23340/api/v1/health 2>/dev/null || echo "000")
+    if [ "$code" = "200" ]; then
+      echo "OK" > "$TMPDIR/$p"
+    else
+      echo "FAIL $code" > "$TMPDIR/$p"
+    fi
+  ) &
+done
+wait
+FAILS=""
+for entry in "${AGENT_ENDPOINTS[@]}"; do
+  p=$(echo "$entry" | awk '{print $1}')
+  c=$(echo "$entry" | awk '{print $2}')
+  if [ "$(cat "$TMPDIR/$p" 2>/dev/null)" != "OK" ]; then
+    FAILS="$FAILS $c"
+  fi
+done
 rm -rf "$TMPDIR"
+if [ -n "$FAILS" ]; then
+  for c in $FAILS; do
+    docker logs --tail 50 "$c" 2>&1 | tail -20
+  done
+  exit 1
+fi
 ```
 
 ### 1.8 记录基线信息
@@ -212,30 +357,51 @@ rm -rf "$TMPDIR"
 
 **仅在 Phase 0.3 检测为 NEED CHARACTER CREATION 时执行此步骤。**
 
-目标：每个 agent 创建具有完整背景的新角色。
-
-每端口强依赖：generate→register→verify 必须串行；**端口间完全独立，用 `xargs -P 6` 全部并发**（6 个角色同时创建，总耗时 = 最慢的那个，而非 6 倍）。
+每端口强依赖 generate→register→verify 串行；端口间用 `&` + `wait` 全并发，总耗时 = 最慢的那个。
 
 ```bash
-PORTS="23341 23342 23343 23344 23345 23349"
 TMPDIR=$(mktemp -d)
+TOKEN_MAP="$TMPDIR/tokens"
+> "$TOKEN_MAP"
+for entry in "${AGENT_ENDPOINTS[@]}"; do
+  c=$(echo "$entry" | awk '{print $2}')
+  echo "$c ${AGENT_TOKENS[$c]}" >> "$TOKEN_MAP"
+done
 
-printf '%s\n' $PORTS | xargs -P 6 -I{} sh -c '
-  port={}; cdir='"$TMPDIR"'/$port; mkdir -p "$cdir"
-  # 2.1 generate（失败重试 1 次）
-  curl -fsX POST --max-time 60 http://localhost:$port/api/v1/character/generate > "$cdir/gen" || \
-    { sleep 2; curl -fsX POST --max-time 60 http://localhost:$port/api/v1/character/generate > "$cdir/gen" || { echo "FAIL generate" > "$cdir/status"; exit 0; }; }
-  # 2.2 register
-  curl -fsX POST --max-time 60 http://localhost:$port/api/v1/character/register > "$cdir/reg" \
-    || { echo "FAIL register" > "$cdir/status"; exit 0; }
-  # 2.3 verify
-  curl -fs --max-time 30 http://localhost:$port/api/v1/character > "$cdir/char" \
-    || { echo "FAIL verify" > "$cdir/status"; exit 0; }
-  echo "OK" > "$cdir/status"
-'
+for entry in "${AGENT_ENDPOINTS[@]}"; do
+  p=$(echo "$entry" | awk '{print $1}')
+  c=$(echo "$entry" | awk '{print $2}')
+  (
+    cdir="$TMPDIR/$p"
+    mkdir -p "$cdir"
+    token=$(awk -v cn="$c" '$1==cn{print $2}' "$TOKEN_MAP")
+    auth_args=()
+    [ -n "$token" ] && auth_args=(-H "Authorization: Bearer $token")
 
-for port in $PORTS; do
-  echo "$port $(cat "$TMPDIR/$port/status" 2>/dev/null || echo TIMEOUT)"
+    # 2.1 generate（失败重试 1 次）
+    docker exec "$c" curl -fsX POST --max-time 60 "${auth_args[@]}" \
+      http://127.0.0.1:23340/api/v1/character/generate > "$cdir/gen" 2>/dev/null || \
+      { sleep 2; docker exec "$c" curl -fsX POST --max-time 60 "${auth_args[@]}" \
+        http://127.0.0.1:23340/api/v1/character/generate > "$cdir/gen" 2>/dev/null \
+        || { echo "FAIL generate" > "$cdir/status"; exit 0; }; }
+    # 2.2 register
+    docker exec "$c" curl -fsX POST --max-time 60 "${auth_args[@]}" \
+      http://127.0.0.1:23340/api/v1/character/register > "$cdir/reg" 2>/dev/null \
+      || { echo "FAIL register" > "$cdir/status"; exit 0; }
+    # 2.3 verify
+    docker exec "$c" curl -fs --max-time 30 "${auth_args[@]}" \
+      http://127.0.0.1:23340/api/v1/character > "$cdir/char" 2>/dev/null \
+      || { echo "FAIL verify" > "$cdir/status"; exit 0; }
+    echo "OK" > "$cdir/status"
+  ) &
+done
+wait
+rm -f "$TOKEN_MAP"
+
+for entry in "${AGENT_ENDPOINTS[@]}"; do
+  p=$(echo "$entry" | awk '{print $1}')
+  status=$(cat "$TMPDIR/$p/status" 2>/dev/null || echo "TIMEOUT")
+  echo "$p $status"
 done
 ```
 
@@ -244,7 +410,7 @@ done
 | Agent | 角色 | 年龄 | 性别 | Agent ID |
 |-------|------|------|------|----------|
 
-从 `$TMPDIR/$port/char` 解析填充。
+从 `$TMPDIR/$p/char` 解析填充。
 
 部分失败 → 记录失败的 agent，用已成功的继续测试。`rm -rf "$TMPDIR"` 清理。
 
@@ -260,19 +426,38 @@ done
 
 ### 3.1 健康状态检查（每轮）
 
+容器内 `docker exec + 127.0.0.1` + Bearer token。
+
 ```bash
-PORTS="23341 23342 23343 23344 23345 23349"
 TMPDIR=$(mktemp -d)
 INTERVAL_MIN=${interval:-10}
+TOKEN_MAP="$TMPDIR/tokens"
+> "$TOKEN_MAP"
+for entry in "${AGENT_ENDPOINTS[@]}"; do
+  c=$(echo "$entry" | awk '{print $2}')
+  echo "$c ${AGENT_TOKENS[$c]}" >> "$TOKEN_MAP"
+done
 
-printf '%s\n' $PORTS | xargs -P 6 -I{} sh -c '
-  port={}; [ "$port" -eq 23349 ] && agent="ollama" || agent="$((port - 23340))"
-  cdir='"$TMPDIR"'/$port; mkdir -p "$cdir"
-  curl -s --max-time 30 http://localhost:$port/api/v1/character > "$cdir/char" &
-  curl -s --max-time 30 http://localhost:$port/api/v1/state     > "$cdir/world" &
-  docker ps --filter name=test-agent-$agent --format "{{.Status}}" > "$cdir/docker" &
-  wait  # final-join
-'
+for entry in "${AGENT_ENDPOINTS[@]}"; do
+  p=$(echo "$entry" | awk '{print $1}')
+  c=$(echo "$entry" | awk '{print $2}')
+  (
+    cdir="$TMPDIR/$p"
+    mkdir -p "$cdir"
+    token=$(awk -v cn="$c" '$1==cn{print $2}' "$TOKEN_MAP")
+    auth_args=()
+    [ -n "$token" ] && auth_args=(-H "Authorization: Bearer $token")
+
+    docker exec "$c" curl -s --max-time 30 "${auth_args[@]}" \
+      http://127.0.0.1:23340/api/v1/character > "$cdir/char" &
+    docker exec "$c" curl -s --max-time 30 "${auth_args[@]}" \
+      http://127.0.0.1:23340/api/v1/state     > "$cdir/world" &
+    docker ps --filter name="$c" --format "{{.Status}}" > "$cdir/docker" &
+    wait  # final-join
+  ) &
+done
+wait
+rm -f "$TOKEN_MAP"
 ```
 
 记录到监控日志表：
@@ -292,11 +477,17 @@ ls .test-agents/agent-*/data/logs/token_cost_count.tmp 2>/dev/null | \
 ### 3.3 日志检查（每轮）
 
 ```bash
-printf '%s\n' 23341 23342 23343 23344 23345 23349 | xargs -P 6 -I{} sh -c '
-  port={}; [ "$port" -eq 23349 ] && agent="ollama" || agent="$((port - 23340))"
-  docker logs --since '"${INTERVAL_MIN}"'m test-agent-$agent 2>&1 | \
-    grep -E "ERROR|WARN|死亡|death|panic" | tail -20 > '"$TMPDIR"'/$port.log
-'
+TMPDIR=$(mktemp -d)
+INTERVAL_MIN=${interval:-10}
+for entry in "${AGENT_ENDPOINTS[@]}"; do
+  p=$(echo "$entry" | awk '{print $1}')
+  c=$(echo "$entry" | awk '{print $2}')
+  (
+    docker logs --since "${INTERVAL_MIN}m" "$c" 2>&1 | \
+      grep -E "ERROR|WARN|死亡|death|panic" | tail -20 > "$TMPDIR/$p.log"
+  ) &
+done
+wait
 ```
 
 ### 3.4 死亡处理
@@ -347,7 +538,7 @@ ls logs/测试报告/联调测试.{mmdd}.*.md 2>/dev/null
 - 测试起止时间 / 监控轮次记录 / 各 agent 角色信息
 - Server 镜像: `docker inspect cyber-jianghu-server --format '{{.Config.Image}} {{.Created}}'`
 - Agent 镜像: `docker inspect agent-agent:latest --format '{{.Created}}'`
-- 容器状态: `docker ps --filter name=test-agent --format '{{.Names}} {{.Status}}'`
+- 容器状态: `docker ps --filter name=agent- --format '{{.Names}} {{.Status}}'`
 
 **Token 统计**（per-agent 隔离，跨阶段复用 `$REPORT_TMPDIR/tokens/`）：
 
@@ -400,27 +591,33 @@ Tick 数计算：`运行秒数 / 60`（real_seconds_per_tick = 60）。
 
 ## 关键 API 端点速查
 
-| 用途 | 方法 | Agent 端点 | Server 端点 |
-|------|------|-----------|-------------|
-| 健康检查 | GET | `localhost:{port}/api/v1/health` | `localhost:23333/health` |
-| 生成角色 | POST | `localhost:{port}/api/v1/character/generate` | - |
-| 注册角色 | POST | `localhost:{port}/api/v1/character/register` | - |
-| 角色信息 | GET | `localhost:{port}/api/v1/character` | - |
-| 世界状态 | GET | `localhost:{port}/api/v1/state` | - |
-| 转生 | POST | `localhost:{port}/api/v1/character/rebirth` | - |
-| 属性 | GET | `localhost:{port}/api/v1/attributes` | - |
+**Agent API 必须在容器内调用**（127.0.0.1 bind + Bearer token）：
+
+```bash
+# 模板
+docker exec $c curl -s -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:23340<path>
+```
+
+| 用途 | 方法 | Agent 路径（容器内） | Server 路径（宿主机） |
+|------|------|---------------------|----------------------|
+| 健康检查 | GET | `/api/v1/health`（公开，无须 Bearer） | `localhost:23333/health` |
+| 生成角色 | POST | `/api/v1/character/generate` | - |
+| 注册角色 | POST | `/api/v1/character/register` | - |
+| 角色信息 | GET | `/api/v1/character` | - |
+| 世界状态 | GET | `/api/v1/state` | - |
+| 转生 | POST | `/api/v1/character/rebirth` | - |
+| 属性 | GET | `/api/v1/attributes` | - |
 
 ---
 
 ## 注意事项
 
-1. **Phase 0 是强制入口**：每次联调必须先执行 Phase 0 智能检测，根据检测结果决定跳过哪些步骤。禁止无条件执行全部步骤。
-2. **镜像按 commit hash 缓存**：`agent-agent:{git-short-hash}` tag 用于缓存检测。代码没变就复用，不浪费构建时间。
-3. **角色创建必须并行**：6 个 `generate+register+verify` 同时发起（`xargs -P 6`），禁止串行逐个创建。
-4. **BuildKit 缓存**：`--no-cache` 不能清除 BuildKit cache mount。如需强制重编译，修改 Dockerfile 中 cache id 或使用 `--build-arg CACHEBUST=$(date +%s)`
-5. **Tick 时长**：60s（`game_rules.yaml` 的 `real_seconds_per_tick`），所有 per-tick 计算基于此
-6. **Token 持久化**：`$CYBER_JIANGHU_DATA_DIR/logs/token_cost_count.tmp`，每次 tick 由 `persist_and_reset()` 写入
-7. **Agent 端口映射**：agent-1=23341, agent-2=23342, ..., agent-5=23345, agent-ollama=23349
-8. **容器命名**：test-agent-1 ~ test-agent-5, test-agent-ollama
-9. **报告路径**：`logs/测试报告/联调测试.{MMDD}.docker.{N}.md`
-10. **配置冻结**：测试开始后不得修改任何 agent 或 server 配置。如需调整，记录变更点并重新开始
+1. **Phase 0 是强制入口**：检测通过的项目直接跳过对应 Phase，禁止无条件执行全流程。
+2. **镜像按 commit hash 缓存**：`agent-agent:{short-hash}` tag 用于 Phase 0.1 检测，代码未变不重新构建。
+3. **角色创建必须并行**：端口间用 `&` + `wait` 全并发；每端口内 generate→register→verify 串行（含 1 次重试）。
+4. **BuildKit 缓存**：`--no-cache` 不能清除 BuildKit cache mount；需改 Dockerfile 的 `--mount=type=cache,id=...` 或加 `--build-arg CACHEBUST=$(date +%s)`。
+5. **Tick 时长**：60s（`game_rules.yaml` 的 `real_seconds_per_tick`）。
+6. **agent HTTP 协议（P0-11 a/b）**：容器内 bind `127.0.0.1` + 除公开路径外强制 Bearer token。宿主机 `localhost:$port` 会被 docker-proxy 拒绝，必须 `docker exec $c curl http://127.0.0.1:23340/...`。token 来自容器内 `/app/data/servers/cyber-jianghu-server-23333/device.yaml`。**禁止改回 `0.0.0.0`**。
+7. **AGENT_ENDPOINTS**：由 Phase 0.0 从 compose 自动解析；增删 agent 改 `.test-agents/docker-compose.yml` 即可。
+8. **配置冻结**：测试开始后不得修改任何 agent 或 server 配置；如需调整，记录变更点并重新开始。
