@@ -447,13 +447,16 @@ async fn write_batch(traces: &[LlmTrace], cfg: &TraceConfig) -> Result<()> {
 // 脱敏纯函数（在注入源调用，非事后清洗）
 // ============================================================================
 
-/// 计算短哈希（取 SHA256 前 8 位十六进制），用于不可逆标识
+/// 计算短哈希（取 SHA256 前 8 位十六进制），用于不可逆标识。
+///
+/// 用 SHA256（非 DefaultHasher）保证跨 Rust 版本/platform 稳定，
+/// 训练数据长期复现时哈希不漂移。
 fn short_hash(input: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    input.hash(&mut hasher);
-    format!("{:08x}", hasher.finish())
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    let result = hasher.finalize();
+    format!("{:08x}", u32::from_be_bytes(result[..4].try_into().unwrap()))
 }
 
 /// 脱敏角色名：哈希化（不可逆）
