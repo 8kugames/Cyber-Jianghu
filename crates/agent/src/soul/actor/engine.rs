@@ -962,6 +962,7 @@ impl CognitiveEngine {
         world_state: &WorldState,
         memory_context: &str,
         validation_feedback: Option<&str>,
+        soul_cycle_attempt: i32,
     ) -> Result<CognitiveChain> {
         let agent_name = {
             let cfg = self.config.read().expect("rwlock poisoned");
@@ -1351,7 +1352,7 @@ impl CognitiveEngine {
             character_name: agent_name.clone(),
             tick_id,
             soul_stage: trace::SoulStage::Renhun,
-            attempt: 0,
+            attempt: soul_cycle_attempt,
             provider: self.llm_client.provider_name(),
             model: self.llm_client.model_name(),
             system_prompt: String::new(), // Direct 路径 system 内嵌 tick_msg，单独提取成本高
@@ -1397,7 +1398,8 @@ impl CognitiveEngine {
         agent_id: Uuid,
         validation_feedback: Option<&str>,
     ) -> Result<CognitiveChain> {
-        self.think_with_memory_and_feedback(tick_id, agent_id, "", validation_feedback)
+        // Legacy 降级路径：attempt 信息不透传（trace::record 主要用 Direct 路径）
+        self.think_with_memory_and_feedback(tick_id, agent_id, "", validation_feedback, 0)
             .await
     }
 
@@ -1408,7 +1410,8 @@ impl CognitiveEngine {
         agent_id: Uuid,
         memory_context: &str,
     ) -> Result<CognitiveChain> {
-        self.think_with_memory_and_feedback(tick_id, agent_id, memory_context, None)
+        // Legacy 降级路径：attempt 信息不透传（trace::record 主要用 Direct 路径）
+        self.think_with_memory_and_feedback(tick_id, agent_id, memory_context, None, 0)
             .await
     }
 
@@ -1419,6 +1422,7 @@ impl CognitiveEngine {
         agent_id: Uuid,
         memory_context: &str,
         validation_feedback: Option<&str>,
+        soul_cycle_attempt: i32,
     ) -> Result<CognitiveChain> {
         let agent_name = {
             let cfg = self.config.read().expect("rwlock poisoned");
@@ -1539,7 +1543,7 @@ impl CognitiveEngine {
             character_name: agent_name.clone(),
             tick_id,
             soul_stage: trace::SoulStage::Renhun,
-            attempt: 0,
+            attempt: soul_cycle_attempt,
             provider: self.llm_client.provider_name(),
             model: self.llm_client.model_name(),
             system_prompt: String::new(),

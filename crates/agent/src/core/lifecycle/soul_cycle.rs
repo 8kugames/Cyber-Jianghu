@@ -95,7 +95,7 @@ impl super::super::Agent {
                     // 最高优先级：decision_with_chain_callback（人魂直连 WorldState）
                     if let Some(ref chain_callback) = self.decision_with_chain_callback {
                         let fb = self.last_rejection_reason.as_deref();
-                        return chain_callback(world_state, memory_context, fb).await;
+                        return chain_callback(world_state, memory_context, fb, attempt).await;
                     }
 
                     // 降级路径：旧式回调（不接收 WorldState）
@@ -335,7 +335,7 @@ impl super::super::Agent {
                             && tick_llm_fail_count < opt_chaos_on_llm_fail
                         {
                             match self
-                                .self_correct_intent(world_state, memory_context, &rejection_reason)
+                                .self_correct_intent(world_state, memory_context, &rejection_reason, attempt)
                                 .await
                             {
                                 Ok(corrected_intent) => {

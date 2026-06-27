@@ -58,11 +58,11 @@ pub fn cognitive_decision(
 pub fn cognitive_decision_with_chain(
     engine: Arc<CognitiveEngine>,
     max_retries: usize,
-) -> impl Fn(&WorldState, &str, Option<&str>) -> BoxFuture<'static, (Intent, Option<CognitiveChain>)>
+) -> impl Fn(&WorldState, &str, Option<&str>, i32) -> BoxFuture<'static, (Intent, Option<CognitiveChain>)>
 + Send
 + Sync
 + 'static {
-    move |world_state: &WorldState, memory_context: &str, feedback: Option<&str>| {
+    move |world_state: &WorldState, memory_context: &str, feedback: Option<&str>, soul_cycle_attempt: i32| {
         let engine = engine.clone();
         let world_state = world_state.clone();
         let memory_context = memory_context.to_string();
@@ -74,8 +74,9 @@ pub fn cognitive_decision_with_chain(
             let mut failed_attempts: usize = 0;
 
             for attempt in 0..=max_retries {
+                let _ = attempt; // 内层认知校验重试序号（不影响 trace 的 soul_cycle_attempt）
                 match engine
-                    .think_direct(&world_state, &memory_context, feedback.as_deref())
+                    .think_direct(&world_state, &memory_context, feedback.as_deref(), soul_cycle_attempt)
                     .await
                 {
                     Ok(chain) => {
