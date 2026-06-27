@@ -109,6 +109,7 @@ impl super::Agent {
         world_state: &WorldState,
         memory_context: &str,
         rejection_reason: &str,
+        soul_cycle_attempt: i32,
     ) -> Result<cyber_jianghu_protocol::Intent> {
         // 设置驳回反馈，使 callback 能传递给 LLM
         self.set_rejection_feedback(rejection_reason.to_string());
@@ -119,7 +120,8 @@ impl super::Agent {
         // 优先使用 decision_with_chain_callback
         if let Some(ref chain_callback) = self.decision_with_chain_callback {
             let fb = self.last_rejection_reason.as_deref();
-            let (corrected_intent, _) = chain_callback(world_state, memory_context, fb).await;
+            let (corrected_intent, _) =
+                chain_callback(world_state, memory_context, fb, soul_cycle_attempt).await;
             return Ok(corrected_intent);
         }
 

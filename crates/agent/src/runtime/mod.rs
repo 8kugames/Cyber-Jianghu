@@ -62,7 +62,7 @@ pub use crate::soul::actor::CognitiveChain;
 /// 接收 WorldState、记忆上下文、验证反馈，返回 (Intent, CognitiveChain) 元组。
 /// 人魂直接访问 WorldState，输出结构化 Intent（不再走天魂翻译）。
 pub type DecisionWithChainCallback = Arc<
-    dyn Fn(&WorldState, &str, Option<&str>) -> BoxFuture<'static, (Intent, Option<CognitiveChain>)>
+    dyn Fn(&WorldState, &str, Option<&str>, i32) -> BoxFuture<'static, (Intent, Option<CognitiveChain>)>
         + Send
         + Sync,
 >;
