@@ -17,8 +17,8 @@
 # server 汇聚：回传后 server 侧 traces/ 与 reward/ 同目录树
 # ============================================================================
 
-version: "0.0.2"
-description: "训练 Trace 配置（结构化 LLM 调用记录 + 回传 + 脱敏）"
+version: "0.0.3"
+description: "训练 Trace 配置（结构化 LLM 调用记录 + 回传）"
 
 # 默认开启（用户要求：支持训练专用模型，默认为开）
 output:
@@ -29,12 +29,3 @@ output:
 upload:
   enabled: true
   batch_size: 32
-
-# 脱敏：玩家输入（角色设定/托梦/私聊）在采集时自动处理，原文不进入训练数据
-# 详见 docs/DATA_USAGE.md §3。脱敏不影响智能体实际推理（推理用原文，训练用脱敏版）
-sanitize:
-  enabled: true
-  persona_name_hash: true        # 角色名哈希化
-  persona_description_mask: true # 角色描述占位（当前 system_prompt 留空，预留未来）
-  dream_content_mask: true       # 托梦占位
-  dialogue_content_mask: true    # 玩家私聊占位
