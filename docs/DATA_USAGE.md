@@ -56,7 +56,7 @@
                           ↓
                     本地落盘（agent 端 traces/）
                           ↓ upload.enabled=true
-                    回传 server（已脱敏）
+                    回传 server（原文）
                           ↓
                     server 汇聚（traces/ + rewards/）
                           ↓

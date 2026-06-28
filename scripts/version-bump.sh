@@ -19,15 +19,23 @@ CRATES=("agent" "protocol" "server")
 
 # Parse command line arguments
 PRE_COMMIT_MODE=false
+RELEASE_MODE=false
+RELEASE_VERSION=""
 while [[ $# -gt 0 ]]; do
     case $1 in
         --pre-commit)
             PRE_COMMIT_MODE=true
             shift
             ;;
+        --release)
+            RELEASE_MODE=true
+            RELEASE_VERSION="$2"
+            shift 2
+            ;;
         --help)
-            echo "Usage: $0 [--pre-commit]"
-            echo "  --pre-commit  Run in pre-commit mode (check staged changes only)"
+            echo "Usage: $0 [--pre-commit] [--release <version>]"
+            echo "  --pre-commit       Run in pre-commit mode (check staged changes only)"
+            echo "  --release <ver>    Release mode: bump Cargo.toml to <ver> + 转 CHANGELOG [Unreleased]"
             exit 0
             ;;
         *)
@@ -166,6 +174,61 @@ update_dependencies() {
         fi
     done
 }
+
+# ============================================================================
+# Release 模式：转正 CHANGELOG [Unreleased] 为实际版本段
+# 用法：scripts/version-bump.sh --release 0.2.0
+# ============================================================================
+if [ "$RELEASE_MODE" = true ]; then
+    if [ -z "$RELEASE_VERSION" ]; then
+        echo -e "${RED}Error: --release 需要版本号参数${NC}"
+        exit 1
+    fi
+
+    TODAY=$(date +%Y-%m-%d)
+
+    echo "=========================================="
+    echo "Release Mode: v$RELEASE_VERSION"
+    echo "=========================================="
+    echo ""
+
+    # 1. Bump 所有 crate 的 Cargo.toml 到指定版本
+    for crate in "${CRATES[@]}"; do
+        cargo_file="crates/$crate/Cargo.toml"
+        if [ -f "$cargo_file" ]; then
+            update_version_in_file "$cargo_file" "$RELEASE_VERSION"
+            echo -e "  ${GREEN}✓${NC} $crate Cargo.toml → $RELEASE_VERSION"
+        fi
+    done
+
+    # 2. 更新依赖版本
+    for crate in "${CRATES[@]}"; do
+        update_dependencies "$crate" "$RELEASE_VERSION"
+    done
+
+    # 3. 转正 CHANGELOG [Unreleased] → [版本号] - 日期
+    if grep -q "^## \[Unreleased\]" CHANGELOG.md; then
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s/^## \[Unreleased\]/## [$RELEASE_VERSION] - $TODAY/" CHANGELOG.md
+            # 在转正的版本段上方重新插入空的 [Unreleased]
+            sed -i '' "/^## \[$RELEASE_VERSION\] - $TODAY/i\\
+## [Unreleased]\\
+" CHANGELOG.md
+        else
+            sed -i "s/^## \[Unreleased\]/## [$RELEASE_VERSION] - $TODAY/" CHANGELOG.md
+            sed -i "/^## \[$RELEASE_VERSION\] - $TODAY/i\\## [Unreleased]\n" CHANGELOG.md
+        fi
+        echo -e "  ${GREEN}✓${NC} CHANGELOG [Unreleased] → [$RELEASE_VERSION] - $TODAY"
+    else
+        echo -e "  ${YELLOW}⚠${NC} CHANGELOG 无 [Unreleased] 段，跳过转正"
+    fi
+
+    echo ""
+    echo -e "${GREEN}Release $RELEASE_VERSION 准备完成${NC}"
+    echo "请检查后提交并打 tag："
+    echo "  git add -A && git commit -m \"release: v$RELEASE_VERSION\" && git tag v$RELEASE_VERSION"
+    exit 0
+fi
 
 echo "=========================================="
 echo "Version Bump Script"
