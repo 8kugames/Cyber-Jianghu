@@ -67,6 +67,49 @@
 
 ---
 
+## 专用模型训练数据管线
+
+> 哲学锚点：天道无为——reward 纯锚定生存因果，声望/关系/心境是众生主观认知不进 reward。
+> 日期：2026-06-28
+
+### Reward 天道账本（server 侧）
+
+- **每日结算**（每游戏日=12tick）：生存分量 + 生理分量（satiation/hydration）+ 天魂审查分量（approved/rejected）
+- **一生结算**（死亡时）：寿数 + 统一死亡 penalty（不分死因）；短命 agent 按存活比例补算
+- **周期聚合**：复用 chronicle 7 日周期
+- **仪表盘 API**：`GET /api/dashboard/reward/trends`、`/reward/lifetime/{id}`
+- **配置驱动**：reward.yaml 强制配置（fail-fast），走 game_data 标准管线，零硬编码
+
+### 训练 Trace 采集（agent → server）
+
+- **结构化落盘**：人魂/天魂 LLM 调用 JSONL（agent_id UUID + tick_id + prompt/response 全文 + soul_stage + attempt）
+- **回传 server**：复用 websocket，`ClientMessage::TraceReport`，server 汇聚到 `traces/`
+- **三入口脱敏**（record 时对副本做，不破坏推理）：
+  - 角色设定：name SHA256 哈希化
+  - 托梦：原文占位化
+  - 玩家私聊：partner_name 哈希化 + 发言占位化
+- **attempt 透传**：外层 soul_cycle attempt 全链路透传到 trace（DPO 配对根基解，非 wall_clock 重建）
+- **配置驱动**：trace.yaml 默认开启采集+回传，可 Opt-out（`output.enabled: false`）
+
+### 训练数据导出（离线脚本）
+
+- **SFT**：`scripts/build_sft_data.py` — 筛天魂 approved 合规样本 → messages JSONL
+- **DPO**：`scripts/build_dpo_data.py` — 天魂 reject→approve 偏好对 → chosen/rejected JSONL
+- **社会结构分析**：`scripts/analyze_social_structure.py` — 恩怨双图 PageRank（观察工具）
+
+### 端侧关系认知（agent 侧，万物自化）
+
+- 人魂 prompt"附近的人"注入 agent 对此人的主观关系认知
+- 完全本地，尊重不对称，不进 reward
+
+### 用户数据明示
+
+- `docs/DATA_USAGE.md`：采集内容/脱敏机制/Opt-out 完整说明
+- Readme 「用户数据使用与隐私」章节
+- trace.yaml 配置顶部明示注释
+
+---
+
 ## 动作演化治理 (Action Evolution Governance)
 
 ### P0 核心机制

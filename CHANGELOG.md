@@ -4,6 +4,53 @@
 
 ## [Unreleased]
 
+### 专用模型训练数据管线（reward + trace + 导出）
+
+围绕"将 Agent 产生的 LLM 调用用于专用模型训练"目标，构建完整的数据采集→脱敏→回传→导出管线。哲学锚点：天道无为——reward 纯锚定生存因果，声望/关系/心境是众生主观认知不进 reward。
+
+- **生存 Reward 天道账本**（server 侧）：
+  - 每日结算（每游戏日=12tick）：生存分量 + 生理分量（satiation/hydration 归一化）+ 天魂审查分量（approved/rejected）
+  - 一生结算（死亡时）：寿数 + 统一死亡 penalty（不分死因），短命 agent 按存活比例补算（`compute_partial_survival`）
+  - 周期聚合（复用 chronicle 7 日周期）+ 仪表盘 API（`GET /api/dashboard/reward/trends`）
+  - 强制配置（reward.yaml，fail-fast），走 game_data 标准管线，零硬编码
+  - 数据源改用 `agent_state_cache`（DashMap）消除时序竞态；`get_config`/`get_attribute_max_value` 失败显式 error 日志（非静默）
+  - **BREAKING**：reward.yaml 为强制配置，缺失即中止启动（对齐 display_messages_loader fail-fast 模式）
+
+- **训练 Trace 结构化落盘**（agent 侧）：
+  - 人魂/天魂 LLM 调用结构化 JSONL（含 agent_id UUID + tick_id + prompt/response 全文 + soul_stage + attempt）
+  - SoulStage 枚举仅 Renhun/Tianhun（地魂不是独立调用方——其 tool-calling 是人魂内部轮次）
+  - 强制配置（trace.yaml），默认开启采集+回传，零开销（Mutex 聚合 + 异步 flush）
+
+- **Trace 回传 server + 三入口脱敏**：
+  - 协议新增 `ClientMessage::TraceReport` + `TraceEntry`，复用 websocket 回传
+  - sender 注入：连接成功后 `set_upload_sender`（解决 init 在连接前的时序问题）
+  - server `handle_trace_report` 落盘到 `traces/`（与 rewards/ 同目录树）
+  - 脱敏三入口（record 时对副本做，注入源保持原文不影响推理）：
+    - 角色设定：name SHA256 哈希化
+    - 托梦：原文占位化
+    - 玩家私聊：partner_name 哈希化 + 发言占位化
+  - 并发修复：文件名含 agent_id，消除多 agent 同机并发写冲突
+
+- **attempt 透传（DPO 配对根基解）**：
+  - **BREAKING**：`DecisionWithChainCallback` 类型 + `think_direct` + `think_with_memory_and_feedback` + `cognitive_decision_with_chain` + `self_correct_intent` 签名均新增 `soul_cycle_attempt: i32` 参数
+  - trace 记录真实外层 soul_cycle attempt（非 wall_clock 重建），DPO 配对精确可靠
+
+- **训练数据导出脚本**（离线工具，只读）：
+  - `scripts/build_sft_data.py`：筛天魂 approved 样本 → messages JSONL（兼容 vLLM/Axolotl），可选 --top-longevity
+  - `scripts/build_dpo_data.py`：天魂 reject→approve 偏好对 → chosen/rejected JSONL
+  - `scripts/analyze_social_structure.py`：恩怨双图 PageRank（观察工具，不写回 agent 状态）
+
+- **端侧关系认知**（agent 侧，万物自化）：
+  - 人魂 prompt"附近的人"段落注入 agent 对此人的主观关系认知（好感度+等级）
+  - 完全本地：每 agent 只查自己的 relationship_store，尊重不对称，不进 reward
+
+- **用户数据使用明示**：
+  - Readme 新增「用户数据使用与隐私」章节
+  - `docs/DATA_USAGE.md` 独立明示文档（采集内容/脱敏机制/Opt-out 选择权）
+  - trace.yaml 配置顶部加【用户数据明示】+【Opt-out】注释
+
+**验证**：826 测试全绿（agent 509 + server 193 + protocol 120 + embedding 4），clippy 0 warning。双签 review：子代理1 事实基础通过（7项深度核实全部一致），子代理2 架构通过。
+
 ### 审计残留 4 项根治（P0-2 / P0-11b / clippy / warn! 测试）
 
 针对 `logs/audit/audit-report-2026-06-24.md` 中 4 项残留问题的第一性原理根治：
