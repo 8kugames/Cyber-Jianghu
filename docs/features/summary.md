@@ -84,10 +84,7 @@
 
 - **结构化落盘**：人魂/天魂 LLM 调用 JSONL（agent_id UUID + tick_id + prompt/response 全文 + soul_stage + attempt）
 - **回传 server**：复用 websocket，`ClientMessage::TraceReport`，server 汇聚到 `traces/`
-- **三入口脱敏**（record 时对副本做，不破坏推理）：
-  - 角色设定：name SHA256 哈希化
-  - 托梦：原文占位化
-  - 玩家私聊：partner_name 哈希化 + 发言占位化
+- **原文记录**（无脱敏——玩家角色均为 LLM 驱动，无隐私内容）
 - **attempt 透传**：外层 soul_cycle attempt 全链路透传到 trace（DPO 配对根基解，非 wall_clock 重建）
 - **配置驱动**：trace.yaml 默认开启采集+回传，可 Opt-out（`output.enabled: false`）
 
@@ -104,7 +101,7 @@
 
 ### 用户数据明示
 
-- `docs/DATA_USAGE.md`：采集内容/脱敏机制/Opt-out 完整说明
+- `docs/DATA_USAGE.md`：采集内容/Opt-out 说明
 - Readme 「用户数据使用与隐私」章节
 - trace.yaml 配置顶部明示注释
 

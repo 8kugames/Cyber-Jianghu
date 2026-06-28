@@ -6,7 +6,7 @@
 
 ### 专用模型训练数据管线（reward + trace + 导出）
 
-围绕"将 Agent 产生的 LLM 调用用于专用模型训练"目标，构建完整的数据采集→脱敏→回传→导出管线。哲学锚点：天道无为——reward 纯锚定生存因果，声望/关系/心境是众生主观认知不进 reward。
+围绕"将 Agent 产生的 LLM 调用用于专用模型训练"目标，构建完整的数据采集→回传→导出管线。哲学锚点：天道无为——reward 纯锚定生存因果，声望/关系/心境是众生主观认知不进 reward。
 
 - **生存 Reward 天道账本**（server 侧）：
   - 每日结算（每游戏日=12tick）：生存分量 + 生理分量（satiation/hydration 归一化）+ 天魂审查分量（approved/rejected）
@@ -21,14 +21,11 @@
   - SoulStage 枚举仅 Renhun/Tianhun（地魂不是独立调用方——其 tool-calling 是人魂内部轮次）
   - 强制配置（trace.yaml），默认开启采集+回传，零开销（Mutex 聚合 + 异步 flush）
 
-- **Trace 回传 server + 三入口脱敏**：
+- **Trace 回传 server**：
   - 协议新增 `ClientMessage::TraceReport` + `TraceEntry`，复用 websocket 回传
   - sender 注入：连接成功后 `set_upload_sender`（解决 init 在连接前的时序问题）
   - server `handle_trace_report` 落盘到 `traces/`（与 rewards/ 同目录树）
-  - 脱敏三入口（record 时对副本做，注入源保持原文不影响推理）：
-    - 角色设定：name SHA256 哈希化
-    - 托梦：原文占位化
-    - 玩家私聊：partner_name 哈希化 + 发言占位化
+  - 原文记录（无脱敏——玩家角色均为 LLM 驱动，无隐私内容）
   - 并发修复：文件名含 agent_id，消除多 agent 同机并发写冲突
 
 - **attempt 透传（DPO 配对根基解）**：
@@ -44,12 +41,11 @@
   - 人魂 prompt"附近的人"段落注入 agent 对此人的主观关系认知（好感度+等级）
   - 完全本地：每 agent 只查自己的 relationship_store，尊重不对称，不进 reward
 
-- **用户数据使用明示**：
-  - Readme 新增「用户数据使用与隐私」章节
-  - `docs/DATA_USAGE.md` 独立明示文档（采集内容/脱敏机制/Opt-out 选择权）
-  - trace.yaml 配置顶部加【用户数据明示】+【Opt-out】注释
+- **用户数据使用说明**：
+  - Readme 新增「用户数据使用说明」章节
+  - `docs/DATA_USAGE.md` 数据使用透明文档（采集内容/Opt-out 选择权）
 
-**验证**：826 测试全绿（agent 509 + server 193 + protocol 120 + embedding 4），clippy 0 warning。双签 review：子代理1 事实基础通过（7项深度核实全部一致），子代理2 架构通过。
+**验证**：818 测试全绿，clippy 0 warning。双签 review 通过。
 
 ### 审计残留 4 项根治（P0-2 / P0-11b / clippy / warn! 测试）
 
