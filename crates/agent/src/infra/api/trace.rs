@@ -30,8 +30,6 @@ pub struct TraceConfig {
     pub output: TraceOutputConfig,
     #[serde(default)]
     pub upload: TraceUploadConfig,
-    #[serde(default)]
-    pub sanitize: TraceSanitizeConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,20 +48,6 @@ pub struct TraceUploadConfig {
     pub enabled: bool,
     #[serde(default = "default_batch_size")]
     pub batch_size: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TraceSanitizeConfig {
-    #[serde(default = "default_enabled")]
-    pub enabled: bool,
-    #[serde(default = "default_enabled")]
-    pub persona_name_hash: bool,
-    #[serde(default = "default_enabled")]
-    pub persona_description_mask: bool,
-    #[serde(default = "default_enabled")]
-    pub dream_content_mask: bool,
-    #[serde(default = "default_enabled")]
-    pub dialogue_content_mask: bool,
 }
 
 fn default_enabled() -> bool {
@@ -90,18 +74,6 @@ impl Default for TraceUploadConfig {
         Self {
             enabled: default_enabled(),
             batch_size: default_batch_size(),
-        }
-    }
-}
-
-impl Default for TraceSanitizeConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_enabled(),
-            persona_name_hash: default_enabled(),
-            persona_description_mask: default_enabled(),
-            dream_content_mask: default_enabled(),
-            dialogue_content_mask: default_enabled(),
         }
     }
 }
@@ -233,115 +205,18 @@ pub fn set_upload_sender(sender: tokio::sync::mpsc::Sender<cyber_jianghu_protoco
 /// 调用方记录 trace（同步 Vec push，非阻塞——O(1)，无 I/O）。
 ///
 /// fire-and-forget：失败只丢 trace，不 panic，不影响 agent tick。
-/// 脱敏在 record 时对将要落盘/回传的 user_prompt 做（注入源保持原文，不影响 agent 推理）。
-pub fn record(mut trace: LlmTrace) {
+/// 直接记录原文——本项目所有玩家角色均为 LLM 驱动，无真人隐私内容。
+pub fn record(trace: LlmTrace) {
     // 配置未加载或未启用 → 空操作
-    let cfg = match TRACE_CONFIG
-        .get()
-        .and_then(|c| c.as_ref())
-    {
+    let cfg = match TRACE_CONFIG.get().and_then(|c| c.as_ref()) {
         Some(c) if c.output.enabled => c,
         _ => return,
     };
-
-    // 脱敏：在 trace 写入前对 user_prompt 做模式替换（注入源原文不影响 agent 推理）
-    if cfg.sanitize.enabled {
-        trace.user_prompt = sanitize_user_prompt(&trace.user_prompt, &cfg.sanitize);
-        trace.character_name = if cfg.sanitize.persona_name_hash {
-            sanitize_persona_name(&trace.character_name)
-        } else {
-            trace.character_name
-        };
-    }
+    let _ = cfg; // 配置已检查 enabled，push 不再读 cfg
 
     if let Ok(mut buf) = trace_buffer().lock() {
         buf.push(trace);
     }
-}
-
-/// 对已拼接的 user_prompt 做脱敏（模式匹配 dream 段 + dialogue 段）。
-///
-/// dream 格式：`### 托梦\n{原文}\n`
-/// dialogue 格式：`## 与{partner}的对话 (session: ...)\n` 段落内的 Partner 行
-///
-/// 注意：此函数只作用于 trace 的副本，不影响 agent 实际推理用的 prompt。
-fn sanitize_user_prompt(prompt: &str, cfg: &TraceSanitizeConfig) -> String {
-    let mut result = prompt.to_string();
-
-    // dream 脱敏：匹配 "### 托梦\n" 到下一个 "\n### " 或 "\n## " 或段落结束
-    if cfg.dream_content_mask {
-        let mut sanitized = String::new();
-        let mut in_dream = false;
-        for line in result.lines() {
-            if line == "### 托梦" {
-                in_dream = true;
-                sanitized.push_str(line);
-                sanitized.push('\n');
-                continue;
-            }
-            if in_dream {
-                if line.starts_with("### ") || line.starts_with("## ") || line.is_empty() {
-                    in_dream = false;
-                    sanitized.push_str(line);
-                    sanitized.push('\n');
-                } else {
-                    // dream 内容行 → 占位化
-                    sanitized.push_str(&sanitize_dream(line));
-                    sanitized.push('\n');
-                }
-            } else {
-                sanitized.push_str(line);
-                sanitized.push('\n');
-            }
-        }
-        result = sanitized;
-    }
-
-    // dialogue 脱敏：partner_name 哈希化 + Partner 发言行占位化
-    // 格式：`## 与{name}的对话` 标题 + `- {name}: {content}` Partner 行
-    if cfg.dialogue_content_mask {
-        let mut sanitized = String::new();
-        let mut current_partner_name: Option<String> = None;
-        let mut current_partner_hash: Option<String> = None;
-        for line in result.lines() {
-            // 匹配对话标题 "## 与{name}的对话 ..."
-            if line.starts_with("## 与") && line.contains("的对话") {
-                let after_prefix = &line["## 与".len()..];
-                if let Some(end_idx) = after_prefix.find("的对话") {
-                    let partner_name = after_prefix[..end_idx].to_string();
-                    let hash = sanitize_dialogue_partner(&partner_name);
-                    current_partner_name = Some(partner_name.clone());
-                    current_partner_hash = Some(hash.clone());
-                    let new_line = line.replacen(&partner_name, &hash, 1);
-                    sanitized.push_str(&new_line);
-                    sanitized.push('\n');
-                    continue;
-                }
-            }
-            // 匹配 Partner 发言行 "- {partner_original_name}: {content}"
-            // 注意：Partner 行用的是原始 name（不是 hash），需用原始 name 匹配
-            if let (Some(name), Some(_hash)) = (&current_partner_name, &current_partner_hash) {
-                let prefix = format!("- {}: ", name);
-                if line.starts_with(&prefix) {
-                    let content = &line[prefix.len()..];
-                    let hash = current_partner_hash.as_ref().unwrap();
-                    sanitized.push_str(&format!("- {}: {}", hash, sanitize_dialogue_content(content)));
-                    sanitized.push('\n');
-                    continue;
-                }
-            }
-            // 新的 ## 标题（非对话标题）重置 partner 上下文
-            if line.starts_with("## ") && !line.contains("的对话") {
-                current_partner_name = None;
-                current_partner_hash = None;
-            }
-            sanitized.push_str(line);
-            sanitized.push('\n');
-        }
-        result = sanitized;
-    }
-
-    result
 }
 
 /// 后台 flush 循环：定时将缓冲区 trace 批量写盘 + 回传。
@@ -444,47 +319,6 @@ async fn write_batch(traces: &[LlmTrace], cfg: &TraceConfig) -> Result<()> {
 }
 
 // ============================================================================
-// 脱敏纯函数（在注入源调用，非事后清洗）
-// ============================================================================
-
-/// 计算短哈希（取 SHA256 前 8 位十六进制），用于不可逆标识。
-///
-/// 用 SHA256（非 DefaultHasher）保证跨 Rust 版本/platform 稳定，
-/// 训练数据长期复现时哈希不漂移。
-fn short_hash(input: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    let result = hasher.finalize();
-    format!("{:08x}", u32::from_be_bytes(result[..4].try_into().unwrap()))
-}
-
-/// 脱敏角色名：哈希化（不可逆）
-///
-/// 注意：persona 脱敏在 trace record 时针对 character_name 字段做。
-/// persona 描述（base_description）当前不脱敏——因为 system_prompt 当前留空
-/// （Direct 路径内嵌在 tick_msg），persona 描述不在 trace 中。未来若填充
-/// system_prompt，需在此处补 system_prompt 脱敏。
-pub fn sanitize_persona_name(name: &str) -> String {
-    format!("角色_{}", &short_hash(name))
-}
-
-/// 脱敏托梦内容：占位化（保留哈希标识便于训练时关联）
-pub fn sanitize_dream(content: &str) -> String {
-    format!("[托梦内容已脱敏_{}]", short_hash(content))
-}
-
-/// 脱敏玩家私聊内容：占位化
-pub fn sanitize_dialogue_content(_content: &str) -> String {
-    "[对话内容已脱敏]".to_string()
-}
-
-/// 脱敏对话伙伴名：哈希化
-pub fn sanitize_dialogue_partner(name: &str) -> String {
-    format!("玩家_{}", short_hash(name))
-}
-
-// ============================================================================
 // 测试
 // ============================================================================
 
@@ -493,124 +327,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_sanitize_user_prompt_dream_and_dialogue() {
-        // 集成测试：真实 user_prompt 含 dream + dialogue 段落，脱敏后原文消失
-        let cfg = TraceSanitizeConfig::default();
-        let prompt = "## 附近的人\n- 张三 (ID: abc123)\n\n### 记忆上下文\n### 托梦\n去京城找李四报仇\n\n## 与王翠花的对话 (session: s1)\n- 你: 你好\n- 王翠花: 我有个秘密\n\n## 最近行动";
-        let result = sanitize_user_prompt(prompt, &cfg);
-
-        // dream 原文应被占位化
-        assert!(!result.contains("去京城找李四报仇"), "dream 原文应脱敏");
-        assert!(result.contains("[托梦内容已脱敏_"), "dream 应占位化");
-
-        // dialogue partner_name 应哈希化
-        assert!(!result.contains("王翠花"), "partner_name 应脱敏");
-        assert!(result.contains("玩家_"), "partner 应哈希化");
-
-        // dialogue Partner 发言应占位化
-        assert!(!result.contains("我有个秘密"), "Partner 发言应脱敏");
-        assert!(result.contains("[对话内容已脱敏]"), "Partner 发言应占位化");
-
-        // Own 发言（agent 自己说的）不应脱敏
-        assert!(result.contains("你好"), "Own 发言不应脱敏");
-
-        // 非玩家输入段落应保留
-        assert!(result.contains("张三"), "附近的人（NPC）不应脱敏");
-        assert!(result.contains("abc123"), "NPC ID 不应脱敏");
-    }
-
-    #[test]
-    fn test_sanitize_user_prompt_disabled_preserves_original() {
-        // sanitize.mask 开关控制各入口独立脱敏
-        let prompt = "### 托梦\n秘密内容";
-        let cfg_on = TraceSanitizeConfig {
-            dream_content_mask: true,
-            ..Default::default()
-        };
-        let result = sanitize_user_prompt(prompt, &cfg_on);
-        assert!(!result.contains("秘密内容"), "dream_mask=true 应脱敏");
-
-        let cfg_off = TraceSanitizeConfig {
-            dream_content_mask: false,
-            ..Default::default()
-        };
-        let result = sanitize_user_prompt(prompt, &cfg_off);
-        assert!(result.contains("秘密内容"), "dream_mask=false 应保留原文");
-    }
-
-    #[test]
     fn test_default_config_is_enabled() {
-        // A1 验收：默认开（用户要求）
+        // 默认开（用户要求）
         assert!(TraceOutputConfig::default().enabled, "output 默认必须开");
         assert!(TraceUploadConfig::default().enabled, "upload 默认必须开");
-        assert!(
-            TraceSanitizeConfig::default().enabled,
-            "sanitize 默认必须开"
-        );
     }
 
     #[test]
-    fn test_sanitize_persona_name_hashes() {
-        // A2 验收：角色名哈希化，不泄露原名
-        let result = sanitize_persona_name("张三丰");
-        assert!(result.starts_with("角色_"), "应以 角色_ 开头");
-        assert!(!result.contains("张三丰"), "不得包含原名");
-    }
-
-    #[test]
-    fn test_sanitize_persona_name_deterministic() {
-        // 相同输入应得相同哈希
-        assert_eq!(sanitize_persona_name("李四"), sanitize_persona_name("李四"));
-        // 不同输入得不同哈希
-        assert_ne!(sanitize_persona_name("李四"), sanitize_persona_name("王五"));
-    }
-
-    #[test]
-    fn test_sanitize_dream_masks_content() {
-        // A3 验收：托梦占位化，不泄露原文
-        let result = sanitize_dream("去京城找李四报仇");
-        assert!(result.starts_with("[托梦内容已脱敏_"), "应占位化");
-        assert!(!result.contains("京城"), "不得包含原文");
-        assert!(!result.contains("李四"), "不得包含原文");
-    }
-
-    #[test]
-    fn test_sanitize_dialogue_masks_content() {
-        // A4 验收：私聊占位化
-        let result = sanitize_dialogue_content("我有个秘密告诉你");
-        assert_eq!(result, "[对话内容已脱敏]");
-        assert!(!result.contains("秘密"));
-    }
-
-    #[test]
-    fn test_sanitize_dialogue_partner_hashes() {
-        let result = sanitize_dialogue_partner("王翠花");
-        assert!(result.starts_with("玩家_"));
-        assert!(!result.contains("王翠花"));
-    }
-
-    #[test]
-    fn test_trace_config_load_with_full_config() {
-        // 完整配置（含 upload + sanitize）可正确加载
+    fn test_trace_config_load_with_upload() {
+        // 完整配置（含 upload）可正确加载
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::write(
             tmp.path().join("trace.yaml"),
-            "version: \"0.0.2\"\noutput:\n  enabled: true\n  base_dir: \"traces\"\nupload:\n  enabled: false\nsanitize:\n  enabled: true\n  persona_name_hash: false\n",
+            "version: \"0.0.2\"\noutput:\n  enabled: true\n  base_dir: \"traces\"\nupload:\n  enabled: false\n",
         )
         .unwrap();
         let cfg = TraceConfig::load(tmp.path()).unwrap();
         assert!(cfg.output.enabled);
         assert!(!cfg.upload.enabled, "upload.enabled=false 应被读取");
-        assert!(cfg.sanitize.enabled);
-        assert!(
-            !cfg.sanitize.persona_name_hash,
-            "persona_name_hash=false 应被读取"
-        );
     }
 
     #[test]
     fn test_trace_config_load_missing_fail_fast() {
-        // T1 验收：trace.yaml 缺失必须 Err（非静默）
+        // trace.yaml 缺失必须 Err（非静默）
         let tmp = tempfile::TempDir::new().unwrap();
         let result = TraceConfig::load(tmp.path());
         assert!(result.is_err(), "缺失 trace.yaml 必须 fail-fast 返回 Err");
@@ -624,7 +363,7 @@ mod tests {
 
     #[test]
     fn test_record_is_sync_no_async() {
-        // T2 验收：record() 是同步函数（编译保证无 await）
+        // record() 是同步函数（编译保证无 await）
         let trace = LlmTrace {
             trace_id: Uuid::new_v4().to_string(),
             agent_id: Uuid::new_v4(),
@@ -642,13 +381,12 @@ mod tests {
             ok: true,
             wall_clock: chrono::Utc::now(),
         };
-        // record 无返回值（同步 void），能调用即证明非 async
         record(trace);
     }
 
     #[test]
     fn test_llm_trace_serializes_token_as_null() {
-        // T9 验收：token 为 None 时序列化为 null（非 0）
+        // token 为 None 时序列化为 null（非 0）
         let trace = LlmTrace {
             trace_id: "test".to_string(),
             agent_id: Uuid::nil(),
