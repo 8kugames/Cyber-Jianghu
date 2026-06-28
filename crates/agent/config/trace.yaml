@@ -2,6 +2,13 @@
 # 训练 Trace 配置（结构化 LLM 调用记录）
 # ============================================================================
 #
+# 【用户数据明示】启用后，智能体的 LLM 调用（prompt+response）会被采集，
+# 用于训练专用模型。玩家输入（角色设定/托梦/私聊）在采集时自动脱敏，
+# 原文不进入训练数据。详见 docs/DATA_USAGE.md。
+#
+# 【Opt-out】如不希望采集，设 output.enabled: false（零开销，不影响游戏）。
+# 如仅不希望回传 server，设 upload.enabled: false（本地仍保留）。
+#
 # 启用后，agent 的人魂/天魂 LLM 调用以结构化 JSONL 落盘 + 回传 server，
 # 作为专用模型训练的数据基础。
 #
@@ -23,7 +30,8 @@ upload:
   enabled: true
   batch_size: 32
 
-# 脱敏：玩家输入（角色设定/托梦/私聊）在注入源占位，非事后清洗
+# 脱敏：玩家输入（角色设定/托梦/私聊）在采集时自动处理，原文不进入训练数据
+# 详见 docs/DATA_USAGE.md §3。脱敏不影响智能体实际推理（推理用原文，训练用脱敏版）
 sanitize:
   enabled: true
   persona_name_hash: true        # 角色名哈希化
