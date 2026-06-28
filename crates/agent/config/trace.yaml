@@ -35,6 +35,6 @@ upload:
 sanitize:
   enabled: true
   persona_name_hash: true        # 角色名哈希化
-  persona_description_mask: true # 角色描述占位
+  persona_description_mask: true # 角色描述占位（当前 system_prompt 留空，预留未来）
   dream_content_mask: true       # 托梦占位
   dialogue_content_mask: true    # 玩家私聊占位
