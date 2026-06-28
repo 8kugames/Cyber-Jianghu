@@ -461,16 +461,12 @@ fn short_hash(input: &str) -> String {
 
 /// 脱敏角色名：哈希化（不可逆）
 ///
-/// 注意：persona 脱敏在 trace record 时针对 system_prompt 字段做（未来填充时），
-/// 而非在 prompt 构造时——因为 persona 是 agent 身份核心，占位化会破坏推理质量。
-/// 这与 dream/dialogue 不同（后两者是注入性输入，占位化不影响核心决策）。
+/// 注意：persona 脱敏在 trace record 时针对 character_name 字段做。
+/// persona 描述（base_description）当前不脱敏——因为 system_prompt 当前留空
+/// （Direct 路径内嵌在 tick_msg），persona 描述不在 trace 中。未来若填充
+/// system_prompt，需在此处补 system_prompt 脱敏。
 pub fn sanitize_persona_name(name: &str) -> String {
     format!("角色_{}", &short_hash(name))
-}
-
-/// 脱敏角色描述：占位化
-pub fn sanitize_persona_description(_desc: &str) -> String {
-    "[角色描述已脱敏]".to_string()
 }
 
 /// 脱敏托梦内容：占位化（保留哈希标识便于训练时关联）
@@ -584,14 +580,6 @@ mod tests {
         let result = sanitize_dialogue_content("我有个秘密告诉你");
         assert_eq!(result, "[对话内容已脱敏]");
         assert!(!result.contains("秘密"));
-    }
-
-    #[test]
-    fn test_sanitize_persona_description_masks() {
-        // A5 验收：角色描述占位化
-        let result = sanitize_persona_description("真实姓名张三，电话13800000000");
-        assert_eq!(result, "[角色描述已脱敏]");
-        assert!(!result.contains("13800000000"));
     }
 
     #[test]
