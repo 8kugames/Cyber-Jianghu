@@ -1,0 +1,10 @@
+*
+# 放行自身
+!.gitignore
+# 显式放行：联调测试技能
+!skills/
+!skills/联调测试/
+!skills/联调测试/**
+# 显式放行：发版技能
+!skills/release/
+!skills/release/**
