@@ -23,7 +23,9 @@
 | **人魂调用**（renhun） | 智能体推理时的 prompt + response（"角色如何思考与决策"） | SFT/DPO 训练主样本 |
 | **天魂调用**（tianhun） | 世界观审查的 prompt + response（"决策是否合规"） | 训练分类标签 |
 
-每条记录包含：智能体 ID、tick 时间戳、灵魂阶段、prompt 全文、response 全文、所用模型。
+每条记录包含：智能体 ID、tick 时间戳、灵魂阶段、角色设定（persona_name/description，~200 bytes）、prompt 全文、response 全文、attempt 序号、所用模型、trace 产生时间（wall_clock）。
+
+> system_prompt 的静态模板部分（survival_rules/narrative/output_format，~15KB）不在 trace 中重复记录——训练时从项目配置（prompt_templates.yaml）复用。trace 只存 agent 特有的 persona 字段。
 
 **不直接采集的数据**：
 - **设备 ID / 真实身份**：仅用于账号绑定，**不进入训练数据**
@@ -104,7 +106,7 @@ upload:
 
 - **本地存储**（agent 端）：`<data_dir>/traces/soul=<stage>/agent=<id>/date=<YYYY-MM-DD>.jsonl`，按日期分区。
 - **server 存储**：回传后汇聚到 server 的 `traces/` 目录。
-- **保留策略**：当前无自动清理机制（文件按日期分区，便于手动归档/删除）。长期运行需运维定期归档。
+- **保留策略**：自动滚动覆盖。`max_size_mb` 控制总体积上限（默认 1024 MB=1G），超过则按 LRU 删除最旧文件。
 
 ---
 
@@ -114,5 +116,6 @@ upload:
 |---|---|---|
 | `output.enabled` | `true` | 是否采集 trace |
 | `output.base_dir` | `"traces"` | 本地输出目录 |
+| `output.max_size_mb` | `1024` | 日志总体积上限（MB），超限按 LRU 删除最旧文件 |
 | `upload.enabled` | `true` | 是否回传 server |
 | `upload.batch_size` | `32` | 每批回传条数 |

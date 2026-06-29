@@ -10,14 +10,16 @@
 
 - **生存 Reward 天道账本**（server 侧）：
   - 每日结算（每游戏日=12tick）：生存分量 + 生理分量（satiation/hydration 归一化）+ 天魂审查分量（approved/rejected）
-  - 一生结算（死亡时）：寿数 + 统一死亡 penalty（不分死因），短命 agent 按存活比例补算（`compute_partial_survival`）
+  - 一生结算（死亡时）：寿数 + 统一死亡 penalty（不分死因），不完整日按完整 `compute_daily_reward` 补算（生存按比例+生理死亡真值+天魂真值）
   - 周期聚合（复用 chronicle 7 日周期）+ 仪表盘 API（`GET /api/dashboard/reward/trends`）
   - 强制配置（reward.yaml，fail-fast），走 game_data 标准管线，零硬编码
   - 数据源改用 `agent_state_cache`（DashMap）消除时序竞态；`get_config`/`get_attribute_max_value` 失败显式 error 日志（非静默）
   - **BREAKING**：reward.yaml 为强制配置，缺失即中止启动（对齐 display_messages_loader fail-fast 模式）
 
 - **训练 Trace 结构化落盘**（agent 侧）：
-  - 人魂/天魂 LLM 调用结构化 JSONL（含 agent_id UUID + tick_id + prompt/response 全文 + soul_stage + attempt）
+  - 人魂/天魂 LLM 调用结构化 JSONL（含 agent_id UUID + tick_id + prompt/response 全文 + soul_stage + attempt + persona_name/description + wall_clock）
+  - persona 字段替代 system_prompt 全文（~200 bytes vs ~15KB，静态模板由配置复用，解决训练-推理分布不匹配）
+  - 日志滚动覆盖：`max_size_mb` 配置（默认 1024MB=1G），超限按 LRU 删除最旧文件
   - SoulStage 枚举仅 Renhun/Tianhun（地魂不是独立调用方——其 tool-calling 是人魂内部轮次）
   - 强制配置（trace.yaml），默认开启采集+回传，零开销（Mutex 聚合 + 异步 flush）
 
@@ -33,8 +35,8 @@
   - trace 记录真实外层 soul_cycle attempt（非 wall_clock 重建），DPO 配对精确可靠
 
 - **训练数据导出脚本**（离线工具，只读）：
-  - `scripts/build_sft_data.py`：筛天魂 approved 样本 → messages JSONL（兼容 vLLM/Axolotl），可选 --top-longevity
-  - `scripts/build_dpo_data.py`：天魂 reject→approve 偏好对 → chosen/rejected JSONL
+  - `scripts/build_sft_data.py`：筛天魂 approved 样本 → messages JSONL（system role 从 persona 重建），可选 --top-longevity
+  - `scripts/build_dpo_data.py`：天魂 reject→approve 偏好对 → chosen/rejected JSONL（prompt 为含 system persona 的 messages 数组）
   - `scripts/analyze_social_structure.py`：恩怨双图 PageRank（观察工具，不写回 agent 状态）
 
 - **端侧关系认知**（agent 侧，万物自化）：
@@ -45,7 +47,12 @@
   - Readme 新增「用户数据使用说明」章节
   - `docs/DATA_USAGE.md` 数据使用透明文档（采集内容/Opt-out 选择权）
 
-**验证**：818 测试全绿，clippy 0 warning。双签 review 通过。
+**验证**：814 测试全绿，clippy 0 warning。双签 review 通过。
+
+### CHANGELOG 版本转正 + release skill
+
+- `scripts/version-bump.sh` 保持 pre-commit 模式（只 bump patch，不动 CHANGELOG）
+- `/release` 指令（`.claude/skills/release/SKILL.md`）新增 Step 1：CHANGELOG `[Unreleased]` → `[版本号] - 日期` 转正
 
 ### 审计残留 4 项根治（P0-2 / P0-11b / clippy / warn! 测试）
 
