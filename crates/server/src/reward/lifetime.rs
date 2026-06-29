@@ -36,13 +36,15 @@ pub async fn settle_lifetime(pool: &DbPool, dead_agent_id: Uuid) -> Result<Lifet
 
     // 2.1 补算最后一个不完整日（根源解，非补丁）
     //     settle_daily 只在整日边界触发，日中死亡的 agent 最后一日 daily 未生成。
-    //     对死亡 tick 的状态做一次完整的 compute_daily_reward（含生存+生理+天魂），
-    //     而非只补生存比例——死亡时生理虽低但天魂分量可能非零，应完整计入。
+    //     对死亡 tick 的状态做一次完整的 compute_daily_reward（含生理+天魂），
+    //     但生存分量需按存活比例给（agent 在不完整日确实活了一段时间，is_alive=false 但应计生存）。
     if ticks_per_day > 0 && (death_tick - birth_tick) % ticks_per_day != 0 {
         // 查死亡 tick 的完整状态
-        if let Some(death_state) = fetch_death_state(pool, dead_agent_id, death_tick).await? {
+        if let Some(mut death_state) = fetch_death_state(pool, dead_agent_id, death_tick).await? {
+            // 临时标 is_alive=true，让 compute_daily_reward 给完整生存分量；
+            // 再按存活比例缩放，得到不完整日的生存奖励。
+            death_state.is_alive = true;
             let partial_game_day = (death_tick - birth_tick) / ticks_per_day;
-            // 查死亡日的天魂审查结果
             let day_start = birth_tick + longevity_days * ticks_per_day;
             let tianhun = super::daily::fetch_tianhun_result_for_day(
                 pool,
@@ -52,11 +54,18 @@ pub async fn settle_lifetime(pool: &DbPool, dead_agent_id: Uuid) -> Result<Lifet
             )
             .await
             .unwrap_or(None);
-            if let Some(partial_reward) = super::daily::compute_daily_reward(
+            if let Some(mut partial_reward) = super::daily::compute_daily_reward(
                 &death_state,
                 partial_game_day,
                 tianhun.as_deref(),
             ) {
+                // 生存分量按存活比例缩放（agent 在这个不完整日活了 partial_ticks/ticks_per_day）
+                let partial_ticks = (death_tick - birth_tick) % ticks_per_day;
+                let ratio = partial_ticks as f64 / ticks_per_day as f64;
+                partial_reward.survival *= ratio;
+                partial_reward.total = partial_reward.survival
+                    + partial_reward.physiological
+                    + partial_reward.tianhun_judgment.unwrap_or(0.0);
                 cumulative_reward += partial_reward.total;
                 // 同时落盘这条 daily 记录（补全 agent 的 daily 数据集）
                 super::daily::append_daily_record(&partial_reward).await;
