@@ -178,7 +178,8 @@ def build_dpo_pairs(
 
                 # prompt：用 chosen（纠正后）的 user_prompt，因含驳回反馈
                 user_prompt = chosen_trace.get("user_prompt", "")
-                system_prompt = chosen_trace.get("system_prompt", "")
+                persona_name = chosen_trace.get("persona_name", "")
+                persona_description = chosen_trace.get("persona_description", "")
 
                 sample = {
                     "prompt": {"role": "user", "content": user_prompt},
@@ -191,7 +192,8 @@ def build_dpo_pairs(
                         "chosen_attempt": att_n1,
                         "rejected_tianhun": result_n,
                         "chosen_tianhun": result_n1,
-                        "system_prompt": system_prompt if system_prompt else None,
+                        "persona_name": persona_name if persona_name else None,
+                        "persona_description": persona_description if persona_description else None,
                     },
                 }
                 dpo_samples.append(sample)

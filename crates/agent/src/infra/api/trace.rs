@@ -39,6 +39,9 @@ pub struct TraceOutputConfig {
     pub enabled: bool,
     #[serde(default = "default_base_dir")]
     pub base_dir: String,
+    /// 日志总体积上限（MB），超过则按 LRU 删除最旧文件。默认 1024 MB（1 GB）
+    #[serde(default = "default_max_size_mb")]
+    pub max_size_mb: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +59,9 @@ fn default_enabled() -> bool {
 fn default_base_dir() -> String {
     "traces".to_string()
 }
+fn default_max_size_mb() -> u64 {
+    1024
+}
 fn default_batch_size() -> usize {
     32
 }
@@ -65,6 +71,7 @@ impl Default for TraceOutputConfig {
         Self {
             enabled: default_enabled(),
             base_dir: default_base_dir(),
+            max_size_mb: default_max_size_mb(),
         }
     }
 }
@@ -116,8 +123,11 @@ pub struct LlmTrace {
     /// 模型信息
     pub provider: String,
     pub model: String,
+    /// 角色设定（agent 特有部分，~200 bytes；静态 system 模板由项目配置复用，不重复记录）
+    /// 训练时：从此字段重建 persona + 从 prompt_templates.yaml 渲染静态部分 = 完整 system_prompt
+    pub persona_name: String,
+    pub persona_description: String,
     /// I/O 全文（训练核心数据）
-    pub system_prompt: String,
     pub user_prompt: String,
     pub response: String,
     /// token 数（架构限制：当前阶段调用方拿不到，标 None）
@@ -255,7 +265,8 @@ async fn flush_loop(cfg: TraceConfig) {
                     attempt: t.attempt,
                     provider: t.provider.clone(),
                     model: t.model.clone(),
-                    system_prompt: t.system_prompt.clone(),
+                    persona_name: t.persona_name.clone(),
+                    persona_description: t.persona_description.clone(),
                     user_prompt: t.user_prompt.clone(),
                     response: t.response.clone(),
                     prompt_tokens: t.prompt_tokens,
@@ -315,7 +326,72 @@ async fn write_batch(traces: &[LlmTrace], cfg: &TraceConfig) -> Result<()> {
         file.write_all(content.as_bytes()).await?;
     }
 
+    // 滚动覆盖：写完后检查总体积，超过上限则按 LRU 删除最旧文件
+    enforce_max_size(&base, cfg.output.max_size_mb).await;
+
     Ok(())
+}
+
+/// 滚动覆盖：检查 traces/ 总体积，超过 max_size_mb 则按文件修改时间删除最旧的文件。
+///
+/// LRU 策略：遍历所有 *.jsonl，按 modified time 排序，从最旧开始删除，
+/// 直到总体积降到 max_size_mb 以下。
+async fn enforce_max_size(base: &std::path::Path, max_size_mb: u64) {
+    let max_bytes = max_size_mb * 1024 * 1024;
+
+    // 栈式遍历收集所有 jsonl 文件（避免 async 递归）
+    let mut files: Vec<(std::path::PathBuf, u64, std::time::SystemTime)> = Vec::new();
+    let mut total: u64 = 0;
+    let mut stack = vec![base.to_path_buf()];
+
+    while let Some(dir) = stack.pop() {
+        let mut reader = match tokio::fs::read_dir(&dir).await {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        while let Ok(Some(entry)) = reader.next_entry().await {
+            let path = entry.path();
+            let metadata = match entry.metadata().await {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if metadata.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "jsonl") {
+                let mtime = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                let size = metadata.len();
+                files.push((path, size, mtime));
+                total += size;
+            }
+        }
+    }
+
+    if total <= max_bytes {
+        return;
+    }
+
+    // 按修改时间排序（最旧在前）
+    files.sort_by_key(|(_, _, mtime)| *mtime);
+
+    let mut deleted = 0u64;
+    for (path, size, _) in &files {
+        if total <= max_bytes {
+            break;
+        }
+        if tokio::fs::remove_file(path).await.is_ok() {
+            total -= size;
+            deleted += size;
+        }
+    }
+
+    if deleted > 0 {
+        tracing::info!(
+            "[trace] 滚动覆盖：删除最旧文件释放 {:.1} MB（当前 {:.1} MB / 上限 {} MB）",
+            deleted as f64 / 1024.0 / 1024.0,
+            total as f64 / 1024.0 / 1024.0,
+            max_size_mb
+        );
+    }
 }
 
 // ============================================================================
@@ -373,7 +449,8 @@ mod tests {
             attempt: 0,
             provider: "test".to_string(),
             model: "test".to_string(),
-            system_prompt: String::new(),
+            persona_name: "测试".to_string(),
+            persona_description: "测试描述".to_string(),
             user_prompt: "prompt".to_string(),
             response: "response".to_string(),
             prompt_tokens: None,
@@ -396,7 +473,8 @@ mod tests {
             attempt: 0,
             provider: "test".to_string(),
             model: "test".to_string(),
-            system_prompt: String::new(),
+            persona_name: "测试".to_string(),
+            persona_description: "测试描述".to_string(),
             user_prompt: "p".to_string(),
             response: "r".to_string(),
             prompt_tokens: None,
