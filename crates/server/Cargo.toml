@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 # 内部 crates
-cyber-jianghu-protocol = { version = "0.1.76", path = "../protocol", features = ["sqlx-support"] }
+cyber-jianghu-protocol = { version = "0.1.77", path = "../protocol", features = ["sqlx-support"] }
 
 # Web 框架
 axum = { version = "0.8.8", features = ["ws"] }

@@ -518,7 +518,8 @@ impl ReflectorSoul {
             attempt: 0,
             provider: llm_client.provider_name(),
             model: llm_client.model_name(),
-            system_prompt: self.reflector_prompt.system_prompt().to_string(),
+            persona_name: String::new(),
+            persona_description: String::new(), // 天魂审查无 persona 上下文
             user_prompt: prompt.clone(),
             response: format!("{:?}", response),
             prompt_tokens: None,

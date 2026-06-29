@@ -1355,7 +1355,8 @@ impl CognitiveEngine {
             attempt: soul_cycle_attempt,
             provider: self.llm_client.provider_name(),
             model: self.llm_client.model_name(),
-            system_prompt: String::new(), // Direct 路径 system 内嵌 tick_msg，单独提取成本高
+            persona_name: persona.name.clone(),
+            persona_description: persona.base_description.clone(),
             user_prompt: tick_msg.clone(),
             response: response_json.clone(),
             prompt_tokens: None, // 架构限制：调用方拿不到 token（在 direct_client 层）
@@ -1546,7 +1547,8 @@ impl CognitiveEngine {
             attempt: soul_cycle_attempt,
             provider: self.llm_client.provider_name(),
             model: self.llm_client.model_name(),
-            system_prompt: String::new(),
+            persona_name: agent_name.clone(),
+            persona_description: String::new(), // Legacy 降级路径无 persona 上下文
             user_prompt: tick_msg.clone(),
             response: response_json.clone(),
             prompt_tokens: None,

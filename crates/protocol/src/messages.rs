@@ -392,7 +392,11 @@ pub struct TraceEntry {
     pub attempt: i32,
     pub provider: String,
     pub model: String,
-    pub system_prompt: String,
+    /// 角色设定（agent 特有部分；静态 system 模板由项目配置复用）
+    #[serde(default)]
+    pub persona_name: String,
+    #[serde(default)]
+    pub persona_description: String,
     pub user_prompt: String,
     pub response: String,
     pub prompt_tokens: Option<u64>,

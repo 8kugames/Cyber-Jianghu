@@ -24,6 +24,7 @@ description: "训练 Trace 配置（结构化 LLM 调用记录 + 回传）"
 output:
   enabled: true
   base_dir: "traces"
+  max_size_mb: 1024          # 日志总体积上限（MB），超过则按 LRU 删除最旧文件
 
 # 回传控制：开时回传 server，关时仅本地
 upload:

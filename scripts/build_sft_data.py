@@ -165,12 +165,20 @@ def trace_to_sft_sample(trace: dict, tianhun_result: Optional[str]) -> Optional[
         return None
 
     user_prompt = trace.get("user_prompt", "")
-    system_prompt = trace.get("system_prompt", "")
 
-    # system_prompt 为空时（Direct 路径当前留空），省略 system 角色
+    # system_prompt 不在 trace 中存储（全局静态模板由配置复用）。
+    # 训练时从 persona_name + persona_description 重建 persona 部分，
+    # 静态部分（survival_rules/narrative/output_format）从 prompt_templates.yaml 渲染。
+    persona_name = trace.get("persona_name", "")
+    persona_description = trace.get("persona_description", "")
+
+    # messages 格式：persona 信息作为 system 角色提示（训练时下游用完整模板补充）
     messages: List[dict] = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
+    if persona_name:
+        system_content = f"你是 {persona_name}。"
+        if persona_description:
+            system_content += f"\n{persona_description}"
+        messages.append({"role": "system", "content": system_content})
     messages.append({"role": "user", "content": user_prompt})
     messages.append({"role": "assistant", "content": response})
 
