@@ -155,7 +155,7 @@ pub async fn settle_daily(
 ///
 /// 数据来源：agent_action_logs.soul_cycle_metadata（agent 通过 SoulCycleReport 上报，server 已存储）。
 /// 取该范围内最大 tick_id + pipe_seq 的记录，解析其 cycles[last].tianhun.result。
-async fn fetch_tianhun_result_for_day(
+pub async fn fetch_tianhun_result_for_day(
     pool: &DbPool,
     agent_id: uuid::Uuid,
     day_start_tick: i64,
@@ -176,6 +176,27 @@ async fn fetch_tianhun_result_for_day(
     match row {
         Some(Some(metadata)) => Ok(parse_tianhun_result(&metadata)),
         _ => Ok(None),
+    }
+}
+
+/// 单条追加 daily reward 记录（供 lifetime 死亡补算用）。
+pub async fn append_daily_record(record: &DailyReward) {
+    let cfg = match RewardRegistry::get_config() {
+        Some(c) if c.output.enabled => c,
+        _ => return,
+    };
+    let base = crate::paths::get_data_dir().join(&cfg.output.base_dir).join("daily");
+    if tokio::fs::create_dir_all(&base).await.is_err() {
+        return;
+    }
+    let path = base.join(format!("day={}.jsonl", record.game_day));
+    let line = match serde_json::to_string(record) {
+        Ok(s) => s + "\n",
+        Err(_) => return,
+    };
+    use tokio::io::AsyncWriteExt;
+    if let Ok(mut f) = tokio::fs::OpenOptions::new().create(true).append(true).open(&path).await {
+        let _ = f.write_all(line.as_bytes()).await;
     }
 }
 
