@@ -181,8 +181,17 @@ def build_dpo_pairs(
                 persona_name = chosen_trace.get("persona_name", "")
                 persona_description = chosen_trace.get("persona_description", "")
 
+                # DPO prompt 是 messages 数组（含 system persona + user），与 SFT 对齐
+                prompt_messages: List[dict] = []
+                if persona_name:
+                    system_content = f"你是 {persona_name}。"
+                    if persona_description:
+                        system_content += f"\n{persona_description}"
+                    prompt_messages.append({"role": "system", "content": system_content})
+                prompt_messages.append({"role": "user", "content": user_prompt})
+
                 sample = {
-                    "prompt": {"role": "user", "content": user_prompt},
+                    "prompt": prompt_messages,
                     "chosen": {"role": "assistant", "content": chosen_resp},
                     "rejected": {"role": "assistant", "content": rejected_resp},
                     "metadata": {
@@ -192,8 +201,6 @@ def build_dpo_pairs(
                         "chosen_attempt": att_n1,
                         "rejected_tianhun": result_n,
                         "chosen_tianhun": result_n1,
-                        "persona_name": persona_name if persona_name else None,
-                        "persona_description": persona_description if persona_description else None,
                     },
                 }
                 dpo_samples.append(sample)
