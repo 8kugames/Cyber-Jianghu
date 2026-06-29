@@ -402,6 +402,9 @@ pub struct TraceEntry {
     pub prompt_tokens: Option<u64>,
     pub completion_tokens: Option<u64>,
     pub ok: bool,
+    /// trace 产生时间（agent 端真实时间，非 server 接收时间）
+    #[serde(default)]
+    pub wall_clock: Option<String>,
 }
 
 /// 三魂循环元数据
