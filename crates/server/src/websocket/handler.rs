@@ -930,7 +930,12 @@ async fn handle_trace_report(
     let traces_dir = crate::paths::get_data_dir().join("traces");
     for entry in traces {
         let soul = &entry.soul_stage;
-        let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        // date 用 trace 真实产生时间（wall_clock 前10位=YYYY-MM-DD），非 server 接收时间
+        let date = entry
+            .wall_clock
+            .as_deref()
+            .and_then(|wc| wc.get(..10).map(|s| s.to_string()))
+            .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
         let dir = traces_dir
             .join(format!("soul={}", soul))
             .join(format!("agent={}", agent_id));
