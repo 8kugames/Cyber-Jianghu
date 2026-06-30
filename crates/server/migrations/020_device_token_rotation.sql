@@ -11,9 +11,27 @@
 -- - 显式 rotation 端点 / 调度器轮换
 -- - TTL 阈值通过 config 注入（避免硬编码）
 
-ALTER TABLE devices
-    ADD COLUMN token_created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    ADD COLUMN token_rotated_at TIMESTAMPTZ;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'devices' AND column_name = 'token_created_at'
+    ) THEN
+        ALTER TABLE devices
+            ADD COLUMN token_created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'devices' AND column_name = 'token_rotated_at'
+    ) THEN
+        ALTER TABLE devices
+            ADD COLUMN token_rotated_at TIMESTAMPTZ;
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_devices_token_created_at
     ON devices(token_created_at);
