@@ -183,7 +183,7 @@ async fn fetch_death_info(
     use sqlx::Row;
     // 取死亡 tick 的状态（精确到 death_tick，避免读到旧状态）
     let row = sqlx::query(
-        r#"SELECT status FROM agent_states WHERE agent_id = $1 AND tick_id = $2 ORDER BY tick_id DESC LIMIT 1"#,
+        r#"SELECT attributes FROM agent_states WHERE agent_id = $1 AND tick_id = $2 ORDER BY tick_id DESC LIMIT 1"#,
     )
     .bind(agent_id)
     .bind(death_tick)
@@ -196,7 +196,7 @@ async fn fetch_death_info(
 
     // status 是 JSON，解析找归零属性（值 <= 0 且有 death_condition）
     let status_json: serde_json::Value =
-        serde_json::from_value(row.try_get::<serde_json::Value, _>("status")?).unwrap_or_default();
+        serde_json::from_value(row.try_get::<serde_json::Value, _>("attributes")?).unwrap_or_default();
 
     // 遍历属性找 <=0 的（候选死因），优先 satiation/hydration/hp
     for attr in ["satiation", "hydration", "hp"] {
