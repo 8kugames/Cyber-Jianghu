@@ -34,8 +34,26 @@ pub fn compute_daily_reward(
 
     // 2. 生理分量：satiation/hydration 归一化
     //    max_value 从 StateRegistry 读（复用 StatusComponent::evaluate_max_value 原语），非硬编码
-    let satiation_max = StateRegistry::get_attribute_max_value("satiation")? as f64;
-    let hydration_max = StateRegistry::get_attribute_max_value("hydration")? as f64;
+    let satiation_max = match StateRegistry::get_attribute_max_value("satiation") {
+        Some(v) => v as f64,
+        None => {
+            tracing::warn!(
+                "[reward] compute_daily_reward: satiation max_value 未加载 (agent={})",
+                agent_state.agent_id
+            );
+            return None;
+        }
+    };
+    let hydration_max = match StateRegistry::get_attribute_max_value("hydration") {
+        Some(v) => v as f64,
+        None => {
+            tracing::warn!(
+                "[reward] compute_daily_reward: hydration max_value 未加载 (agent={})",
+                agent_state.agent_id
+            );
+            return None;
+        }
+    };
     let satiation = agent_state.status.get("satiation").unwrap_or(0) as f64;
     let hydration = agent_state.status.get("hydration").unwrap_or(0) as f64;
     let physiological = (satiation / satiation_max * cfg.daily.physiological.satiation_weight)
@@ -105,12 +123,36 @@ pub async fn settle_daily(
         return Ok(vec![]);
     }
 
-    // 读所有存活 agent 的最新状态（DashMap，内存——与 broadcast 同源，消除时序竞态）
-    let agents: Vec<AgentState> = state_cache
+    // 读所有存活 agent 的最新状态
+    // 优先用 state_cache（DashMap 内存层，与 broadcast 同源），空时回退 DB
+    let mut agents: Vec<AgentState> = state_cache
         .iter()
         .map(|r| r.value().clone())
         .filter(|s| s.is_alive)
         .collect();
+
+    if agents.is_empty() {
+        tracing::warn!(
+            "[reward] settle_daily: state_cache 无存活 agent (game_day={}, tick={}), 回退 DB 查询",
+            game_day,
+            tick_id
+        );
+        agents = crate::db::get_all_alive_agents_latest_states(pool).await?;
+        tracing::info!(
+            "[reward] settle_daily: DB 回退查到 {} 个存活 agent (game_day={})",
+            agents.len(),
+            game_day
+        );
+    }
+
+    if agents.is_empty() {
+        tracing::info!(
+            "[reward] settle_daily: 无存活 agent 可结算 (game_day={}, tick={})",
+            game_day,
+            tick_id
+        );
+        return Ok(vec![]);
+    }
 
     let mut records = Vec::with_capacity(agents.len());
     for agent in &agents {
@@ -225,6 +267,27 @@ async fn write_daily_batch(records: &[DailyReward], _tick_id: i64) -> anyhow::Re
         content.push('\n');
     }
 
-    tokio::fs::write(&path, content).await?;
+    tokio::fs::write(&path, content)
+        .await
+        .map_err(|_| anyhow::anyhow!("[reward] 写入 daily reward 文件失败: {:?}", path))?;
+
+    // 落盘后验证：文件存在且行数匹配
+    let read_back = tokio::fs::read_to_string(&path).await.unwrap_or_default();
+    let line_count = read_back.lines().count();
+    if line_count != records.len() {
+        tracing::warn!(
+            "[reward] write_daily_batch 验证: 写入 {} 条但文件 {} 有 {} 行",
+            records.len(),
+            path.display(),
+            line_count
+        );
+    } else {
+        tracing::info!(
+            "[reward] 每日 reward 落盘: {} ({} 条)",
+            path.display(),
+            line_count
+        );
+    }
+
     Ok(())
 }

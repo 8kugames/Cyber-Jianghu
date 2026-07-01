@@ -4,7 +4,13 @@
 
 ## [Unreleased]
 
-## [0.1.267] - 2026-06-30
+## [0.1.267] - 2026-07-01
+
+### Bug Fixes
+
+- **tick/scheduler**: 修复游戏日边界检测（生存奖励结算+编年史）在服务器重启后的偶发漂移。使用 `tick_counter` ordinal 计数器（每 tick +1）替代 `current_tick_id` modulo 墙钟秒判断，消除 modulo 对齐对墙钟余数的偶发依赖，确保每 N 个 tick 精确触发一次
+
+
 
 ### 专用模型训练数据管线（reward + trace + 导出）
 

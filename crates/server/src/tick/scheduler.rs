@@ -48,6 +48,9 @@ pub struct TickScheduler {
     /// 当前Tick编号（递增）
     current_tick_id: i64,
 
+    /// Tick 计数器（每 tick +1，与墙钟解耦，用于边界判断）
+    tick_counter: u64,
+
     /// 运行状态
     is_running: bool,
 
@@ -151,6 +154,7 @@ impl TickScheduler {
         Self {
             game_data_cache,
             current_tick_id: 0,
+            tick_counter: 0,
             is_running: false,
             db_pool,
             connection_manager,
@@ -853,6 +857,8 @@ impl TickScheduler {
 
             interval.tick().await;
 
+            self.tick_counter += 1;
+
             let new_tick_id = self.calculate_tick_id_from_time(game_epoch);
             self.current_tick_id = self.current_tick_id.max(new_tick_id);
 
@@ -885,17 +891,27 @@ impl TickScheduler {
             }
 
             // 2.5 游戏日边界推送：每个游戏日结束时向所有在线 Agent 推送动作统计
-            // tick_id 是真实秒数（非 tick 计数），需乘以 real_seconds_per_tick 转换
-            let real_seconds_per_tick = {
-                let gd = self.game_data_cache.get();
-                gd.game_rules.data.agent_state.tick.real_seconds_per_tick as i64
-            };
-            let ticks_per_day_real_secs = crate::game_data::registry::TimeRegistry::get_config()
-                .map(|c| c.ticks_per_hour as i64 * c.hours_per_day as i64 * real_seconds_per_tick)
-                .unwrap_or(720);
-            if self.current_tick_id > 0 && self.current_tick_id % ticks_per_day_real_secs == 0 {
+            // 使用 tick_counter（ordinal counter）而非 current_tick_id（墙钟秒），
+            // 解除 modulo 对齐对墙钟余数的偶发依赖。
+            let ticks_per_game_day = crate::game_data::registry::TimeRegistry::get_config()
+                .map(|c| c.ticks_per_hour as u64 * c.hours_per_day as u64)
+                .unwrap_or(12);
+            if self.tick_counter > 0 && self.tick_counter.is_multiple_of(ticks_per_game_day) {
+                let real_seconds_per_tick = {
+                    let gd = self.game_data_cache.get();
+                    gd.game_rules.data.agent_state.tick.real_seconds_per_tick as i64
+                };
+                let ticks_per_day_real_secs =
+                    ticks_per_game_day as i64 * real_seconds_per_tick;
                 let game_day = self.current_tick_id / ticks_per_day_real_secs;
                 let day_start_tick = self.current_tick_id - ticks_per_day_real_secs + 1;
+                tracing::info!(
+                    "[reward] 边界条件触发: tick_counter={}, current_tick_id={}, ticks_per_game_day={}, game_day={}",
+                    self.tick_counter,
+                    self.current_tick_id,
+                    ticks_per_game_day,
+                    game_day
+                );
                 self.broadcast_daily_summaries(game_day).await;
                 // 生存 Reward 每日结算（旁路，失败只 error 不阻断 tick）
                 // 数据源：agent_state_cache（DashMap，与 broadcast 同源，消除时序竞态）
@@ -916,8 +932,21 @@ impl TickScheduler {
             }
 
             // 3. 群像传记：每 period_ticks 真实秒 (默认 7 游戏日) 生成一次
+            // 转换为 tick 计数：period_ticks 是墙钟秒，除以 real_seconds_per_tick 得 tick 周期
             let period_ticks = crate::chronicle::ChronicleConfig::default().period_ticks;
-            if self.current_tick_id > 0 && self.current_tick_id % period_ticks == 0 {
+            let real_seconds_per_tick = {
+                let gd = self.game_data_cache.get();
+                gd.game_rules.data.agent_state.tick.real_seconds_per_tick as i64
+            };
+            debug_assert!(
+                period_ticks % real_seconds_per_tick == 0,
+                "period_ticks({}) must be divisible by real_seconds_per_tick({})",
+                period_ticks,
+                real_seconds_per_tick
+            );
+            let chronicle_period_ticks =
+                (period_ticks / real_seconds_per_tick) as u64;
+            if self.tick_counter > 0 && self.tick_counter.is_multiple_of(chronicle_period_ticks) {
                 let period_start = self.current_tick_id - period_ticks + 1;
                 let db_pool = self.db_pool.clone();
                 let tick_id = self.current_tick_id;

@@ -28,6 +28,7 @@ services:
     volumes:
       - ./agent-1/config:/app/config
       - ./agent-1/data:/app/data
+      - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
       - ../crates/agent/static/panel:/app/static/panel:ro
 
   agent-2:
@@ -40,6 +41,7 @@ services:
     volumes:
       - ./agent-2/config:/app/config
       - ./agent-2/data:/app/data
+      - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
       - ../crates/agent/static/panel:/app/static/panel:ro
 
   agent-3:
@@ -52,6 +54,7 @@ services:
     volumes:
       - ./agent-3/config:/app/config
       - ./agent-3/data:/app/data
+      - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
       - ../crates/agent/static/panel:/app/static/panel:ro
 
   agent-4:
@@ -64,6 +67,7 @@ services:
     volumes:
       - ./agent-4/config:/app/config
       - ./agent-4/data:/app/data
+      - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
       - ../crates/agent/static/panel:/app/static/panel:ro
 
   agent-5:
@@ -76,6 +80,7 @@ services:
     volumes:
       - ./agent-5/config:/app/config
       - ./agent-5/data:/app/data
+      - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
       - ../crates/agent/static/panel:/app/static/panel:ro
 
   agent-7:
@@ -88,6 +93,7 @@ services:
     volumes:
       - ./agent-7/config:/app/config
       - ./agent-7/data:/app/data
+      - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
       - ../crates/agent/static/panel:/app/static/panel:ro
 
   agent-ollama:
@@ -100,6 +106,7 @@ services:
     volumes:
       - ./agent-ollama/config:/app/config
       - ./agent-ollama/data:/app/data
+      - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
       - ../crates/agent/static/panel:/app/static/panel:ro
 
 networks:
