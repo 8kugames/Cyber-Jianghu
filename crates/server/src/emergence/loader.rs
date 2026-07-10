@@ -111,11 +111,13 @@ pub async fn fetch_health(
     };
 
     // tick 完成率（tick_logs.status 聚合）+ 连续运行跨度
+    // 注意：EXTRACT(EPOCH FROM ...) 返回 PG numeric 类型，sqlx 无法直接解码为 f64，
+    // 必须显式 ::float8 cast 成 double precision。
     let tick_rows = sqlx::query(
         r#"
         SELECT status,
                COUNT(*) as cnt,
-               COALESCE(EXTRACT(EPOCH FROM (COALESCE(MAX(completed_at), MAX(started_at)) - MIN(started_at))), 0) as span
+               COALESCE(EXTRACT(EPOCH FROM (COALESCE(MAX(completed_at), MAX(started_at)) - MIN(started_at)))::float8, 0.0) as span
         FROM tick_logs
         WHERE tick_id BETWEEN $1 AND $2
         GROUP BY status
@@ -130,7 +132,8 @@ pub async fn fetch_health(
     for row in &tick_rows {
         let status: String = row.get("status");
         let cnt: i64 = row.get("cnt");
-        let span: f64 = row.get("span");
+        // span 可能为 NULL（空表/无 completed_at），用 Option 防 panic
+        let span: f64 = row.get::<Option<f64>, _>("span").unwrap_or(0.0);
         h.ticks_total += cnt;
         match status.as_str() {
             "completed" => h.ticks_completed = cnt,
