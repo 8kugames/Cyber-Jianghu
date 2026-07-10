@@ -1,0 +1,67 @@
+/* 健康度看板样式 */
+
+.health-grid {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 16px;
+}
+
+.health-grid h3 {
+    margin-bottom: 20px;
+    color: var(--text-primary, #333);
+}
+
+.health-section {
+    background: var(--bg-card, #fff);
+    border: 1px solid var(--border, #e0e0e0);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.health-section h4 {
+    margin: 0 0 12px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border, #eee);
+}
+
+.health-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+.health-table th,
+.health-table td {
+    padding: 6px 10px;
+    text-align: left;
+    border-bottom: 1px solid var(--border, #f0f0f0);
+}
+
+.health-table th {
+    font-weight: 600;
+    color: var(--text-secondary, #666);
+    background: var(--bg-hover, #f9f9f9);
+}
+
+.health-table .pass {
+    color: #16a34a;
+    font-weight: 600;
+}
+
+.health-table .fail {
+    color: #dc2626;
+    font-weight: 600;
+}
+
+.health-section .note {
+    font-size: 12px;
+    color: var(--text-secondary, #888);
+    margin-top: 8px;
+    line-height: 1.5;
+}
+
+.health-section .error {
+    color: #dc2626;
+}

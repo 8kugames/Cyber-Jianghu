@@ -540,6 +540,14 @@ impl IntentWorker {
     async fn process_tick_boundary(&self, tick_id: i64) -> Result<()> {
         debug!("Tick {} 边界处理开始", tick_id);
 
+        // tick_logs 写入（修复死代码债：让 tick 完成率/崩溃数可测）
+        // best-effort：失败只 warn 不阻断 tick 主流程。
+        // 若本函数中途 ? 传播错误，tick_log 保持 Running 状态（自然标记未完成 tick）。
+        let mut tick_log = crate::models::tick::TickLog::new(tick_id);
+        if let Err(e) = crate::db::create_tick_log(&self.db_pool, &tick_log).await {
+            warn!("Tick {} tick_logs 写入失败（不阻断）: {}", tick_id, e);
+        }
+
         // 1. 从 DashMap 读取所有 Agent 状态
         let mut ghost_ids: Vec<uuid::Uuid> = Vec::new();
         let states: Vec<AgentState> = self.state_cache.iter().map(|r| r.value().clone()).collect();
@@ -670,6 +678,12 @@ impl IntentWorker {
             updated_states.len(),
             dead_agents.len()
         );
+
+        // tick_logs 更新为完成（best-effort）
+        tick_log.complete(updated_states.len() as i32, 0);
+        if let Err(e) = crate::db::update_tick_log(&self.db_pool, &tick_log).await {
+            warn!("Tick {} tick_logs 更新失败（不阻断）: {}", tick_id, e);
+        }
 
         Ok(())
     }
