@@ -63,6 +63,9 @@ struct SoulCycleAttemptEntry {
     renhun: RenhunEntry,
     tianhun: TianhunEntry,
     final_intent: Option<FinalIntentEntry>,
+    /// 该次尝试使用的 LLM 模型 ID（用于经历日志展示）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model_id: Option<String>,
 }
 
 /// 即时意图记录
@@ -162,6 +165,7 @@ fn record_to_attempt_entry(
                 dream_marker: None,
             }
         }),
+        model_id: r.model_id,
     }
 }
 

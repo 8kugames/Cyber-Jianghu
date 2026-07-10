@@ -247,6 +247,13 @@ impl super::super::Agent {
             }
 
             // 人魂决策完成，立即记录该 attempt 的人魂输出 + 地魂 tool call（天魂审查前）
+            // model_id 取该次人魂实际使用的 LLM 模型（含降级后真实模型），写入经历日志。
+            let attempt_model_id = if let Some(ref container) = self.actor_llm_container {
+                let llm = container.read().await;
+                llm.model_name()
+            } else {
+                String::new()
+            };
             if let Some(recorder) = self.soul_recorder().await {
                 recorder
                     .record_renhun(
@@ -254,6 +261,7 @@ impl super::super::Agent {
                         attempt,
                         &renhun_narrative,
                         renhun_thought_log,
+                        &attempt_model_id,
                     )
                     .await;
                 if let Some(ref engine) = self.cognitive_engine

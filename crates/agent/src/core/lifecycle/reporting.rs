@@ -80,6 +80,7 @@ impl super::super::Agent {
                                 dream_marker: None,
                             }
                         }),
+                        model_id: r.model_id,
                     }
                 })
                 .collect();
@@ -187,6 +188,7 @@ impl super::super::Agent {
                                 chaos_marker: subsequent.chaos_marker.clone(),
                                 dream_marker: subsequent.dream_marker.clone(),
                             }),
+                            model_id: None,
                         }],
                         immediate_intents: vec![],
                     };

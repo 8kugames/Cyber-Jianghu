@@ -121,6 +121,7 @@ function renderAgents() {
     "<div>名称</div>" +
     "<div>位置</div>" +
     "<div>状态</div>" +
+    "<div>模型</div>" +
     "<div>最后活跃</div>" +
     "<div>最后 Tick</div>" +
     "<div>创建时间</div>" +
@@ -212,6 +213,9 @@ function renderAgents() {
         '">' +
         escapeHtml(getStatusText(agent.status)) +
         "</span></div>" +
+        '<div class="model-id">' +
+        escapeHtml(agent.model_id || "-") +
+        "</div>" +
         '<div class="last-active">' +
         escapeHtml(formatLastActive(agent.last_active)) +
         "</div>" +
@@ -445,6 +449,9 @@ function renderBasicInfo(agent) {
       ? escapeHtml(new Date(agent.last_active).toLocaleString())
       : "从未") +
     "</div>" +
+    '<div class="detail-item"><span class="detail-label">模型:</span> ' +
+    escapeHtml(agent.model_id || "-") +
+    "</div>" +
     (agent.age !== null && agent.age !== undefined
       ? '<div class="detail-item"><span class="detail-label">年龄:</span> ' +
         escapeHtml(agent.age) +
@@ -571,6 +578,7 @@ function renderTickCard(exp, metadata, time) {
   var attempts = metadata.cycles || [];
   var immediate = metadata.immediate_intents || [];
   var worldTimeDisplay = exp.formatted_time || "-";
+  var modelId = attempts[0] && attempts[0].model_id ? attempts[0].model_id : "";
 
   var html =
     '<div class="tick-card">' +
@@ -581,6 +589,9 @@ function renderTickCard(exp, metadata, time) {
     '<span class="tick-world-time">' +
     escapeHtml(worldTimeDisplay) +
     "</span>" +
+    (modelId
+      ? '<span class="tick-model">' + escapeHtml(modelId) + "</span>"
+      : "") +
     '<span class="tick-real-time">' +
     time +
     "</span>" +

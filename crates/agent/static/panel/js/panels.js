@@ -272,11 +272,13 @@ export function renderTickCard(tickId, attempts, immediate) {
     const first = attempts[0];
     const wt = first?.world_time?.display || '-';
     const ts = first?.created_at ? new Date(first.created_at).toLocaleString('zh-CN') : '';
+    const modelId = first?.model_id || '';
 
     let html = `<div class="tl-item"><div class="tl-dot"></div><div class="tl-content">`;
     html += `<div class="tick-card-header">`;
     html += `<span class="tick-badge">T${escapeHtml(tickId)}</span>`;
     html += `<span class="tick-world-time">${escapeHtml(wt)}</span>`;
+    if (modelId) html += `<span class="tick-model">${escapeHtml(modelId)}</span>`;
     html += `<span class="tick-real-time">${escapeHtml(ts)}</span>`;
     html += `</div>`;
 

@@ -114,6 +114,7 @@ pub async fn agent_register(
         &system_prompt,
         current_tick_id,
         &initial_items_data,
+        payload.model_id.as_deref(),
     )
     .await
     {

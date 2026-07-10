@@ -137,6 +137,10 @@ pub struct AgentRegisterRequest {
     // === 当前目标 ===
     #[serde(default)]
     pub goals: GoalsRequest,
+
+    // === 角色注册时上报的 LLM 模型 ID（如 glm-4、gpt-4o）===
+    #[serde(default)]
+    pub model_id: Option<String>,
 }
 
 impl AgentRegisterRequest {

@@ -38,6 +38,8 @@ pub struct SoulCycleRecord {
     pub world_time: Option<String>,
     /// 地魂 tool calling 日志（JSON 序列化的 Vec<EarthToolCall>）
     pub earth_tool_calls: Option<String>,
+    /// 该次尝试使用的 LLM 模型 ID（用于经历日志展示）
+    pub model_id: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -144,6 +146,9 @@ impl SoulCycleRecorder {
         // idempotent migration: add earth_tool_calls column (地魂 tool calling 日志)
         conn.execute_batch("ALTER TABLE soul_cycle_record ADD COLUMN earth_tool_calls TEXT")
             .ok();
+        // idempotent migration: add model_id column (该次尝试使用的 LLM 模型 ID)
+        conn.execute_batch("ALTER TABLE soul_cycle_record ADD COLUMN model_id TEXT")
+            .ok();
 
         Ok(())
     }
@@ -155,6 +160,7 @@ impl SoulCycleRecorder {
         attempt: i32,
         narrative: &str,
         thought_log: &str,
+        model_id: &str,
     ) {
         let conn = self
             .conn
@@ -164,13 +170,14 @@ impl SoulCycleRecorder {
 
         let result = conn.execute(
             "INSERT INTO soul_cycle_record
-             (tick_id, attempt, renhun_narrative, renhun_thought_log, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+             (tick_id, attempt, renhun_narrative, renhun_thought_log, model_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(tick_id, attempt) DO UPDATE SET
                 renhun_narrative = excluded.renhun_narrative,
                 renhun_thought_log = excluded.renhun_thought_log,
+                model_id = excluded.model_id,
                 created_at = excluded.created_at",
-            params![tick_id, attempt, narrative, thought_log, created_at],
+            params![tick_id, attempt, narrative, thought_log, model_id, created_at],
         );
 
         match result {
@@ -443,7 +450,7 @@ impl SoulCycleRecorder {
                     tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
                     tianhun_layer3_result, tianhun_reason,
                     final_intent_id, final_action_type, final_action_data, final_pipeline_json,
-                    route_type, world_time, earth_tool_calls, created_at
+                    route_type, world_time, earth_tool_calls, model_id, created_at
              FROM soul_cycle_record WHERE tick_id = ?1 ORDER BY attempt ASC",
             )
             .context("get_by_tick prepare 失败")?;
@@ -504,7 +511,7 @@ impl SoulCycleRecorder {
                     tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
                     tianhun_layer3_result, tianhun_reason,
                     final_intent_id, final_action_type, final_action_data, final_pipeline_json,
-                    route_type, world_time, earth_tool_calls, created_at
+                    route_type, world_time, earth_tool_calls, model_id, created_at
              FROM soul_cycle_record WHERE tick_id IN ({}) ORDER BY tick_id DESC, attempt ASC",
             build_in_placeholders(tick_ids.len())
         );
@@ -586,7 +593,7 @@ impl SoulCycleRecorder {
     }
 
     fn row_to_record(row: &rusqlite::Row<'_>) -> SoulCycleRecord {
-        let created_at_str: String = row.get(17).unwrap_or_default();
+        let created_at_str: String = row.get(18).unwrap_or_default();
         let created_at = DateTime::parse_from_rfc3339(&created_at_str)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
@@ -609,6 +616,7 @@ impl SoulCycleRecorder {
             route_type: row.get(14).unwrap_or_else(|_| "main".to_string()),
             world_time: row.get(15).ok(),
             earth_tool_calls: row.get(16).ok(),
+            model_id: row.get(17).ok(),
             created_at,
         }
     }
@@ -651,7 +659,7 @@ mod tests {
     async fn test_record_renhun() {
         let (_dir, recorder) = make_recorder();
         recorder
-            .record_renhun(1, 0, "吃馒头充饥", "思考中...")
+            .record_renhun(1, 0, "吃馒头充饥", "思考中...", "test-model")
             .await;
         let records = recorder.get_by_tick(1).await.expect("get_by_tick in test");
         assert_eq!(records.len(), 1);
@@ -662,7 +670,7 @@ mod tests {
     #[tokio::test]
     async fn test_record_tianhun_approved() {
         let (_dir, recorder) = make_recorder();
-        recorder.record_renhun(1, 0, "吃馒头", "...").await;
+        recorder.record_renhun(1, 0, "吃馒头", "...", "test-model").await;
         recorder
             .record_tianhun(
                 1,
@@ -685,7 +693,7 @@ mod tests {
     #[tokio::test]
     async fn test_record_tianhun_rejected() {
         let (_dir, recorder) = make_recorder();
-        recorder.record_renhun(1, 0, "无效", "...").await;
+        recorder.record_renhun(1, 0, "无效", "...", "test-model").await;
         recorder
             .record_tianhun(
                 1,
@@ -705,8 +713,8 @@ mod tests {
     #[tokio::test]
     async fn test_unique_constraint_tick_attempt() {
         let (_dir, recorder) = make_recorder();
-        recorder.record_renhun(1, 0, "第一次", "...").await;
-        recorder.record_renhun(1, 0, "第二次覆盖", "...").await;
+        recorder.record_renhun(1, 0, "第一次", "...", "test-model").await;
+        recorder.record_renhun(1, 0, "第二次覆盖", "...", "test-model").await;
         let records = recorder.get_by_tick(1).await.expect("get_by_tick in test");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].renhun_narrative.as_deref(), Some("第二次覆盖"));
@@ -758,7 +766,7 @@ mod tests {
     #[tokio::test]
     async fn test_world_time() {
         let (_dir, recorder) = make_recorder();
-        recorder.record_renhun(1, 0, "移动", "...").await;
+        recorder.record_renhun(1, 0, "移动", "...", "test-model").await;
         recorder.record_world_time(1, 0, "第三天 申时").await;
         let records = recorder.get_by_tick(1).await.expect("get_by_tick in test");
         assert_eq!(records[0].world_time.as_deref(), Some("第三天 申时"));
@@ -768,10 +776,10 @@ mod tests {
     async fn test_get_tick_ids_page_dedup_and_order() {
         let (_dir, recorder) = make_recorder();
         // tick 1 有 2 次 attempt，tick 2 和 3 各 1 次
-        recorder.record_renhun(1, 0, "a1", "...").await;
-        recorder.record_renhun(1, 1, "a2", "...").await;
-        recorder.record_renhun(3, 0, "c", "...").await;
-        recorder.record_renhun(2, 0, "b", "...").await;
+        recorder.record_renhun(1, 0, "a1", "...", "test-model").await;
+        recorder.record_renhun(1, 1, "a2", "...", "test-model").await;
+        recorder.record_renhun(3, 0, "c", "...", "test-model").await;
+        recorder.record_renhun(2, 0, "b", "...", "test-model").await;
 
         let (ids, total) = recorder.get_tick_ids_page(1, 10).await.expect("get_tick_ids_page in test");
         assert_eq!(total, 3);
@@ -783,7 +791,7 @@ mod tests {
         let (_dir, recorder) = make_recorder();
         for i in 1..=5 {
             recorder
-                .record_renhun(i, 0, &format!("n{}", i), "...")
+                .record_renhun(i, 0, &format!("n{}", i), "...", "test-model")
                 .await;
         }
 
@@ -808,9 +816,9 @@ mod tests {
     #[tokio::test]
     async fn test_get_by_ticks_batch() {
         let (_dir, recorder) = make_recorder();
-        recorder.record_renhun(1, 0, "a", "...").await;
-        recorder.record_renhun(1, 1, "a2", "...").await;
-        recorder.record_renhun(3, 0, "c", "...").await;
+        recorder.record_renhun(1, 0, "a", "...", "test-model").await;
+        recorder.record_renhun(1, 1, "a2", "...", "test-model").await;
+        recorder.record_renhun(3, 0, "c", "...", "test-model").await;
         // tick 2 不存在
 
         let records = recorder.get_by_ticks(&[1, 2, 3]).await.expect("get_by_ticks in test");

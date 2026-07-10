@@ -748,6 +748,15 @@ input:checked + .slider:before {
     color: var(--text-secondary);
 }
 
+.tick-model {
+    font-size: 11px;
+    color: var(--text-subtle);
+    font-family: monospace;
+    padding: 1px 5px;
+    background: var(--bg-level-1);
+    border-radius: 3px;
+}
+
 .tick-real-time {
     color: var(--text-subtle);
     margin-left: auto;
@@ -1130,7 +1139,7 @@ input:checked + .slider:before {
 
 .agent-list-header {
     display: grid;
-    grid-template-columns: 80px 80px 130px 120px 80px 110px 80px 100px auto auto 60px;
+    grid-template-columns: 80px 80px 130px 120px 80px 90px 110px 80px 100px auto auto 60px;
     gap: 8px;
     align-items: center;
     padding: 10px 14px;
@@ -1154,7 +1163,7 @@ input:checked + .slider:before {
     border: 1px solid transparent;
     border-top: 1px solid var(--border-subtle);
     display: grid;
-    grid-template-columns: 80px 80px 130px 120px 80px 110px 80px 100px auto auto 60px;
+    grid-template-columns: 80px 80px 130px 120px 80px 90px 110px 80px 100px auto auto 60px;
     gap: 8px;
     align-items: center;
     animation: fade-in 0.3s var(--ease-out) both;
@@ -1487,6 +1496,15 @@ input:checked + .slider:before {
     font-size: 13px;
     color: var(--text-primary);
     font-weight: 500;
+}
+
+.tick-model {
+    font-size: 11px;
+    color: var(--text-subtle);
+    font-family: monospace;
+    padding: 1px 5px;
+    background: var(--bg-level-1);
+    border-radius: 3px;
 }
 
 .tick-real-time {

@@ -468,6 +468,7 @@ body {
     color: var(--accent);
 }
 .tick-world-time { color: var(--text-secondary); }
+.tick-model { font-size: 11px; color: var(--text-muted); font-family: monospace; padding: 1px 5px; background: var(--bg-card); border-radius: 3px; }
 .tick-real-time { color: var(--text-muted); margin-left: auto; font-size: 11px; }
 
 .tick-section { margin-bottom: 8px; }

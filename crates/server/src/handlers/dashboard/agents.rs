@@ -216,6 +216,8 @@ pub struct AgentListEntry {
     pub attributes: std::collections::HashMap<String, i32>,
     pub birth_attributes: std::collections::HashMap<String, i32>,
     pub roles: Vec<String>,
+    /// 角色注册时上报的 LLM 模型 ID（如 glm-4、gpt-4o）
+    pub model_id: Option<String>,
 }
 
 /// 获取所有 agents（统一列表，数据驱动）
@@ -251,6 +253,7 @@ pub async fn get_all_agents(State(state): State<Arc<AppState>>) -> Json<Vec<Agen
             a.status as db_status,
             a.created_at,
             a.last_tick_online,
+            a.model_id,
             COALESCE(s.node_id, 'unknown') as location,
             COALESCE((s.attributes->>'hp')::int, 0) as hp,
             COALESCE((s.attributes->>'hp_max')::int, 100) as max_hp,
@@ -340,6 +343,7 @@ pub async fn get_all_agents(State(state): State<Arc<AppState>>) -> Json<Vec<Agen
             attributes,
             birth_attributes,
             roles: roles_map.remove(&agent_id).unwrap_or_default(),
+            model_id: row.get("model_id"),
         });
     }
 

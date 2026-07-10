@@ -429,6 +429,9 @@ pub struct SoulCycleAttempt {
     pub tianhun: TianhunReport,
     /// 最终 Intent
     pub final_intent: Option<FinalIntentReport>,
+    /// 该次尝试使用的 LLM 模型 ID（用于经历日志展示）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
 }
 
 /// 地魂 tool calling 日志条目

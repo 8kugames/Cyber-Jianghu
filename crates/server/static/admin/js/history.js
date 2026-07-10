@@ -424,6 +424,9 @@ function renderExpTable() {
             const dihunHtml = renderDihunCell(cycles);
             const tianhunHtml = renderTianhunCell(cycles, e);
 
+            // 模型 ID：取该 tick 第一次 attempt 使用的模型
+            const modelId = (cycles[0] && cycles[0].model_id) || "-";
+
             return (
                 `<tr>` +
                 `<td><span class="tick-badge">T${escapeHtml(e.tick_id || "-")}</span></td>` +
@@ -434,6 +437,7 @@ function renderExpTable() {
                 `<td class="soul-cell"><div class="soul-cell-inner">${dihunHtml}</div></td>` +
                 `<td class="soul-cell"><div class="soul-cell-inner">${tianhunHtml}</div></td>` +
                 `<td>${resultBadge}</td>` +
+                `<td class="mono-text">${escapeHtml(modelId)}</td>` +
                 `<td class="mono-text">${escapeHtml(timeStr)}</td>` +
                 `</tr>`
             );
