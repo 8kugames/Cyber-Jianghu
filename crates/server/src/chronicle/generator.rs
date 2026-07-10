@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::game_data::registry::ActionRegistry;
 
-use super::collector::CollectedData;
+    use super::collector::{CollectedData, EmergenceCollectStatus};
 
 /// LLM Token 统计（全局）
 static LLM_INPUT_TOKENS: AtomicU64 = AtomicU64::new(0);
@@ -266,6 +266,23 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
         summary.push_str(nl);
     }
 
+    // 涌现采集降级提示（让缺段可见，不再静默丢失）
+    match &data.emergence_status {
+        EmergenceCollectStatus::Ok => {}
+        EmergenceCollectStatus::ConfigError(msg) => {
+            summary.push_str(&format!(
+                "> ⚠️ 涌现采集降级：emergence.yaml 配置加载失败，本周期未检测因果涌现事件。{}\n{nl}",
+                super::truncate_text(msg, 80),
+            ));
+        }
+        EmergenceCollectStatus::DetectError(msg) => {
+            summary.push_str(&format!(
+                "> ⚠️ 涌现采集降级：涌现检测执行失败，本周期未检测因果涌现事件。{}\n{nl}",
+                super::truncate_text(msg, 80),
+            ));
+        }
+    }
+
     // 结语
     summary.push_str(&format!("--{nl}{nl}"));
     summary.push_str(&format!(
@@ -517,6 +534,14 @@ fn build_llm_prompt(data: &CollectedData) -> String {
         prompt.push('\n');
     }
 
+    // 涌现采集降级提示（让 LLM 知道数据可能缺失）
+    match &data.emergence_status {
+        EmergenceCollectStatus::Ok => {}
+        EmergenceCollectStatus::ConfigError(_) | EmergenceCollectStatus::DetectError(_) => {
+            prompt.push_str("注：本周期涌现采集降级，未检测到因果涌现事件，请勿虚构相关情节。\n\n");
+        }
+    }
+
     prompt.push_str(
         "请以武侠小说的笔法撰写这份群像传记，要求：\n\
          1. 语言古朴典雅，有古龙遗风\n\
@@ -585,6 +610,7 @@ mod tests {
             deaths: 2,
             births: 5,
             emergence_events: vec![],
+            emergence_status: EmergenceCollectStatus::Ok,
         };
 
         let summary = generate_template(&data).unwrap();
@@ -622,6 +648,7 @@ mod tests {
             deaths: 0,
             births: 1,
             emergence_events: vec![],
+            emergence_status: EmergenceCollectStatus::Ok,
         };
 
         let prompt = build_llm_prompt(&data);
@@ -681,6 +708,7 @@ mod tests {
                 causal_edges: vec![],
                 actions: vec![],
             }],
+            emergence_status: EmergenceCollectStatus::Ok,
         };
 
         let prompt = build_llm_prompt(&data);

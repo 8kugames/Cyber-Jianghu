@@ -246,6 +246,27 @@ function showChrModal(c) {
             ${c.highlights.map((h) => `<div class="highlight-item"><span class="highlight-type type-${escapeHtml(h.event_type || "")}">${escapeHtml({ death: "陨落", dialogue: "对话", combat: "战斗", social: "交际" }[h.event_type] || h.event_type || "")}</span><span class="highlight-desc">${escapeHtml(h.description || "")}</span></div>`).join("")}
         </div>
     </div>` : ""}
+    ${c.emergence_events && c.emergence_events.length ? `
+    <div class="detail-section">
+        <h3>因果涌现</h3>
+        <div class="emergence-list">
+            ${c.emergence_events.map((e) => {
+                const isCausal = e.category === "causal_emergence";
+                const label = isCausal ? "因果涌现" : "共现（存疑）";
+                const cls = isCausal ? "emergence-causal" : "emergence-cooccur";
+                const edges = (e.causal_edges || []).map((ed) => {
+                    const fn = (ed.from_agent || "").substring(0, 8);
+                    const tn = (ed.to_agent || "").substring(0, 8);
+                    return `<div class="emergence-edge">${escapeHtml(fn)} → ${escapeHtml(tn)}（${escapeHtml(ed.evidence || "")}）</div>`;
+                }).join("");
+                return `<div class="emergence-item ${cls}">
+                    <span class="emergence-badge ${cls}">${escapeHtml(label)}</span>
+                    <span class="emergence-desc">tick ${escapeHtml(e.tick_start)}–${escapeHtml(e.tick_end)}，${escapeHtml(e.action_count || 0)} 次互动（${escapeHtml((e.categories_covered || []).join("、"))}）</span>
+                    ${edges}
+                </div>`;
+            }).join("")}
+        </div>
+    </div>` : ""}
     ${c.agent_summaries && c.agent_summaries.length ? `
     <div class="detail-section">
         <h3>江湖群像</h3>

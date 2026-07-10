@@ -104,6 +104,64 @@ function buildHealthHtml(d) {
             </table>
             <p class="note">Causal emergence = 通过"感知→处理→定向回应"因果闭环验证的事件链。
             Co-occurrence = 仅形态共现，无法证明因果互动。MVP 验收以 causal emergence 为准。</p>
+            <button class="btn-secondary" onclick="toggleEmergenceDetail(${d.tick_start}, ${d.tick_end})" id="emergence-detail-btn">
+                展开涌现事件详情 ▼
+            </button>
+            <div id="emergence-detail"></div>
         </div>
     </div>`;
+}
+
+// 涌现事件详情：按需拉取 /api/dashboard/emergence 的完整事件链
+let emergenceDetailLoaded = false;
+
+async function toggleEmergenceDetail(tickStart, tickEnd) {
+    const detailDiv = document.getElementById('emergence-detail');
+    const btn = document.getElementById('emergence-detail-btn');
+    if (emergenceDetailLoaded) {
+        detailDiv.innerHTML = '';
+        btn.textContent = '展开涌现事件详情 ▼';
+        emergenceDetailLoaded = false;
+        return;
+    }
+    btn.textContent = '加载中...';
+    try {
+        const url = `/api/dashboard/emergence?start=${tickStart}&end=${tickEnd}`;
+        const res = await apiFetch(url);
+        if (!res.ok) {
+            detailDiv.innerHTML = '<p class="note">加载失败：' + res.status + '</p>';
+            btn.textContent = '展开涌现事件详情 ▼';
+            return;
+        }
+        const data = await res.json();
+        detailDiv.innerHTML = renderEmergenceDetail(data);
+        btn.textContent = '收起涌现事件详情 ▲';
+        emergenceDetailLoaded = true;
+    } catch (e) {
+        detailDiv.innerHTML = '<p class="note">加载失败：' + escapeHtml(e.message) + '</p>';
+        btn.textContent = '展开涌现事件详情 ▼';
+    }
+}
+
+function renderEmergenceDetail(data) {
+    if (!data.events || data.events.length === 0) {
+        return '<p class="note">本窗口未检测到涌现事件。</p>';
+    }
+    const items = data.events.map((e) => {
+        const isCausal = e.category === 'causal_emergence';
+        const label = isCausal ? '因果涌现' : '共现（存疑）';
+        const cls = isCausal ? 'emergence-causal' : 'emergence-cooccur';
+        const edges = (e.causal_edges || []).map((ed) => {
+            const fn = (ed.from_agent || '').substring(0, 8);
+            const tn = (ed.to_agent || '').substring(0, 8);
+            return `<div class="emergence-edge">${escapeHtml(fn)} → ${escapeHtml(tn)}（${escapeHtml(ed.evidence || '')}）</div>`;
+        }).join('');
+        const participants = (e.participants || []).map((p) => escapeHtml((p || '').substring(0, 8))).join('、');
+        return `<div class="emergence-item ${cls}">
+            <span class="emergence-badge ${cls}">${escapeHtml(label)}</span>
+            <span class="emergence-desc">tick ${escapeHtml(e.tick_start)}–${escapeHtml(e.tick_end)}，参与者 [${participants}]，${escapeHtml(e.action_count || 0)} 次互动（${escapeHtml((e.categories_covered || []).join('、'))}）</span>
+            ${edges}
+        </div>`;
+    }).join('');
+    return '<div class="emergence-list" style="margin-top:12px">' + items + '</div>';
 }

@@ -47,6 +47,9 @@ pub struct Chronicle {
     pub location_stats: Vec<LocationStat>,
     pub deaths: i32,
     pub births: i32,
+    /// 涌现事件（因果验证通过的事件链，持久化于 raw_data JSONB）
+    #[serde(default)]
+    pub emergence_events: Vec<crate::emergence::EmergenceEvent>,
     pub status: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     /// 服务端格式化的游戏内日期字符串（由 get_chronicle 填充）
