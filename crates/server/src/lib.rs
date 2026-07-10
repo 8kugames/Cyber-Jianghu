@@ -8,6 +8,7 @@ pub mod config;
 pub mod config_validator;
 pub mod db;
 pub mod dialogue;
+pub mod emergence;
 pub mod game_data;
 pub mod governance;
 pub mod handlers;

@@ -6,6 +6,7 @@
         <title>天道 | Cyber-Jianghu</title>
         <link rel="stylesheet" href="css/dashboard.css" />
         <link rel="stylesheet" href="css/action-evolution.css" />
+        <link rel="stylesheet" href="css/health.css" />
     </head>
     <body>
         <header>
@@ -38,6 +39,9 @@
                 </div>
                 <div class="nav-tab" data-tab-id="evolution" onclick="switchTab('evolution'); loadActionEvolution();">
                     动作演化
+                </div>
+                <div class="nav-tab" data-tab-id="health" onclick="switchTab('health'); loadHealth();">
+                    健康度
                 </div>
             </div>
         </header>
@@ -203,6 +207,12 @@
                     <p>加载中...</p>
                 </div>
             </div>
+            <!-- Health View -->
+            <div id="health" class="view-section">
+                <div id="health-content">
+                    <p>加载中...</p>
+                </div>
+            </div>
         </main>
 
         <div id="toast" class="toast">Message</div>
@@ -215,5 +225,6 @@
         <script src="js/config-editor.js"></script>
         <script src="js/app.js"></script>
         <script src="js/action-evolution.js"></script>
+        <script src="js/health.js"></script>
     </body>
 </html>

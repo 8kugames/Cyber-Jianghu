@@ -31,6 +31,8 @@ pub struct CollectedData {
     pub location_stats: Vec<LocationStat>,
     pub deaths: i32,
     pub births: i32,
+    /// 涌现事件（因果验证通过的事件链，来自 emergence 模块）
+    pub emergence_events: Vec<crate::emergence::EmergenceEvent>,
 }
 
 /// Agent 信息
@@ -59,6 +61,9 @@ pub async fn collect(
     let deaths = collect_deaths(db_pool, period_start, period_end).await?;
     let births = collect_births(db_pool, period_start, period_end).await?;
 
+    // 涌现事件检测（复用 emergence 模块，best-effort：失败只 warn 不阻断 chronicle）
+    let emergence_events = collect_emergence_events(db_pool, period_start, period_end).await;
+
     Ok(CollectedData {
         period_start,
         period_end,
@@ -71,7 +76,33 @@ pub async fn collect(
         location_stats,
         deaths,
         births,
+        emergence_events,
     })
+}
+
+/// 采集涌现事件（因果验证通过的事件链，复用 emergence 模块）。
+///
+/// best-effort：emergence.yaml 缺失或检测失败时返回空 Vec，不阻断 chronicle 生成。
+/// 这是"涌现事件流入 chronicle"的桥接点——chronicle 把已验证的因果事件作为叙事骨架。
+async fn collect_emergence_events(
+    db_pool: &crate::db::DbPool,
+    period_start: i64,
+    period_end: i64,
+) -> Vec<crate::emergence::EmergenceEvent> {
+    let config = match crate::emergence::load_emergence_config(&crate::paths::get_config_dir()) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("[chronicle] 涌现配置加载失败，跳过涌现采集: {}", e);
+            return Vec::new();
+        }
+    };
+    match crate::emergence::detect_window(db_pool, &config, period_start, period_end, false).await {
+        Ok(result) => result.events,
+        Err(e) => {
+            tracing::warn!("[chronicle] 涌现检测失败，跳过: {}", e);
+            Vec::new()
+        }
+    }
 }
 
 /// 1 游戏日对应的真实秒数
@@ -391,51 +422,66 @@ async fn collect_highlights(
     .await
     .context("查询关键事件失败")?;
 
-    // 按类型采样（保留有序性，随机性通过打乱后取前 N 实现）
-    let mut dialogues = Vec::new();
-    let mut combats = Vec::new();
-    let mut socials = Vec::new();
+    // 按类型收集，附带戏剧性权重（content 长度 / 对手关联）
+    // 权重高的优先保留，权重相同时 tick_id 升序（确定性）
+    let mut dialogues: Vec<(usize, Highlight)> = Vec::new();
+    let mut combats: Vec<(usize, Highlight)> = Vec::new();
+    let mut socials: Vec<(usize, Highlight)> = Vec::new();
 
     for row in event_rows {
         let tick_id: i64 = row.get("tick_id");
         let agent_id: uuid::Uuid = row.get("agent_id");
         let action_type: String = row.get("action_type");
         let agent_name: String = row.get("name");
+        let action_data: Option<serde_json::Value> = row.get("action_data");
 
-        let highlight = match ActionRegistry::get(&action_type).and_then(|c| c.highlight_kind) {
+        let (weight, highlight) = match ActionRegistry::get(&action_type).and_then(|c| c.highlight_kind) {
             Some(HighlightKind::Dialogue) => {
-                let action_data: Option<serde_json::Value> = row.get("action_data");
                 let content = action_data
                     .as_ref()
                     .and_then(|d| d.get("content"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("...");
-                Highlight {
+                // 权重 = content 字符长度（长台词更可能是重要宣言/情节推进）
+                let weight = content.chars().count();
+                let h = Highlight {
                     tick_id,
                     event_type: "dialogue".to_string(),
+                    // 放宽截断到 150 字，减少腰斩重要台词
                     description: super::truncate_text(
                         &format!("{}\u{ff1a}\u{201c}{}\u{201d}", agent_name, content),
-                        100,
+                        150,
                     ),
                     agent_id: Some(agent_id),
                     agent_name: Some(agent_name),
-                }
+                };
+                (weight, h)
             }
             Some(HighlightKind::Combat) => {
                 let result_message: Option<String> = row.get("result_message");
-                Highlight {
+                // 提取对手 agent_id（让"谁打谁"可还原）
+                let target_display = action_data
+                    .as_ref()
+                    .and_then(|d| d.get("target_agent_id"))
+                    .and_then(|v| v.as_str())
+                    .map(|t| format!("（对手：{}）", &t[..t.len().min(8)]))
+                    .unwrap_or_default();
+                let h = Highlight {
                     tick_id,
                     event_type: "combat".to_string(),
                     description: result_message
-                        .map(|m| format!("{}: {}", agent_name, m))
-                        .unwrap_or_else(|| format!("{} 发起了一场战斗", agent_name)),
+                        .as_ref()
+                        .map(|m| format!("{}{}: {}", agent_name, target_display, m))
+                        .unwrap_or_else(|| format!("{}{} 发起了一场战斗", agent_name, target_display)),
                     agent_id: Some(agent_id),
                     agent_name: Some(agent_name),
-                }
+                };
+                // 战斗默认权重较高（冲突是戏剧性核心）
+                (10, h)
             }
             Some(HighlightKind::Social) => {
                 let result_message: Option<String> = row.get("result_message");
-                Highlight {
+                let h = Highlight {
                     tick_id,
                     event_type: "social".to_string(),
                     description: result_message
@@ -443,38 +489,33 @@ async fn collect_highlights(
                         .unwrap_or_else(|| format!("{} 赠出物品", agent_name)),
                     agent_id: Some(agent_id),
                     agent_name: Some(agent_name),
-                }
+                };
+                (5, h)
             }
             None => continue,
         };
 
         match highlight.event_type.as_str() {
-            "dialogue" => dialogues.push(highlight),
-            "combat" => combats.push(highlight),
-            "social" => socials.push(highlight),
+            "dialogue" => dialogues.push((weight, highlight)),
+            "combat" => combats.push((weight, highlight)),
+            "social" => socials.push((weight, highlight)),
             _ => {}
         }
     }
 
-    // 打乱后取前 N（用 tick_id 作为伪随机种子避免每次生成不同结果）
-    let shuffle_and_take = |v: Vec<Highlight>, n: usize| {
-        let mut shuffled = v;
-        // Knuth LCG (TAOCP Vol 2, 3.2.1.2, Table 1, line 26) + 标准 Fisher-Yates
-        let seed = period_start as u64;
-        let mut rng_state = seed;
-        for i in (1..shuffled.len()).rev() {
-            rng_state = rng_state
-                .wrapping_mul(6_364_136_223_846_793_005)
-                .wrapping_add(1);
-            let j = ((rng_state >> 33) as usize) % (i + 1);
-            shuffled.swap(i, j);
-        }
-        shuffled.into_iter().take(n).collect::<Vec<_>>()
+    // 加权采样：按戏剧性权重降序，权重相同时按 tick_id 升序（确定性，无随机）。
+    // 替代原无差别 shuffle——长台词/战斗等高戏剧性事件优先保留。
+    let weighted_take = |mut v: Vec<(usize, Highlight)>, n: usize| -> Vec<Highlight> {
+        v.sort_by(|a, b| {
+            // 权重降序，tick_id 升序（确定性 tie-break）
+            b.0.cmp(&a.0).then_with(|| a.1.tick_id.cmp(&b.1.tick_id))
+        });
+        v.into_iter().take(n).map(|(_, h)| h).collect()
     };
 
-    highlights.extend(shuffle_and_take(dialogues, 10));
-    highlights.extend(shuffle_and_take(combats, 5));
-    highlights.extend(shuffle_and_take(socials, 5));
+    highlights.extend(weighted_take(dialogues, 10));
+    highlights.extend(weighted_take(combats, 5));
+    highlights.extend(weighted_take(socials, 5));
 
     // 按 tick_id 排序
     highlights.sort_by_key(|h| h.tick_id);

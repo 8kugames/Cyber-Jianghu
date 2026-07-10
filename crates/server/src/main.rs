@@ -809,6 +809,24 @@ async fn main() -> Result<()> {
             ),
         )
         .route(
+            "/api/dashboard/emergence",
+            get(handlers::dashboard::get_emergence).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/dashboard/health",
+            get(handlers::dashboard::get_health).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
             "/api/dashboard/agents/offline",
             get(handlers::dashboard::get_offline_agents).layer(
                 axum::middleware::from_fn_with_state(

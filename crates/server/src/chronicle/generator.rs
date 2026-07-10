@@ -215,12 +215,12 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
                 summary.push_str("- 命运: 陨落于本周期\n");
             }
 
-            // 从叙事中提取一句作为代表
+            // 从叙事中提取角色自述（放宽到 150 字，提供更多角色血肉）
             if let Some(first_narrative) = agent.narratives.first() {
-                let snippet = if first_narrative.len() > 50 {
+                let snippet = if first_narrative.chars().count() > 150 {
                     let end = first_narrative
                         .char_indices()
-                        .nth(47)
+                        .nth(147)
                         .map(|(idx, _)| idx)
                         .unwrap_or(first_narrative.len());
                     format!("{}...", &first_narrative[..end])
@@ -232,6 +232,38 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
 
             summary.push_str(nl);
         }
+    }
+
+    // 涌现事件（因果验证通过的事件链，作为本周要事骨架）
+    let causal_events: Vec<_> = data
+        .emergence_events
+        .iter()
+        .filter(|e| e.category == "causal_emergence")
+        .collect();
+    if !causal_events.is_empty() {
+        summary.push_str(&format!("## 江湖涌现{nl}{nl}"));
+        summary.push_str("本周期观测到自发的因果互动链：\n");
+        for e in causal_events.iter().take(3) {
+            let names: Vec<&str> = e
+                .participants
+                .iter()
+                .map(|id| agent_name_in(id, data).unwrap_or("?"))
+                .collect();
+            summary.push_str(&format!(
+                "- 第{}–{}日：{} 共 {} 次互动（{}）\n",
+                e.tick_start,
+                e.tick_end,
+                names.join("、"),
+                e.action_count,
+                e.categories_covered.join("、"),
+            ));
+            for edge in e.causal_edges.iter().take(2) {
+                let from_name = agent_name_in(&edge.from_agent, data).unwrap_or("?");
+                let to_name = agent_name_in(&edge.to_agent, data).unwrap_or("?");
+                summary.push_str(&format!("    - {} → {}（{}）\n", from_name, to_name, edge.evidence));
+            }
+        }
+        summary.push_str(nl);
     }
 
     // 结语
@@ -437,6 +469,50 @@ fn build_llm_prompt(data: &CollectedData) -> String {
                     "尚在江湖"
                 }
             ));
+            // 注入角色的实际所思所行（narrative / daily_summary），
+            // 让 LLM 拿到素材写出有血肉的角色，而非凭空编造。
+            if let Some(narrative) = agent.narratives.first() {
+                let n = narrative.trim();
+                if !n.is_empty() {
+                    // 截断到 200 字，避免 prompt 过长
+                    let snippet: String = if n.chars().count() > 200 {
+                        let end = n
+                            .char_indices()
+                            .nth(197)
+                            .map(|(idx, _)| idx)
+                            .unwrap_or(n.len());
+                        format!("{}...", &n[..end])
+                    } else {
+                        n.to_string()
+                    };
+                    prompt.push_str(&format!("  近况：{}\n", snippet));
+                }
+            }
+        }
+        prompt.push('\n');
+    }
+
+    // 涌现事件（已机器验证的因果互动链，作为叙事事实骨架注入 LLM）
+    let causal_events: Vec<_> = data
+        .emergence_events
+        .iter()
+        .filter(|e| e.category == "causal_emergence")
+        .collect();
+    if !causal_events.is_empty() {
+        prompt.push_str("已观测到的因果涌现事件（机器验证，请融入叙事）：\n");
+        for e in causal_events.iter().take(3) {
+            let names: Vec<&str> = e
+                .participants
+                .iter()
+                .map(|id| agent_name_in(id, data).unwrap_or("?"))
+                .collect();
+            prompt.push_str(&format!(
+                "- 第{}–{}日，{} 之间出现 {} 互动链\n",
+                e.tick_start,
+                e.tick_end,
+                names.join("、"),
+                e.categories_covered.join("、"),
+            ));
         }
         prompt.push('\n');
     }
@@ -451,6 +527,14 @@ fn build_llm_prompt(data: &CollectedData) -> String {
     );
 
     prompt
+}
+
+/// 从采集数据中按 agent_id 查名字（用于涌现事件的参与者名称渲染）
+fn agent_name_in<'a>(agent_id: &uuid::Uuid, data: &'a CollectedData) -> Option<&'a str> {
+    data.agents
+        .iter()
+        .find(|a| &a.agent_id == agent_id)
+        .map(|a| a.name.as_str())
 }
 
 #[cfg(test)]
@@ -500,6 +584,7 @@ mod tests {
             location_stats: vec![],
             deaths: 2,
             births: 5,
+            emergence_events: vec![],
         };
 
         let summary = generate_template(&data).unwrap();
@@ -507,5 +592,99 @@ mod tests {
         assert!(summary.contains("春"));
         assert!(summary.contains("1 位江湖儿女"));
         assert!(summary.contains("100 次行动"));
+    }
+
+    /// AC: build_llm_prompt 含 agent narrative 文本（3a 信息源增强）
+    #[test]
+    fn test_llm_prompt_contains_narrative() {
+        let data = CollectedData {
+            period_start: 1,
+            period_end: 168,
+            game_day_start: 1,
+            game_day_end: 7,
+            season: "春".to_string(),
+            agents: vec![AgentInfo {
+                agent_id: uuid::Uuid::new_v4(),
+                name: "李四".to_string(),
+                location: "龙门客栈".to_string(),
+                actions_count: 30,
+                top_actions: vec![("说话".to_string(), 10)],
+                narratives: vec!["今日与旧友重逢，感慨万千，决定共谋大事。".to_string()],
+                died_this_period: false,
+            }],
+            highlights: vec![],
+            action_stats: ActionStats {
+                total: 30,
+                by_type: HashMap::new(),
+                success_rate: 0.9,
+            },
+            location_stats: vec![],
+            deaths: 0,
+            births: 1,
+            emergence_events: vec![],
+        };
+
+        let prompt = build_llm_prompt(&data);
+        // narrative 应被注入 prompt（让 LLM 拿到角色素材）
+        assert!(prompt.contains("今日与旧友重逢"), "LLM prompt 应包含 agent narrative");
+        assert!(prompt.contains("李四"));
+    }
+
+    /// AC: build_llm_prompt 含涌现事件（3c 涌现流入 chronicle）
+    #[test]
+    fn test_llm_prompt_contains_emergence_events() {
+        use crate::emergence::EmergenceEvent;
+        let agent_a = uuid::Uuid::new_v4();
+        let agent_b = uuid::Uuid::new_v4();
+        let data = CollectedData {
+            period_start: 1,
+            period_end: 168,
+            game_day_start: 1,
+            game_day_end: 7,
+            season: "春".to_string(),
+            agents: vec![
+                AgentInfo {
+                    agent_id: agent_a,
+                    name: "王五".to_string(),
+                    location: "龙门客栈".to_string(),
+                    actions_count: 20,
+                    top_actions: vec![],
+                    narratives: vec![],
+                    died_this_period: false,
+                },
+                AgentInfo {
+                    agent_id: agent_b,
+                    name: "赵六".to_string(),
+                    location: "龙门客栈".to_string(),
+                    actions_count: 18,
+                    top_actions: vec![],
+                    narratives: vec![],
+                    died_this_period: false,
+                },
+            ],
+            highlights: vec![],
+            action_stats: ActionStats {
+                total: 38,
+                by_type: HashMap::new(),
+                success_rate: 0.9,
+            },
+            location_stats: vec![],
+            deaths: 0,
+            births: 2,
+            emergence_events: vec![EmergenceEvent {
+                category: "causal_emergence".to_string(),
+                tick_start: 50,
+                tick_end: 55,
+                participants: vec![agent_a, agent_b],
+                action_count: 5,
+                categories_covered: vec!["conflict".to_string(), "trade".to_string()],
+                causal_edges: vec![],
+                actions: vec![],
+            }],
+        };
+
+        let prompt = build_llm_prompt(&data);
+        assert!(prompt.contains("因果涌现事件"), "LLM prompt 应包含涌现事件段");
+        assert!(prompt.contains("王五") && prompt.contains("赵六"));
     }
 }

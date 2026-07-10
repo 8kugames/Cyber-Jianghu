@@ -4,7 +4,9 @@
 
 mod action_evolution;
 mod agents;
+mod emergence;
 mod experience;
+mod health;
 mod maintenance;
 mod reward;
 mod stats;
@@ -14,7 +16,9 @@ mod types;
 
 pub use action_evolution::*;
 pub use agents::*;
+pub use emergence::*;
 pub use experience::*;
+pub use health::*;
 pub use maintenance::*;
 pub use reward::*;
 pub use stats::*;
