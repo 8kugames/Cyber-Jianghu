@@ -307,11 +307,12 @@ pub async fn get_chronicle(
                 .filter_map(|v| serde_json::from_value(v).ok())
                 .collect();
 
-            // 从 raw_data 解析涌现事件（旧记录无此字段时降级为空）
-            let raw_data_json: serde_json::Value =
-                r.get::<serde_json::Value, _>("raw_data");
+            // 从 raw_data 解析涌现事件（旧记录 raw_data 可能为 NULL 或无此字段 → 降级为空）
+            let raw_data_json: Option<serde_json::Value> =
+                r.get::<Option<serde_json::Value>, _>("raw_data");
             let emergence_events: Vec<crate::emergence::EmergenceEvent> = raw_data_json
-                .get("emergence_events")
+                .as_ref()
+                .and_then(|d| d.get("emergence_events"))
                 .and_then(|v| v.as_array())
                 .cloned()
                 .unwrap_or_default()
