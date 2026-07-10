@@ -981,3 +981,50 @@ body {
         grid-template-columns: repeat(2, 1fr);
     }
 }
+
+/* 因果涌现区块 */
+.emergence-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.emergence-item {
+    padding: 10px 14px;
+    border-radius: 6px;
+    border-left: 3px solid var(--border, #ddd);
+    background: var(--bg-hover, #f9f9f9);
+}
+.emergence-item.emergence-causal {
+    border-left-color: #16a34a;
+    background: #f0fdf4;
+}
+.emergence-item.emergence-cooccur {
+    border-left-color: #d97706;
+    background: #fffbeb;
+}
+.emergence-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-right: 8px;
+    color: #fff;
+}
+.emergence-badge.emergence-causal {
+    background: #16a34a;
+}
+.emergence-badge.emergence-cooccur {
+    background: #d97706;
+}
+.emergence-desc {
+    font-size: 13px;
+    color: var(--text-secondary, #555);
+}
+.emergence-edge {
+    font-size: 12px;
+    color: var(--text-secondary, #777);
+    margin-top: 4px;
+    margin-left: 4px;
+    font-family: monospace;
+}

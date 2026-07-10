@@ -80,6 +80,7 @@ pub async fn store_with_llm(
         "season": data.season,
         "agents_count": data.agents.len(),
         "highlights_count": data.highlights.len(),
+        "emergence_events": data.emergence_events,
     });
 
     // 根据是否有 LLM 摘要决定状态
@@ -139,6 +140,7 @@ pub async fn store_with_llm(
         agent_count: data.agents.len() as i32,
         actions_count: data.action_stats.total,
         highlights: data.highlights.clone(),
+        emergence_events: data.emergence_events.clone(),
         agent_summaries,
         action_stats: data.action_stats.clone(),
         location_stats: data.location_stats.clone(),
@@ -265,7 +267,8 @@ pub async fn get_chronicle(
                game_day_start, game_day_end, season,
                summary, summary_llm, agent_count, actions_count,
                highlights, agent_summaries, action_stats,
-               location_stats, deaths, births, status, created_at
+               location_stats, deaths, births, status, created_at,
+               raw_data
         FROM chronicles
         WHERE chronicle_id = $1
         "#,
@@ -298,6 +301,18 @@ pub async fn get_chronicle(
             let location_stats: Vec<LocationStat> = r
                 .get::<serde_json::Value, _>("location_stats")
                 .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|v| serde_json::from_value(v).ok())
+                .collect();
+
+            // 从 raw_data 解析涌现事件（旧记录无此字段时降级为空）
+            let raw_data_json: serde_json::Value =
+                r.get::<serde_json::Value, _>("raw_data");
+            let emergence_events: Vec<crate::emergence::EmergenceEvent> = raw_data_json
+                .get("emergence_events")
+                .and_then(|v| v.as_array())
                 .cloned()
                 .unwrap_or_default()
                 .into_iter()
@@ -338,6 +353,7 @@ pub async fn get_chronicle(
                 agent_count: r.get("agent_count"),
                 actions_count: r.get("actions_count"),
                 highlights,
+                emergence_events,
                 agent_summaries,
                 action_stats,
                 location_stats,

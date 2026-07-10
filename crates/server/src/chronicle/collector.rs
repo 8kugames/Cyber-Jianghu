@@ -17,6 +17,18 @@ use super::{ActionStats, Highlight, LocationStat};
 use crate::game_data::registry::ActionRegistry;
 use crate::game_data::types::actions::HighlightKind;
 
+/// 涌现采集状态（让降级可见，避免 chronicle 静默缺段）
+#[derive(Debug, Clone, Default)]
+pub enum EmergenceCollectStatus {
+    /// 采集成功
+    #[default]
+    Ok,
+    /// 配置加载失败（emergence.yaml 缺失/格式错）
+    ConfigError(String),
+    /// 检测执行失败
+    DetectError(String),
+}
+
 /// 采集的原始数据
 #[derive(Debug, Clone)]
 pub struct CollectedData {
@@ -33,6 +45,8 @@ pub struct CollectedData {
     pub births: i32,
     /// 涌现事件（因果验证通过的事件链，来自 emergence 模块）
     pub emergence_events: Vec<crate::emergence::EmergenceEvent>,
+    /// 涌现采集状态（让降级可见）
+    pub emergence_status: EmergenceCollectStatus,
 }
 
 /// Agent 信息
@@ -62,7 +76,8 @@ pub async fn collect(
     let births = collect_births(db_pool, period_start, period_end).await?;
 
     // 涌现事件检测（复用 emergence 模块，best-effort：失败只 warn 不阻断 chronicle）
-    let emergence_events = collect_emergence_events(db_pool, period_start, period_end).await;
+    let (emergence_events, emergence_status) =
+        collect_emergence_events(db_pool, period_start, period_end).await;
 
     Ok(CollectedData {
         period_start,
@@ -77,30 +92,35 @@ pub async fn collect(
         deaths,
         births,
         emergence_events,
+        emergence_status,
     })
 }
 
 /// 采集涌现事件（因果验证通过的事件链，复用 emergence 模块）。
 ///
-/// best-effort：emergence.yaml 缺失或检测失败时返回空 Vec，不阻断 chronicle 生成。
+/// best-effort：emergence.yaml 缺失或检测失败时返回空 Vec + 错误状态，不阻断 chronicle 生成。
+/// 返回的 EmergenceCollectStatus 让下游（generator/前端）可见降级，避免"正常但缺段"的静默丢失。
 /// 这是"涌现事件流入 chronicle"的桥接点——chronicle 把已验证的因果事件作为叙事骨架。
 async fn collect_emergence_events(
     db_pool: &crate::db::DbPool,
     period_start: i64,
     period_end: i64,
-) -> Vec<crate::emergence::EmergenceEvent> {
+) -> (
+    Vec<crate::emergence::EmergenceEvent>,
+    EmergenceCollectStatus,
+) {
     let config = match crate::emergence::load_emergence_config(&crate::paths::get_config_dir()) {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!("[chronicle] 涌现配置加载失败，跳过涌现采集: {}", e);
-            return Vec::new();
+            return (Vec::new(), EmergenceCollectStatus::ConfigError(e.to_string()));
         }
     };
     match crate::emergence::detect_window(db_pool, &config, period_start, period_end, false).await {
-        Ok(result) => result.events,
+        Ok(result) => (result.events, EmergenceCollectStatus::Ok),
         Err(e) => {
             tracing::warn!("[chronicle] 涌现检测失败，跳过: {}", e);
-            Vec::new()
+            (Vec::new(), EmergenceCollectStatus::DetectError(e.to_string()))
         }
     }
 }
