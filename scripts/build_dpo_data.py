@@ -164,8 +164,8 @@ def build_dpo_pairs(
             result_n = attempt_results.get(att_n, "unknown")
             result_n1 = attempt_results.get(att_n1, "unknown")
 
-            # 配对：N rejected → N+1 approved
-            if result_n == "rejected" and result_n1 in ("approved", "chaos_fallback"):
+            # 配对：N rejected → N+1 approved（不含 chaos_fallback——那是代码兜底非 LLM 产出）
+            if result_n == "rejected" and result_n1 == "approved":
                 rejected_trace = attempt_traces[att_n]
                 chosen_trace = attempt_traces[att_n1]
 
