@@ -641,6 +641,24 @@ pub(crate) async fn register_character_handler(
     };
 
     // 5. 构建发送到 Server 的请求。system_prompt 由 Server 统一生成，Agent 不再本地拼装。
+    //    model_id 优先取配置的静态模型名；配置缺失时回退到运行时 LLM 客户端的活跃模型名。
+    let model_id: Option<String> = if let Some(m) = config.llm.model.clone() {
+        Some(m)
+    } else {
+        let guard = state.llm_container.read().await;
+        match guard.as_ref() {
+            Some(container) => {
+                let llm = container.read().await;
+                let name = llm.model_name();
+                if name.is_empty() || name == "unknown" {
+                    None
+                } else {
+                    Some(name)
+                }
+            }
+            None => None,
+        }
+    };
     let server_request = serde_json::json!({
         "device_id": device_id,
         "auth_token": auth_token,
@@ -653,6 +671,7 @@ pub(crate) async fn register_character_handler(
         "values": payload.values,
         "language_style": payload.language_style,
         "goals": payload.goals,
+        "model_id": model_id,
     });
 
     // 6. 转发到 Server

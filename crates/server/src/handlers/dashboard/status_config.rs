@@ -64,6 +64,8 @@ pub struct AgentDetail {
     pub max_age: Option<i64>,
     pub biography: Option<String>,
     pub roles: Vec<String>,
+    /// 角色注册时上报的 LLM 模型 ID（如 glm-4、gpt-4o）
+    pub model_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -307,6 +309,7 @@ pub async fn get_agent_details(
         max_age,
         biography: agent_row.get("biography"),
         roles,
+        model_id: agent_row.get("model_id"),
     }))
 }
 

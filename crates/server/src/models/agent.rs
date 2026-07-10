@@ -41,6 +41,11 @@ pub struct Agent {
     /// 角色出生 tick（秒级时间戳，不可变）
     /// NULL = 不朽（迁移前角色不受寿命约束）
     pub birth_tick: Option<i64>,
+
+    /// 角色注册时上报的 LLM 模型 ID（如 glm-4、gpt-4o）
+    /// NULL = 旧数据 / 未上报（兼容存量）
+    #[serde(default)]
+    pub model_id: Option<String>,
 }
 
 /// Agent状态

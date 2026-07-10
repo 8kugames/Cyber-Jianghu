@@ -535,6 +535,7 @@ pub struct RegistrationResult {
 /// - system_prompt: Agent人设Prompt
 /// - initial_tick_id: 初始Tick ID
 /// - initial_items: 初始物品列表
+/// - model_id: 角色注册时上报的 LLM 模型 ID（可选）
 pub async fn register_agent_transactional(
     pool: &PgPool,
     device_id: Uuid,
@@ -542,6 +543,7 @@ pub async fn register_agent_transactional(
     system_prompt: &str,
     initial_tick_id: i64,
     initial_items: &[(String, String, i32, String)],
+    model_id: Option<&str>,
 ) -> Result<RegistrationResult> {
     debug!("事务性注册Agent: {} (device: {})", name, device_id);
 
@@ -569,8 +571,8 @@ pub async fn register_agent_transactional(
     let birth_tick = initial_tick_id - starting_age_ticks;
     let agent = sqlx::query_as::<Postgres, Agent>(
         r#"
-        INSERT INTO agents (device_id, name, system_prompt, status, birth_tick)
-        VALUES ($1, $2, $3, 'active', $4)
+        INSERT INTO agents (device_id, name, system_prompt, status, birth_tick, model_id)
+        VALUES ($1, $2, $3, 'active', $4, $5)
         RETURNING *
         "#,
     )
@@ -578,6 +580,7 @@ pub async fn register_agent_transactional(
     .bind(name)
     .bind(system_prompt)
     .bind(birth_tick)
+    .bind(model_id)
     .fetch_one(&mut *tx)
     .await
     .context("在事务中创建 Agent 失败")?;
@@ -859,14 +862,14 @@ pub async fn auto_rebirth_agent(
     let mut tx = pool.begin().await.context("开始转世事务失败")?;
 
     // 1. 查询旧 agent（P1-10 F2：必须 device_id 匹配，杜绝跨设备转世）
-    let old_agent: Option<(String, String, Uuid)> = sqlx::query_as(REBIRTH_FETCH_OLD_AGENT_SQL)
+    let old_agent: Option<(String, String, Uuid, Option<String>)> = sqlx::query_as(REBIRTH_FETCH_OLD_AGENT_SQL)
     .bind(old_agent_id)
     .bind(device_id)
     .fetch_optional(&mut *tx)
     .await
     .context("查询旧 Agent 失败")?;
 
-    let (name, system_prompt, fetched_device_id) = match old_agent {
+    let (name, system_prompt, fetched_device_id, inherited_model_id) = match old_agent {
         Some(a) => a,
         None => anyhow::bail!(
             "Agent {} 不存在、不属于设备 {} 或非 dead 状态，无法转世",
@@ -906,11 +909,11 @@ pub async fn auto_rebirth_agent(
     //    state 落后世界 N tick，导致 birth_tick 偏小、compute_age_years 异常。
     let (state_tick, birth_tick) = compute_rebirth_ticks(world_tick, starting_age_ticks);
 
-    // 4. INSERT 新 agent（新 UUID 由 DB 自动生成）
+    // 4. INSERT 新 agent（新 UUID 由 DB 自动生成），继承旧角色的 model_id
     let new_agent_id: (Uuid,) = sqlx::query_as(
         r#"
-        INSERT INTO agents (device_id, name, system_prompt, status, birth_tick)
-        VALUES ($1, $2, $3, 'active', $4)
+        INSERT INTO agents (device_id, name, system_prompt, status, birth_tick, model_id)
+        VALUES ($1, $2, $3, 'active', $4, $5)
         RETURNING agent_id
         "#,
     )
@@ -918,6 +921,7 @@ pub async fn auto_rebirth_agent(
     .bind(&name)
     .bind(&system_prompt)
     .bind(birth_tick)
+    .bind(&inherited_model_id)
     .fetch_one(&mut *tx)
     .await
     .context("创建新 Agent 失败")?;
@@ -1133,7 +1137,7 @@ pub fn ensure_old_agent_id_not_nil(old_agent_id: Uuid) -> anyhow::Result<()> {
 /// - F2：`AND device_id = $2` 强制旧 agent 必须属于 caller 的设备，杜绝跨设备转世。
 /// - F3：fetch 不带 retired_at 过滤，但配合下面的 UPDATE 守卫实现幂等性。
 pub(crate) const REBIRTH_FETCH_OLD_AGENT_SQL: &str = r#"
-SELECT name, system_prompt, device_id
+SELECT name, system_prompt, device_id, model_id
 FROM agents
 WHERE agent_id = $1
   AND device_id = $2
