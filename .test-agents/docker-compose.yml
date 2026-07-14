@@ -84,19 +84,6 @@ services:
       - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
       - ../crates/agent/static/panel:/app/static/panel:ro
 
-  agent-7:
-    <<: *agent-common
-    container_name: agent-7-siliconflow
-    environment:
-      <<: *agent-env-common
-    ports:
-      - "23347:23340"
-    volumes:
-      - ./agent-7/config:/app/config
-      - ./agent-7/data:/app/data
-      - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
-      - ../crates/agent/static/panel:/app/static/panel:ro
-
   agent-ollama:
     <<: *agent-common
     container_name: agent-ollama
