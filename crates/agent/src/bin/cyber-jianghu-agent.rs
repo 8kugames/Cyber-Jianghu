@@ -1117,6 +1117,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 narrative_rules: String::new(),
                 last_updated: String::new(),
                 rules_json: None,
+                known_item_ids: Vec::new(),
             }),
         )
         .with_http_api_state(api_state.clone())

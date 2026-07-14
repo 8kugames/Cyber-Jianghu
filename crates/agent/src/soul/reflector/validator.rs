@@ -310,6 +310,77 @@ impl ReflectorSoul {
             }
         }
 
+        // === 存在性校验（维度A）===
+        // 物品存在性：拦截 LLM 幻觉产生的不存在 item_id
+        // 人员存在性：取-agent 的 source_id / 予-agent 的 recipient_id 必须在附近
+        // 注意：不做物品可见性（背包/地面），因 subsequent_intents 链内 WorldState
+        // 快照不更新，可见性校验会误拦"取后即用"等合法连续动作。
+        let action_type = request.intent.action_type.as_str();
+        let action_data = request.intent.action_data.as_ref();
+        let item_actions = ["用", "吃", "喝", "取", "予"];
+
+        // 块1：物品存在性（item_id ∈ known_item_ids，空集跳过保证向后兼容）
+        if item_actions.contains(&action_type)
+            && let Some(item_id) = action_data.and_then(|d| d.get("item_id")).and_then(|v| v.as_str())
+        {
+            let known = self.rules.read().await.known_item_ids.clone();
+            if !known.is_empty() && !known.iter().any(|k| k == item_id) {
+                let preview = known.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+                return Err(format!(
+                    "物品「{}」不存在于世界物品定义中。合法物品: [{}]",
+                    item_id, preview
+                ));
+            }
+        }
+
+        // 块2：来源人/接收人存在性（resolve_agent_id 前缀匹配 entities）
+        let nearby_ids: Vec<uuid::Uuid> = world_state.entities.iter().map(|e| e.id).collect();
+        let nearby_names: Vec<String> = world_state
+            .entities
+            .iter()
+            .map(|e| format!("{} ({})", e.name, cyber_jianghu_protocol::short_id(&e.id)))
+            .collect::<Vec<_>>();
+
+        // 取-agent：source_id 必须在附近
+        if action_type == "取" {
+            let source_type = action_data.and_then(|d| d.get("source_type")).and_then(|v| v.as_str());
+            if source_type == Some("agent") {
+                let source_id = action_data.and_then(|d| d.get("source_id")).and_then(|v| v.as_str());
+                match source_id {
+                    None => {
+                        return Err("取(从角色获取)必须指定 source_id".to_string());
+                    }
+                    Some(id) => {
+                        if let Err(e) = cyber_jianghu_protocol::resolve_agent_id(id, &nearby_ids) {
+                            return Err(Self::format_target_rejection(id, e, &nearby_names, "来源角色"));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 予-agent：recipient_id 必须在附近
+        if action_type == "予" {
+            let recipient_type = action_data
+                .and_then(|d| d.get("recipient_type"))
+                .and_then(|v| v.as_str());
+            if recipient_type == Some("agent") {
+                let recipient_id = action_data
+                    .and_then(|d| d.get("recipient_id"))
+                    .and_then(|v| v.as_str());
+                match recipient_id {
+                    None => {
+                        return Err("予(给角色)必须指定 recipient_id".to_string());
+                    }
+                    Some(id) => {
+                        if let Err(e) = cyber_jianghu_protocol::resolve_agent_id(id, &nearby_ids) {
+                            return Err(Self::format_target_rejection(id, e, &nearby_names, "目标角色"));
+                        }
+                    }
+                }
+            }
+        }
+
         let (available_item_ids, reachable_node_ids) = extract_ids_from_world_state(world_state);
         let context = RuleValidationContext {
             intent: request.intent.clone(),
@@ -327,6 +398,39 @@ impl ReflectorSoul {
             Err(e) => {
                 tracing::warn!("RuleEngine error, rejecting: {}", e);
                 Err(format!("RuleEngine 内部错误: {}", e))
+            }
+        }
+    }
+
+    /// 格式化目标存在性校验的拒绝消息（复用现有 target_agent_id 校验的三分支格式）
+    fn format_target_rejection(
+        target_id: &str,
+        err: cyber_jianghu_protocol::ResolveAgentIdError,
+        nearby_names: &[String],
+        label: &str,
+    ) -> String {
+        use cyber_jianghu_protocol::ResolveAgentIdError;
+        match err {
+            ResolveAgentIdError::Ambiguous { matched, .. } => {
+                format!(
+                    "{} ID '{}' 匹配到多个角色，请使用更长的 ID。匹配结果: [{}]。当前附近的角色: [{}]",
+                    label,
+                    target_id,
+                    matched
+                        .iter()
+                        .map(cyber_jianghu_protocol::short_id)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    nearby_names.join(", ")
+                )
+            }
+            _ => {
+                format!(
+                    "{} {} 不在附近实体中。当前附近的角色: [{}]",
+                    label,
+                    target_id,
+                    nearby_names.join(", ")
+                )
             }
         }
     }
@@ -711,6 +815,7 @@ mod tests {
             narrative_rules: "测试叙事规则".to_string(),
             last_updated: "2026-01-01T00:00:00Z".to_string(),
             rules_json: None,
+            known_item_ids: Vec::new(),
         }
     }
 

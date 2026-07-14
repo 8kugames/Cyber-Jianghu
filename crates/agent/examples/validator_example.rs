@@ -62,6 +62,7 @@ async fn main() -> anyhow::Result<()> {
         narrative_rules: "示例叙事规则".to_string(),
         last_updated: "2026-01-01T00:00:00Z".to_string(),
         rules_json: None,
+        known_item_ids: Vec::new(),
     };
     println!("世界观规则版本: {}", world_rules.version);
     println!("   时代: {}", world_rules.era.name);

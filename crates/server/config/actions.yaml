@@ -42,6 +42,8 @@ data:
         - field: quantity
           validation_type: min_value
           min_value: 1
+        - field: item_id
+          validation_type: item_exists
     requirements:
       - requirement_type: attribute
         attribute: stamina
@@ -71,6 +73,8 @@ data:
         - field: quantity
           validation_type: min_value
           min_value: 1
+        - field: item_id
+          validation_type: item_exists
     requirements:
       - requirement_type: attribute
         attribute: stamina
@@ -92,6 +96,9 @@ data:
     validation:
       required_fields:
         - item_id
+      field_validations:
+        - field: item_id
+          validation_type: item_exists
     requirements:
       - requirement_type: attribute
         attribute: stamina
