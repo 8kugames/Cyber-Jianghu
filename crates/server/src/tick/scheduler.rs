@@ -35,7 +35,7 @@ use super::event_manager::SharedEventManager;
 use crate::game_data::loaders::load_actions;
 use crate::paths::get_config_dir;
 use crate::websocket::broadcast_config_update;
-use cyber_jianghu_protocol::ServerMessage;
+use cyber_jianghu_protocol::{ConfigType, ServerMessage};
 
 /// Tick调度器
 ///
@@ -235,7 +235,7 @@ impl TickScheduler {
 
                     // 广播给所有在线 Agent
                     let config_update = ServerMessage::ConfigUpdate {
-                        config_type: "actions".to_string(),
+                        config_type: ConfigType::Actions,
                         update_type: "full".to_string(),
                         version,
                         content: serde_json::to_value(available_actions)?,
@@ -300,7 +300,7 @@ impl TickScheduler {
 
                     // 广播给所有在线 Agent
                     let config_update = ServerMessage::ConfigUpdate {
-                        config_type: "game_rules".to_string(),
+                        config_type: ConfigType::GameRules,
                         update_type: "full".to_string(),
                         version,
                         content: serde_json::to_value(&self.game_data_cache.get().game_rules)?,
@@ -362,7 +362,7 @@ impl TickScheduler {
 
                 // 广播给所有在线 Agent
                 let config_update = ServerMessage::ConfigUpdate {
-                    config_type: "world_building_rules".to_string(),
+                    config_type: ConfigType::WorldBuildingRules,
                     update_type: "full".to_string(),
                     version,
                     content: serde_json::to_value(&world_building_rules)?,
@@ -475,7 +475,7 @@ impl TickScheduler {
             let guard = cache.read().await;
             if let Some(ref pt_cache) = *guard {
                 let config_update = ServerMessage::ConfigUpdate {
-                    config_type: "prompt_templates".to_string(),
+                    config_type: ConfigType::PromptTemplates,
                     update_type: "full".to_string(),
                     version: pt_cache.version.clone(),
                     content: pt_cache.json_value.clone(),
@@ -548,7 +548,7 @@ impl TickScheduler {
 
                     // 广播给所有在线 Agent
                     let config_update = ServerMessage::ConfigUpdate {
-                        config_type: "skills".to_string(),
+                        config_type: ConfigType::Skills,
                         update_type: "full".to_string(),
                         version,
                         content: serde_json::to_value(skill_contents).unwrap_or_default(),
@@ -630,7 +630,7 @@ impl TickScheduler {
         };
 
         let config_update = ServerMessage::ConfigUpdate {
-            config_type: "narrative_config".to_string(),
+            config_type: ConfigType::NarrativeConfig,
             update_type: "full".to_string(),
             version: "1.0".to_string(),
             content: serde_json::to_value(&nc).unwrap_or_default(),

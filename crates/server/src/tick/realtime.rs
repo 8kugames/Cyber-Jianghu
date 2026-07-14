@@ -290,7 +290,7 @@ impl IntentWorker {
 
             if !skill_contents.is_empty() {
                 let config_update = cyber_jianghu_protocol::ServerMessage::ConfigUpdate {
-                    config_type: "skills".to_string(),
+                    config_type: cyber_jianghu_protocol::ConfigType::Skills,
                     update_type: "incremental".to_string(),
                     version: "1.0.0".to_string(),
                     content: serde_json::to_value(&skill_contents).unwrap_or_default(),

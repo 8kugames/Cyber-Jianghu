@@ -408,8 +408,8 @@ impl DownstreamMessage {
                 version: _,
                 content,
                 ..
-            } => match config_type.as_str() {
-                "game_rules" => {
+            } => match config_type {
+                cyber_jianghu_protocol::ConfigType::GameRules => {
                     if let Ok(game_rules) =
                         serde_json::from_value::<cyber_jianghu_protocol::GameRules>(content.clone())
                     {
@@ -422,7 +422,7 @@ impl DownstreamMessage {
                         None
                     }
                 }
-                "world_building_rules" => {
+                cyber_jianghu_protocol::ConfigType::WorldBuildingRules => {
                     if let Ok(rules) = serde_json::from_value::<
                         cyber_jianghu_protocol::WorldBuildingRules,
                     >(content.clone())
@@ -435,7 +435,11 @@ impl DownstreamMessage {
                         None
                     }
                 }
-                _ => None,
+                cyber_jianghu_protocol::ConfigType::Skills
+                | cyber_jianghu_protocol::ConfigType::Actions
+                | cyber_jianghu_protocol::ConfigType::PromptTemplates
+                | cyber_jianghu_protocol::ConfigType::PersonaEventRules
+                | cyber_jianghu_protocol::ConfigType::NarrativeConfig => None,
             },
             ServerMessage::AgentDied {
                 agent_id,
@@ -914,7 +918,7 @@ mod tests {
     #[test]
     fn test_from_server_message_game_rules_update() {
         let server_msg = ServerMessage::ConfigUpdate {
-            config_type: "game_rules".to_string(),
+            config_type: cyber_jianghu_protocol::ConfigType::GameRules,
             update_type: "full".to_string(),
             version: "0.0.6".to_string(),
             content: serde_json::json!({

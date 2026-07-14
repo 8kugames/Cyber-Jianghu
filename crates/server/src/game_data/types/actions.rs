@@ -272,9 +272,8 @@ impl FieldValidation {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ActionRequirement {
-    /// 需求类型（如 "attribute", "item", "location" 等）
-    /// 添加新类型无需修改此结构，只需在配置和处理器中支持
-    pub requirement_type: String,
+    /// 需求类型
+    pub requirement_type: cyber_jianghu_protocol::RequirementType,
 
     /// 目标对象（如 "target", "self"）
     #[serde(default)]
@@ -313,9 +312,8 @@ pub struct ActionRequirement {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ActionEffect {
-    /// 效果类型（如 "attribute_change", "add_item", "remove_item" 等）
-    /// 添加新类型无需修改此结构，只需在配置和处理器中支持
-    pub effect_type: String,
+    /// 效果类型
+    pub effect_type: cyber_jianghu_protocol::EffectType,
 
     /// 目标对象（如 "target", "self"）
     #[serde(default)]
@@ -336,14 +334,7 @@ pub struct ActionEffect {
 // 辅助常量（数据驱动扩展预留）
 // ============================================================================
 
-/// 需求类型常量
-#[allow(dead_code)]
 impl ActionRequirement {
-    pub const REQUIREMENT_TYPE_ATTRIBUTE: &str = "attribute";
-    pub const REQUIREMENT_TYPE_ITEM: &str = "item";
-    pub const REQUIREMENT_TYPE_LOCATION: &str = "location";
-    pub const REQUIREMENT_TYPE_SKILL: &str = "skill";
-
     /// 获取字符串参数
     pub fn get_str(&self, key: &str) -> Option<&str> {
         self.params.get(key).and_then(|v| v.as_str())
@@ -387,15 +378,7 @@ impl ActionRequirement {
     }
 }
 
-/// 效果类型常量
-#[allow(dead_code)]
 impl ActionEffect {
-    pub const EFFECT_TYPE_ATTRIBUTE_CHANGE: &str = "attribute_change";
-    pub const EFFECT_TYPE_ATTRIBUTE_MAX_CHANGE: &str = "attribute_max_change";
-    pub const EFFECT_TYPE_ADD_ITEM: &str = "add_item";
-    pub const EFFECT_TYPE_REMOVE_ITEM: &str = "remove_item";
-    pub const EFFECT_TYPE_TELEPORT: &str = "teleport";
-
     /// 获取字符串参数
     pub fn get_str(&self, key: &str) -> Option<&str> {
         self.params.get(key).and_then(|v| v.as_str())

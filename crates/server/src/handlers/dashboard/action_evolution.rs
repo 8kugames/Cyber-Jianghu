@@ -406,7 +406,7 @@ pub async fn admin_action_on_group(
             axum::http::StatusCode::INTERNAL_SERVER_ERROR
         })?;
     let config_update = cyber_jianghu_protocol::messages::ServerMessage::ConfigUpdate {
-        config_type: "actions".to_string(),
+        config_type: cyber_jianghu_protocol::ConfigType::Actions,
         update_type: "full".to_string(),
         version: chrono::Utc::now().to_rfc3339(),
         content: serde_json::json!({"yaml": actions_content}),

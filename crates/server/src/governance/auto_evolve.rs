@@ -88,10 +88,8 @@ fn build_requirements(requirement_refs: &[String]) -> Vec<serde_yaml::Value> {
     reqs.push(serde_yaml::to_value(&default_req).unwrap_or(serde_yaml::Value::Null));
 
     for ref_ in requirement_refs {
-        let (req_type, target) = if ref_.starts_with("tool.") {
-            ("has_item", ref_.as_str())
-        } else if ref_.starts_with("skill.") {
-            ("skill", ref_.as_str())
+        let (req_type, target) = if ref_.starts_with("tool.") || ref_.starts_with("skill.") {
+            ("item", ref_.as_str())
         } else {
             ("attribute", ref_.as_str())
         };
@@ -189,7 +187,7 @@ mod tests {
         let (_, entry) = generate_action_config(&evidence, &verdict).unwrap();
         let reqs = entry["requirements"].as_sequence().unwrap();
         assert_eq!(reqs.len(), 2);
-        assert_eq!(reqs[1]["requirement_type"], "has_item");
+        assert_eq!(reqs[1]["requirement_type"], "item");
         assert_eq!(reqs[1]["target"], "tool.sword");
     }
 

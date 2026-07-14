@@ -309,14 +309,25 @@ impl Default for OocRisk {
 // 动作需求与效果 — 通用数据驱动类型
 // ============================================================================
 
+/// 动作需求类型（Server → Agent 跨进程契约）
+///
+/// 真闭集：值域由 server 端 `match req.requirement_type { ... }` 穷尽匹配（2 分支）。
+/// 新增变体必须同时修改本枚举、server 验证器/执行器 dispatch、actions.yaml 配置。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RequirementType {
+    Attribute,
+    Item,
+}
+
 /// 动作需求（通用，数据驱动）
 ///
 /// 从 actions.yaml requirements 字段直传。
 /// 通用 key-value 结构，支持任意 requirement_type 扩展。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionRequirementInfo {
-    /// 需求类型（"attribute" | "item" | "location" | "skill" 等，可扩展）
-    pub requirement_type: String,
+    /// 需求类型
+    pub requirement_type: RequirementType,
 
     /// 目标（"self" | "target"，默认 "self"）
     #[serde(default)]
@@ -327,14 +338,26 @@ pub struct ActionRequirementInfo {
     pub params: HashMap<String, serde_json::Value>,
 }
 
+/// 动作效果类型（Server → Agent 跨进程契约）
+///
+/// 真闭集：值域由 server 端 `match effect.effect_type { ... }` 穷尽匹配（3 分支）。
+/// 新增变体必须同时修改本枚举、server 执行器 dispatch、actions.yaml 配置。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectType {
+    AttributeChange,
+    AttributeMaxChange,
+    AddItem,
+}
+
 /// 动作效果（通用，数据驱动）
 ///
 /// 从 actions.yaml effects 字段直传。
 /// 通用 key-value 结构，支持任意 effect_type 扩展。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionEffectInfo {
-    /// 效果类型（"attribute_change" | "add_item" | "remove_item" 等，可扩展）
-    pub effect_type: String,
+    /// 效果类型
+    pub effect_type: EffectType,
 
     /// 目标（"self" | "target"，默认 "self"）
     #[serde(default)]
