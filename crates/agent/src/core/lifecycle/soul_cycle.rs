@@ -453,11 +453,13 @@ used_chaos_fallback = true;
                         std::iter::once(serde_json::json!({
                             "action_type": pipeline.action_type,
                             "action_data": pipeline.action_data,
+                            "intent_id": pipeline.intent_id,
                         }))
                         .chain(pipeline.subsequent_intents.iter().map(|si| {
                             serde_json::json!({
                                 "action_type": si.action_type,
                                 "action_data": si.action_data,
+                                "intent_id": si.intent_id,
                             })
                         }))
                         .collect();

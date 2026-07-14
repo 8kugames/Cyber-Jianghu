@@ -221,7 +221,7 @@ function showChrModal(c) {
     <div class="detail-section">
         <h3>基本统计</h3>
         <div class="detail-grid">
-            <div class="detail-item"><div class="label">周期</div><div class="value">${escapeHtml(formatChronicleRange(c.formatted_start_date, c.formatted_end_date))}</div></div>
+            <div class="detail-item"><div class="label">周期</div><div class="value">${escapeHtml(formatChronicleRange(c.formatted_start_date, c.formatted_end_date))}<div class="chr-tick-range">Tick ${escapeHtml(c.period_start)} – ${escapeHtml(c.period_end)}</div></div></div>
             <div class="detail-item"><div class="label">江湖儿女</div><div class="value">${escapeHtml(c.agent_count)}</div></div>
             <div class="detail-item"><div class="label">行动次数</div><div class="value">${escapeHtml(c.actions_count)}</div></div>
             <div class="detail-item"><div class="label">陨落人数</div><div class="value">${escapeHtml(c.deaths)}</div></div>
@@ -323,7 +323,15 @@ let expFiltersLoaded = false;
 let experiencesLoaded = false;
 
 async function ensureExperiencesLoaded() {
+    await Promise.allSettled([loadDisplayMap(), getLayerDisplay()]); // 展示名 + 天魂层名映射必须在渲染前就绪
     if (!expFiltersLoaded) await initExpFilters();
+    // URL 参数 ?agent=xxx 自动预选角色筛选（来自详情页跳转）
+    const urlAgent = new URLSearchParams(location.search).get("agent");
+    if (urlAgent && !experiencesLoaded) {
+        await new Promise((r) => setTimeout(r, 100)); // 等筛选下拉填充
+        const sel = document.getElementById("filter-agent");
+        if (sel) sel.value = urlAgent;
+    }
     if (!experiencesLoaded) await loadExperiences();
     if (!Object.keys(locationNames).length) await initLocationMapping();
 }
@@ -354,10 +362,10 @@ async function initExpFilters() {
 async function loadExperiences() {
     const loading = document.getElementById("exp-loading");
     const empty = document.getElementById("exp-empty");
-    const tbody = document.getElementById("experiences-tbody");
+    const cardsEl = document.getElementById("experiences-cards");
     loading.style.display = "flex";
     empty.style.display = "none";
-    tbody.innerHTML = "";
+    cardsEl.innerHTML = "";
 
     const params = new URLSearchParams();
     params.set("page", expPage);
@@ -381,35 +389,34 @@ async function loadExperiences() {
         experiences = data.entries || [];
         expTotal = data.total || 0;
         experiencesLoaded = true;
-        renderExpTable();
+        renderExpCards();
         updateExpPagination();
     } catch (e) {
         if (e.name === "ApiError") {
-            tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><p>${e.message === "UNAUTHORIZED" ? "请先登录" : "请求失败"}</p></td></tr>`;
+            cardsEl.innerHTML = `<div class="empty-state"><p>${e.message === "UNAUTHORIZED" ? "请先登录" : "请求失败"}</p></div>`;
         } else {
-            tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><p>加载失败: ${escapeHtml(e.message)}</p></td></tr>`;
+            cardsEl.innerHTML = `<div class="empty-state"><p>加载失败: ${escapeHtml(e.message)}</p></div>`;
         }
     } finally {
         loading.style.display = "none";
     }
 }
 
-function renderExpTable() {
+function renderExpCards() {
     const empty = document.getElementById("exp-empty");
-    const tbody = document.getElementById("experiences-tbody");
-    const tableWrap = tbody.closest(".exp-table-wrap");
+    const cardsEl = document.getElementById("experiences-cards");
     if (!experiences.length) {
         empty.style.display = "flex";
-        if (tableWrap) tableWrap.classList.add("hidden");
+        cardsEl.innerHTML = "";
         return;
     }
     empty.style.display = "none";
-    if (tableWrap) tableWrap.classList.remove("hidden");
 
-    tbody.innerHTML = experiences
+    cardsEl.innerHTML = experiences
         .map((e) => {
             const metadata = e.soul_cycle_metadata || {};
             const cycles = metadata.cycles || [];
+            const executionResults = metadata.execution_results || null;
             const isSuccess = e.result === "success";
             const resultBadge = `<span class="result-badge ${isSuccess ? "result-success" : "result-failed"}">${isSuccess ? "成功" : "失败"}</span>`;
 
@@ -420,33 +427,57 @@ function renderExpTable() {
                       })
                     : "-");
 
-            const renhunHtml = renderRenhunCell(cycles, e);
+            // 三魂内容（复用现有渲染逻辑）
+            const renhunHtml = renderRenhunCell(cycles, e, executionResults);
             const dihunHtml = renderDihunCell(cycles);
             const tianhunHtml = renderTianhunCell(cycles, e);
-
-            // 模型 ID：取该 tick 第一次 attempt 使用的模型
             const modelId = (cycles[0] && cycles[0].model_id) || "-";
 
+            // 动作摘要行（首条 pipeline action 或主 intent）
+            let actionSummary = "-";
+            if (cycles.length > 0) {
+                const fi = cycles[0].final_intent;
+                if (fi) {
+                    if (fi.pipeline_actions && fi.pipeline_actions.length > 0) {
+                        const pa = fi.pipeline_actions[0];
+                        actionSummary = renderActionText(pa.action_type, parseActionData(pa.action_data));
+                    } else if (fi.action_type) {
+                        actionSummary = renderActionText(fi.action_type, parseActionData(fi.action_data));
+                    }
+                }
+            }
+            if (actionSummary === "-" && e.action_type) {
+                actionSummary = renderActionText(e.action_type, parseActionData(e.action_data));
+            }
+
             return (
-                `<tr>` +
-                `<td><span class="tick-badge">T${escapeHtml(e.tick_id || "-")}</span></td>` +
-                `<td>${escapeHtml(e.agent_name || "-")}</td>` +
-                `<td>${escapeHtml(getLocationName(e.location || "-"))}</td>` +
-                `<td><span class="exp-action-badge">${escapeHtml(e.action_type_display || e.action_type || "-")}</span></td>` +
-                `<td class="soul-cell"><div class="soul-cell-inner">${renhunHtml}</div></td>` +
-                `<td class="soul-cell"><div class="soul-cell-inner">${dihunHtml}</div></td>` +
-                `<td class="soul-cell"><div class="soul-cell-inner">${tianhunHtml}</div></td>` +
-                `<td>${resultBadge}</td>` +
-                `<td class="mono-text">${escapeHtml(modelId)}</td>` +
-                `<td class="mono-text">${escapeHtml(timeStr)}</td>` +
-                `</tr>`
+                `<div class="exp-card">` +
+                // 头部：Tick · 时间 · 角色 · 位置 · 结果
+                `<div class="exp-card-header">` +
+                `<span class="tick-badge">T${escapeHtml(e.tick_id || "-")}</span>` +
+                `<span class="exp-card-time">${escapeHtml(timeStr)}</span>` +
+                `<span class="exp-card-agent">${escapeHtml(e.agent_name || "-")}</span>` +
+                `<span class="exp-card-loc">@ ${escapeHtml(getLocationName(e.location || "-"))}</span>` +
+                resultBadge +
+                `</div>` +
+                // 动作摘要行
+                `<div class="exp-card-action"><span class="exp-action-badge">${escapeHtml(e.action_type_display || e.action_type || "-")}</span> ${actionSummary}</div>` +
+                // 三魂区块
+                `<div class="exp-card-body">` +
+                (renhunHtml !== "-" ? `<div class="exp-soul-block"><span class="exp-soul-label">人魂</span><div class="exp-soul-content">${renhunHtml}</div></div>` : "") +
+                (dihunHtml !== "-" ? `<div class="exp-soul-block"><span class="exp-soul-label">地魂</span><div class="exp-soul-content">${dihunHtml}</div></div>` : "") +
+                (tianhunHtml !== "-" ? `<div class="exp-soul-block"><span class="exp-soul-label">天魂</span><div class="exp-soul-content">${tianhunHtml}</div></div>` : "") +
+                `</div>` +
+                // 底部次要信息：模型 ID
+                `<div class="exp-card-footer"><span class="mono-text">模型: ${escapeHtml(modelId)}</span></div>` +
+                `</div>`
             );
         })
         .join("");
 }
 
 // 渲染人魂单元格（叙事 + 推理 + JSON action）
-function renderRenhunCell(cycles, entry) {
+function renderRenhunCell(cycles, entry, executionResults) {
     let html = "";
     if (!cycles || cycles.length === 0) {
         if (!entry.thought_log) return "-";
@@ -462,15 +493,25 @@ function renderRenhunCell(cycles, entry) {
         const fi = cycle.final_intent;
         if (fi) {
             if (fi.pipeline_actions && fi.pipeline_actions.length > 0) {
-                fi.pipeline_actions.forEach((item) => {
+                fi.pipeline_actions.forEach((item, pidx) => {
                     const aType = item.action_type || "";
                     const aData = parseActionData(item.action_data);
                     html += `<div class="exp-meta-text" style="color:var(--text-subtle);">${renderSingleAction(aType, aData)}</div>`;
+                    if (executionResults && executionResults[String(pidx)]) {
+                        const er = executionResults[String(pidx)];
+                        const ok = er.success;
+                        html += `<div style="margin-top:2px;"><span class="result-badge ${ok ? "result-success" : "result-failed"}" style="font-size:11px;">${ok ? "成功" : (er.error || "失败")}</span></div>`;
+                    }
                 });
             } else if (fi.action_type) {
                 const aType = fi.action_type || "";
                 const aData = parseActionData(fi.action_data);
                 html += `<div class="exp-meta-text" style="color:var(--text-subtle);">${renderSingleAction(aType, aData)}</div>`;
+                if (executionResults && executionResults["0"]) {
+                    const er = executionResults["0"];
+                    const ok = er.success;
+                    html += `<div style="margin-top:2px;"><span class="result-badge ${ok ? "result-success" : "result-failed"}" style="font-size:11px;">${ok ? "成功" : (er.error || "失败")}</span></div>`;
+                }
             }
         }
         // 执行结果（仅已通过天魂审查的 cycle）
@@ -499,7 +540,7 @@ function renderTianhunCell(cycles, entry) {
             html += `<div class="soul-layers">`;
             th.layers.forEach((l) => {
                 const passed = l.passed;
-                const name = LAYER_NAMES[l.layer] || l.layer;
+                const name = (_layerDisplayCache || LAYER_NAMES)[l.layer] || l.layer;
                 html += `<span class="soul-layer-tag ${passed ? "passed" : "failed"}">${escapeHtml(name)}${passed ? "" : ": " + escapeHtml(l.detail || "")}</span>`;
             });
             html += `</div>`;
@@ -520,36 +561,9 @@ function parseActionData(raw) {
     return {};
 }
 
-// 渲染单个 action 的地魂描述文本
+// 渲染单个 action 的描述文本（统一渲染器在 utils.js: renderActionText）
 function renderSingleAction(aType, aData) {
-    const content = aData.content || "";
-    if (isSpeakAtype(aType, aData) && content)
-        return `向在场众人说话："${escapeHtml(content)}"`;
-    if (isWhisperAtype(aType, aData) && content) {
-        const name = resolveTargetName(aData.target_agent_id);
-        return `向${escapeHtml(name)}密语："${escapeHtml(content)}"`;
-    }
-    if (isShoutAtype(aType, aData) && content)
-        return `大喊："${escapeHtml(content)}"`;
-    let text = escapeHtml(getActionTypeDisplay(aType));
-    // 选取关键字段展示（非全量 JSON dump）
-    const keys = Object.keys(aData).filter(k => k !== "content" && k !== "target_agent_id");
-    if (content) text += ` "${escapeHtml(content)}"`;
-    if (aData.target_agent_id) {
-        const name = resolveTargetName(aData.target_agent_id);
-        text += ` → ${escapeHtml(name)}`;
-    }
-    if (aData.item_id) text += ` ${escapeHtml(aData.item_id)}`;
-    if (aData.quantity) text += ` x${aData.quantity}`;
-    if (aData.target_location) text += ` → ${escapeHtml(aData.target_location)}`;
-    // 其他未知字段兜底
-    const remaining = keys.filter(k => !["item_id","quantity","target_location"].includes(k));
-    if (remaining.length > 0) {
-        const picked = {};
-        remaining.forEach(k => picked[k] = aData[k]);
-        text += ` ${escapeHtml(JSON.stringify(picked))}`;
-    }
-    return text;
+    return renderActionText(aType, aData);
 }
 
 // 渲染地魂单元格（地魂 tool calling 日志）
@@ -825,9 +839,9 @@ function toggleSummaryExpand(btn) {
 // ============================================================
 
 function formatChronicleRange(startDate, endDate) {
-    const prefix = startDate.match(/^.+?月/);
-    if (prefix) return startDate + '至' + endDate.slice(prefix[0].length);
-    return startDate + '至' + endDate;
+    // 服务端已保证两端均为完整的"x年x月x日"，直接拼接。
+    // 跨年/跨月时两端都完整显示，符合"x年x月x日 至 x年x月x日"表述。
+    return startDate + ' 至 ' + endDate;
 }
 
 // ============================================================

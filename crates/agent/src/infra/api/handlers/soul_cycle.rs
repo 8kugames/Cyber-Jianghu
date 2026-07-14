@@ -66,6 +66,9 @@ struct SoulCycleAttemptEntry {
     /// 该次尝试使用的 LLM 模型 ID（用于经历日志展示）
     #[serde(skip_serializing_if = "Option::is_none")]
     model_id: Option<String>,
+    /// Server 执行结果回填（数据驱动，key=pipe_seq）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    execution_results: Option<serde_json::Value>,
 }
 
 /// 即时意图记录
@@ -166,6 +169,10 @@ fn record_to_attempt_entry(
             }
         }),
         model_id: r.model_id,
+        execution_results: r
+            .server_execution_results
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok()),
     }
 }
 

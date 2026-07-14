@@ -755,7 +755,15 @@ impl super::Agent {
                         }
                     }
 
-                    if let Err(e) = self.client.send_intent(&final_intent).await {
+                    // 三魂元数据随 intent 一次性提交（消除独立 SoulCycleReport 的丢失风险）
+                    let soul_cycle_metadata = self
+                        .build_soul_cycle_metadata(final_intent.tick_id)
+                        .await;
+                    if let Err(e) = self
+                        .client
+                        .send_intent(&final_intent, soul_cycle_metadata)
+                        .await
+                    {
                             error!("Failed to send intent: {}", e);
                             if let Err(reconnect_err) = self.reconnect().await {
                                 error!("Reconnect failed: {}", reconnect_err);
@@ -822,6 +830,56 @@ impl super::Agent {
                                         "ExecutionResult: tick={}, {}/{} success",
                                         results[0].tick_id, success_count, total
                                     );
+
+                                    // Phase 2: 执行结果回填 SoulCycleRecord
+                                    if let Some(recorder) = self.soul_recorder().await {
+                                        use std::collections::HashMap;
+                                        let tick_id = results[0].tick_id;
+                                        if let Ok(records) = recorder.get_by_tick(tick_id).await {
+                                            let mut attempt_results: HashMap<(i64, i32), serde_json::Map<String, serde_json::Value>> = HashMap::new();
+                                            for result in &results {
+                                                let rid = result.intent_id.to_string();
+                                                for record in &records {
+                                                    let mut found_pipe_seq: Option<usize> = None;
+                                                    // 检查主 Intent 匹配 (pipe_seq=0)
+                                                    if let Some(ref fid) = record.final_intent_id {
+                                                        if fid == &rid {
+                                                            found_pipe_seq = Some(0);
+                                                        }
+                                                    }
+                                                    // 检查 pipeline 子 Intent 匹配 (final_pipeline_json 现在含 intent_id)
+                                                    if found_pipe_seq.is_none() {
+                                                        if let Some(ref json) = record.final_pipeline_json {
+                                                            if let Ok(pipeline) = serde_json::from_str::<Vec<serde_json::Value>>(json) {
+                                                                for (i, entry) in pipeline.iter().enumerate() {
+                                                                    if entry.get("intent_id").and_then(|v| v.as_str()) == Some(&rid) {
+                                                                        found_pipe_seq = Some(i);
+                                                                        break;
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    if let Some(pipe_seq) = found_pipe_seq {
+                                                        let exec_map = attempt_results.entry((tick_id, record.attempt)).or_insert_with(serde_json::Map::new);
+                                                        exec_map.insert(
+                                                            pipe_seq.to_string(),
+                                                            serde_json::json!({
+                                                                "success": result.success,
+                                                                "error": result.error,
+                                                                "state_change_summary": result.state_change_summary,
+                                                            }),
+                                                        );
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            for ((tid, att), exec_map) in &attempt_results {
+                                                let json = serde_json::to_string(exec_map).unwrap_or_default();
+                                                recorder.backfill_server_result(*tid, *att, &json).await;
+                                            }
+                                        }
+                                    }
 
                                     // 建立 intent_id → (action_type, action_data) 映射表
                                     let intent_map: std::collections::HashMap<uuid::Uuid, (&cyber_jianghu_protocol::ActionType, &Option<serde_json::Value>)> = {

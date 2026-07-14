@@ -40,6 +40,12 @@ pub struct SoulCycleRecord {
     pub earth_tool_calls: Option<String>,
     /// 该次尝试使用的 LLM 模型 ID（用于经历日志展示）
     pub model_id: Option<String>,
+    /// 天魂各层审查结果（JSON 数组，数据驱动可扩展）
+    /// 格式: [{"layer":"layer1","passed":true,"detail":null}, ...]
+    pub tianhun_layers: Option<String>,
+    /// Server 执行结果回填（JSON 对象，key=pipe_seq）
+    /// 格式: {"0":{"success":true,"error":null,"state_change_summary":"..."}}
+    pub server_execution_results: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -149,6 +155,12 @@ impl SoulCycleRecorder {
         // idempotent migration: add model_id column (该次尝试使用的 LLM 模型 ID)
         conn.execute_batch("ALTER TABLE soul_cycle_record ADD COLUMN model_id TEXT")
             .ok();
+        // idempotent migration: add tianhun_layers column (天魂审查结果 JSON 数组)
+        conn.execute_batch("ALTER TABLE soul_cycle_record ADD COLUMN tianhun_layers TEXT")
+            .ok();
+        // idempotent migration: add server_execution_results column (Server 执行结果回填)
+        conn.execute_batch("ALTER TABLE soul_cycle_record ADD COLUMN server_execution_results TEXT")
+            .ok();
 
         Ok(())
     }
@@ -212,6 +224,25 @@ impl SoulCycleRecorder {
             .expect("soul_cycle_recorder lock not poisoned");
         let created_at = Utc::now().to_rfc3339();
 
+        // 构建 tianhun_layers JSON 数组（数据驱动可扩展）
+        let tianhun_layers = {
+            let layers: Vec<serde_json::Value> = [(1, layer1), (2, layer2), (3, layer3)]
+                .into_iter()
+                .filter_map(|(idx, layer)| {
+                    layer.map(|v| serde_json::json!({
+                        "layer": format!("layer{}", idx),
+                        "passed": v != "rejected",
+                        "detail": if v == "rejected" { "驳回" } else { v },
+                    }))
+                })
+                .collect();
+            if layers.is_empty() {
+                None
+            } else {
+                Some(serde_json::to_string(&layers).unwrap_or_default())
+            }
+        };
+
         // 注意: previous_round_narrative 由 update_previous_round_narrative() 独占管理
         // 此处不再写入该列，避免当轮审批叙事覆盖上轮执行叙事
         let result = conn.execute(
@@ -221,10 +252,11 @@ impl SoulCycleRecorder {
                 tianhun_layer2_result = ?3,
                 tianhun_layer3_result = ?4,
                 tianhun_reason = ?5,
-                created_at = ?6
-             WHERE tick_id = ?7 AND attempt = ?8",
+                tianhun_layers = ?6,
+                created_at = ?7
+             WHERE tick_id = ?8 AND attempt = ?9",
             params![
-                result, layer1, layer2, layer3, reason, created_at, tick_id, attempt
+                result, layer1, layer2, layer3, reason, tianhun_layers, created_at, tick_id, attempt
             ],
         );
 
@@ -297,6 +329,38 @@ impl SoulCycleRecorder {
                 "[soul_cycle] Failed to record final_intent for tick {}: {}",
                 tick_id,
                 e
+            ),
+        }
+    }
+
+    /// 回填 Server 执行结果（幂等，按 (tick_id, attempt) 更新 server_execution_results）
+    pub async fn backfill_server_result(
+        &self,
+        tick_id: i64,
+        attempt: i32,
+        execution_results_json: &str,
+    ) {
+        let conn = self
+            .conn
+            .lock()
+            .expect("soul_cycle_recorder lock not poisoned");
+        let result = conn.execute(
+            "UPDATE soul_cycle_record SET server_execution_results = ?1 WHERE tick_id = ?2 AND attempt = ?3",
+            params![execution_results_json, tick_id, attempt],
+        );
+
+        match result {
+            Ok(n) if n > 0 => tracing::debug!(
+                "[soul_cycle] Backfilled server results for tick {} attempt {}",
+                tick_id, attempt
+            ),
+            Ok(_) => tracing::warn!(
+                "[soul_cycle] No record found for tick {} attempt {} when backfilling",
+                tick_id, attempt
+            ),
+            Err(e) => tracing::warn!(
+                "[soul_cycle] Failed to backfill server results for tick {}: {}",
+                tick_id, e
             ),
         }
     }
@@ -450,7 +514,8 @@ impl SoulCycleRecorder {
                     tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
                     tianhun_layer3_result, tianhun_reason,
                     final_intent_id, final_action_type, final_action_data, final_pipeline_json,
-                    route_type, world_time, earth_tool_calls, model_id, created_at
+                    route_type, world_time, earth_tool_calls, model_id,
+                    tianhun_layers, server_execution_results, created_at
              FROM soul_cycle_record WHERE tick_id = ?1 ORDER BY attempt ASC",
             )
             .context("get_by_tick prepare 失败")?;
@@ -511,7 +576,8 @@ impl SoulCycleRecorder {
                     tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
                     tianhun_layer3_result, tianhun_reason,
                     final_intent_id, final_action_type, final_action_data, final_pipeline_json,
-                    route_type, world_time, earth_tool_calls, model_id, created_at
+                    route_type, world_time, earth_tool_calls, model_id,
+                    tianhun_layers, server_execution_results, created_at
              FROM soul_cycle_record WHERE tick_id IN ({}) ORDER BY tick_id DESC, attempt ASC",
             build_in_placeholders(tick_ids.len())
         );
@@ -593,7 +659,7 @@ impl SoulCycleRecorder {
     }
 
     fn row_to_record(row: &rusqlite::Row<'_>) -> SoulCycleRecord {
-        let created_at_str: String = row.get(18).unwrap_or_default();
+        let created_at_str: String = row.get(20).unwrap_or_default();
         let created_at = DateTime::parse_from_rfc3339(&created_at_str)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
@@ -617,6 +683,8 @@ impl SoulCycleRecorder {
             world_time: row.get(15).ok(),
             earth_tool_calls: row.get(16).ok(),
             model_id: row.get(17).ok(),
+            tianhun_layers: row.get(18).ok(),
+            server_execution_results: row.get(19).ok(),
             created_at,
         }
     }
@@ -665,6 +733,45 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].renhun_narrative.as_deref(), Some("吃馒头充饥"));
         assert_eq!(records[0].renhun_thought_log.as_deref(), Some("思考中..."));
+    }
+
+    #[tokio::test]
+    async fn test_tianhun_layers_column() {
+        let (_dir, recorder) = make_recorder();
+        recorder.record_renhun(1, 0, "吃馒头", "...", "test-model").await;
+        recorder
+            .record_tianhun(
+                1, 0, "approved",
+                Some("action_type合法"),
+                Some("物品存在"),
+                None, None,
+            )
+            .await;
+        let records = recorder.get_by_tick(1).await.expect("get_by_tick");
+        let record = &records[0];
+        // 新列 tianhun_layers 应有值
+        assert!(record.tianhun_layers.is_some(), "tianhun_layers should be set");
+        let layers: Vec<serde_json::Value> = serde_json::from_str(
+            record.tianhun_layers.as_ref().unwrap()
+        ).expect("tianhun_layers JSON");
+        assert_eq!(layers.len(), 2, "should have 2 layers (layer1, layer2)");
+        assert_eq!(layers[0]["layer"], "layer1");
+        assert!(layers[0]["passed"].as_bool().unwrap());
+        // 旧列仍然兼容
+        assert_eq!(record.tianhun_layer1_result.as_deref(), Some("action_type合法"));
+    }
+
+    #[tokio::test]
+    async fn test_server_execution_results_column() {
+        let (_dir, recorder) = make_recorder();
+        recorder.record_renhun(1, 0, "吃馒头", "...", "test-model").await;
+        let exec_results = r#"{"0":{"success":true,"error":null,"state_change_summary":"体力+5"}}"#;
+        recorder.backfill_server_result(1, 0, exec_results).await;
+        let records = recorder.get_by_tick(1).await.expect("get_by_tick");
+        assert_eq!(
+            records[0].server_execution_results.as_deref(),
+            Some(exec_results)
+        );
     }
 
     #[tokio::test]

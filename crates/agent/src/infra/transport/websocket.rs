@@ -579,7 +579,11 @@ impl WebSocketClient {
     }
 
     /// 发送 Intent（通过 mpsc channel → 后台任务）
-    pub async fn send_intent(&self, intent: &Intent) -> Result<()> {
+    pub async fn send_intent(
+        &self,
+        intent: &Intent,
+        soul_cycle_metadata: Option<cyber_jianghu_protocol::SoulCycleMetadata>,
+    ) -> Result<()> {
         let tx = {
             let state = self.state.read().await;
             state
@@ -589,9 +593,12 @@ impl WebSocketClient {
                 .clone()
         };
 
-        tx.send(ClientMessage::from_intent(intent.clone()))
-            .await
-            .context("Failed to send intent to background task")?;
+        tx.send(ClientMessage::from_intent_with_extras(
+            intent.clone(),
+            soul_cycle_metadata,
+        ))
+        .await
+        .context("Failed to send intent to background task")?;
 
         debug!("Sent Intent to background: {:?}", intent.action_type);
         Ok(())
@@ -1174,9 +1181,13 @@ impl AgentClient {
         client.wait_for_execution_result(timeout_ms).await
     }
 
-    pub async fn send_intent(&self, intent: &Intent) -> Result<()> {
+    pub async fn send_intent(
+        &self,
+        intent: &Intent,
+        soul_cycle_metadata: Option<cyber_jianghu_protocol::SoulCycleMetadata>,
+    ) -> Result<()> {
         let client = self.client.read().await;
-        client.send_intent(intent).await
+        client.send_intent(intent, soul_cycle_metadata).await
     }
     /// 获取 Intent 发送端
     pub async fn intent_sender(&self) -> Option<tokio::sync::mpsc::Sender<ClientMessage>> {
