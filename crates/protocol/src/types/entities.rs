@@ -272,10 +272,10 @@ pub struct AvailableAction {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub optional_fields: Vec<String>,
 
-    /// OOC 风险等级（"low" | "medium" | "high"）
-    /// high → 强制 LLM 审核, medium → 抽审, low → 跳过 LLM
-    #[serde(default = "default_ooc_risk")]
-    pub ooc_risk: String,
+    /// OOC 风险等级
+    /// High → 强制 LLM 审核, Medium → 抽审, Low → 跳过 LLM
+    #[serde(default)]
+    pub ooc_risk: OocRisk,
 
     /// 动作需求列表（消耗/前置条件，从 actions.yaml 直传）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -286,8 +286,23 @@ pub struct AvailableAction {
     pub effects: Vec<ActionEffectInfo>,
 }
 
-fn default_ooc_risk() -> String {
-    "low".to_string()
+/// 动作的 OOC（Out-of-Character）风险等级，决定天魂分级审核策略。
+/// 真闭集：值域被 websocket/types.rs:82 的 match 写死（3 分支 → always/adaptive/skip 桶）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OocRisk {
+    /// 低风险，跳过审核
+    Low,
+    /// 中风险，自适应审核
+    Medium,
+    /// 高风险，必须审核
+    High,
+}
+
+impl Default for OocRisk {
+    fn default() -> Self {
+        Self::Low
+    }
 }
 
 // ============================================================================
@@ -353,4 +368,37 @@ pub struct DeathInfo {
     pub cause: String,
     /// 死亡描述
     pub message: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ooc_risk_serde_roundtrip() {
+        // 序列化
+        assert_eq!(serde_json::to_string(&OocRisk::High).unwrap(), "\"high\"");
+        assert_eq!(
+            serde_json::to_string(&OocRisk::Medium).unwrap(),
+            "\"medium\""
+        );
+        assert_eq!(serde_json::to_string(&OocRisk::Low).unwrap(), "\"low\"");
+
+        // 反序列化
+        assert_eq!(
+            serde_json::from_str::<OocRisk>("\"high\"").unwrap(),
+            OocRisk::High
+        );
+        assert_eq!(
+            serde_json::from_str::<OocRisk>("\"medium\"").unwrap(),
+            OocRisk::Medium
+        );
+        assert_eq!(
+            serde_json::from_str::<OocRisk>("\"low\"").unwrap(),
+            OocRisk::Low
+        );
+
+        // 默认值 = Low
+        assert_eq!(OocRisk::default(), OocRisk::Low);
+    }
 }

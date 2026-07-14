@@ -5,6 +5,7 @@
 // 本模块定义 WebSocket 相关的类型和辅助函数
 // ============================================================================
 
+use cyber_jianghu_protocol::types::OocRisk;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -79,10 +80,10 @@ pub fn build_game_rules_from_config(
     let mut skip_types: Vec<String> = Vec::new();
 
     for action in &available_actions {
-        match action.ooc_risk.as_str() {
-            "high" => always_types.push(action.action.clone()),
-            "medium" => adaptive_types.push(action.action.clone()),
-            _ => skip_types.push(action.action.clone()),
+        match action.ooc_risk {
+            OocRisk::High => always_types.push(action.action.clone()),
+            OocRisk::Medium => adaptive_types.push(action.action.clone()),
+            OocRisk::Low => skip_types.push(action.action.clone()),
         }
     }
 

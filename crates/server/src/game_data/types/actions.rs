@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use cyber_jianghu_protocol::types::governance::{AtomicKind, ProtocolKind, TargetArity};
+use cyber_jianghu_protocol::types::OocRisk;
 
 // ============================================================================
 // 动作配置条目
@@ -73,10 +74,10 @@ pub struct ActionConfigEntry {
     #[serde(default)]
     pub effects: Vec<ActionEffect>,
 
-    /// OOC 风险等级（"low" | "medium" | "high"）
-    /// 用于天魂分级审核：high → 强制 LLM, medium → 抽审, low → 跳过 LLM
-    #[serde(default = "default_ooc_risk")]
-    pub ooc_risk: String,
+    /// OOC 风险等级
+    /// 用于天魂分级审核：High → 强制 LLM, Medium → 抽审, Low → 跳过 LLM
+    #[serde(default)]
+    pub ooc_risk: OocRisk,
 
     /// 显示名（用于 chronicle_generator 等展示场景，未配置时回退到 `name`）
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -125,10 +126,6 @@ fn default_actor_arity() -> u8 {
 
 fn default_phase_count() -> u8 {
     1
-}
-
-fn default_ooc_risk() -> String {
-    "low".to_string()
 }
 
 fn default_flee_success_rate() -> f64 {
