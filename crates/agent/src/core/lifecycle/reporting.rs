@@ -1,153 +1,137 @@
 use tracing::{debug, error, info, warn};
 
 impl super::super::Agent {
+    /// 从 SoulCycleRecorder 构建本 tick 的三魂循环元数据
+    ///
+    /// 三魂审查在 intent 提交前完成，recorder 数据已就绪。
+    /// 此方法在 send_intent 之前调用，metadata 随 intent 一次性提交。
+    pub(super) async fn build_soul_cycle_metadata(
+        &self,
+        tick_id: i64,
+    ) -> Option<cyber_jianghu_protocol::SoulCycleMetadata> {
+        let recorder = self.soul_recorder().await?;
+
+        let records = match recorder.get_by_tick(tick_id).await {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("build_soul_cycle_metadata: get_by_tick({tick_id}) 失败: {e:?}");
+                return None;
+            }
+        };
+        if records.is_empty() {
+            return None;
+        }
+
+        let immediate_records = recorder.get_immediate_by_tick(tick_id).await.unwrap_or_default();
+
+        let world_time = records.first().and_then(|r| r.world_time.clone());
+
+        let cycles: Vec<cyber_jianghu_protocol::SoulCycleAttempt> = records
+            .into_iter()
+            .map(|r| {
+                let layers: Vec<cyber_jianghu_protocol::LayerReport> = vec![
+                    (r.tianhun_layer1_result.as_deref(), "layer1"),
+                    (r.tianhun_layer2_result.as_deref(), "layer2"),
+                    (r.tianhun_layer3_result.as_deref(), "layer3"),
+                ]
+                .into_iter()
+                .filter_map(|(detail, layer)| {
+                    detail.map(|d| cyber_jianghu_protocol::LayerReport {
+                        layer: layer.to_string(),
+                        passed: d == "通过" || d.is_empty(),
+                        detail: if d == "通过" || d.is_empty() {
+                            None
+                        } else {
+                            Some(d.to_string())
+                        },
+                    })
+                })
+                .collect();
+
+                cyber_jianghu_protocol::SoulCycleAttempt {
+                    attempt: r.attempt,
+                    renhun: cyber_jianghu_protocol::RenhunReport {
+                        narrative: r.renhun_narrative,
+                        thought_log: r.renhun_thought_log,
+                        earth_tool_calls: r
+                            .earth_tool_calls
+                            .as_ref()
+                            .and_then(|s| serde_json::from_str(s).ok()),
+                    },
+                    tianhun: cyber_jianghu_protocol::TianhunReport {
+                        result: r.tianhun_result,
+                        layers,
+                        reason: r.tianhun_reason,
+                    },
+                    final_intent: r.final_intent_id.map(|id| {
+                        let pipeline_actions: Option<
+                            Vec<cyber_jianghu_protocol::PipelineAction>,
+                        > = r
+                            .final_pipeline_json
+                            .as_ref()
+                            .and_then(|s| serde_json::from_str(s).ok());
+                        cyber_jianghu_protocol::FinalIntentReport {
+                            intent_id: Some(id),
+                            action_type: r.final_action_type.clone(),
+                            action_data: r
+                                .final_action_data
+                                .as_ref()
+                                .and_then(|s| serde_json::from_str(s).ok()),
+                            pipeline_actions,
+                            chaos_marker: None,
+                            dream_marker: None,
+                        }
+                    }),
+                    model_id: r.model_id,
+                }
+            })
+            .collect();
+
+        let agent_name = self.character_name().to_string();
+        let immediate_intents: Vec<cyber_jianghu_protocol::ImmediateIntentReport> =
+            immediate_records
+                .into_iter()
+                .map(|r| cyber_jianghu_protocol::ImmediateIntentReport {
+                    intent_id: r.intent_id,
+                    route_type: r.route_type,
+                    action_type: r.action_type,
+                    action_data: r
+                        .action_data
+                        .as_ref()
+                        .and_then(|s| serde_json::from_str(s).ok()),
+                    from_agent_name: Some(agent_name.clone()),
+                    speech_content: r.speech_content,
+                    send_status: r.send_status,
+                    send_error: r.send_error,
+                })
+                .collect();
+
+        Some(cyber_jianghu_protocol::SoulCycleMetadata {
+            world_time,
+            cycles,
+            immediate_intents,
+        })
+    }
+
     pub(super) async fn report_soul_cycle_and_compress(
         &self,
         final_intent: &crate::models::Intent,
     ) {
         let tick_id_for_report = final_intent.tick_id;
-        if let Some(recorder) = self.soul_recorder().await {
-            let records = match recorder.get_by_tick(tick_id_for_report).await {
-                Ok(r) => r,
-                Err(e) => {
-                    warn!("report_soul_cycle: get_by_tick({tick_id_for_report}) 失败（best-effort 继续）: {e:?}");
-                    Vec::new()
-                }
-            };
-            let immediate_records = match recorder.get_immediate_by_tick(tick_id_for_report).await {
-                Ok(r) => r,
-                Err(e) => {
-                    warn!("report_soul_cycle: get_immediate_by_tick({tick_id_for_report}) 失败（best-effort 继续）: {e:?}");
-                    Vec::new()
-                }
-            };
+        if self.soul_recorder().await.is_some() {
+            // 主 metadata 已随 intent 提交（build_soul_cycle_metadata + send_intent），
+            // 此处不再单独发送 SoulCycleReport（消除独立消息的丢失风险）。
+            // 保留 subsequent intents 的 SoulCycleReport 发送（过渡期）+ 对话 summary 压缩。
 
-            let world_time = records.first().and_then(|r| r.world_time.clone());
-
-            let cycles: Vec<cyber_jianghu_protocol::SoulCycleAttempt> = records
-                .into_iter()
-                .map(|r| {
-                    let layers: Vec<cyber_jianghu_protocol::LayerReport> = vec![
-                        (r.tianhun_layer1_result.as_deref(), "layer1"),
-                        (r.tianhun_layer2_result.as_deref(), "layer2"),
-                        (r.tianhun_layer3_result.as_deref(), "layer3"),
-                    ]
-                    .into_iter()
-                    .filter_map(|(detail, layer)| {
-                        detail.map(|d| cyber_jianghu_protocol::LayerReport {
-                            layer: layer.to_string(),
-                            passed: d == "通过" || d.is_empty(),
-                            detail: if d == "通过" || d.is_empty() {
-                                None
-                            } else {
-                                Some(d.to_string())
-                            },
-                        })
-                    })
-                    .collect();
-
-                    cyber_jianghu_protocol::SoulCycleAttempt {
-                        attempt: r.attempt,
-                        renhun: cyber_jianghu_protocol::RenhunReport {
-                            narrative: r.renhun_narrative,
-                            thought_log: r.renhun_thought_log,
-                            earth_tool_calls: r
-                                .earth_tool_calls
-                                .as_ref()
-                                .and_then(|s| serde_json::from_str(s).ok()),
-                        },
-                        tianhun: cyber_jianghu_protocol::TianhunReport {
-                            result: r.tianhun_result,
-                            layers,
-                            reason: r.tianhun_reason,
-                        },
-                        final_intent: r.final_intent_id.map(|id| {
-                            let pipeline_actions: Option<
-                                Vec<cyber_jianghu_protocol::PipelineAction>,
-                            > = r
-                                .final_pipeline_json
-                                .as_ref()
-                                .and_then(|s| serde_json::from_str(s).ok());
-                            cyber_jianghu_protocol::FinalIntentReport {
-                                intent_id: Some(id),
-                                action_type: r.final_action_type.clone(),
-                                action_data: r
-                                    .final_action_data
-                                    .as_ref()
-                                    .and_then(|s| serde_json::from_str(s).ok()),
-                                pipeline_actions,
-                                chaos_marker: None,
-                                dream_marker: None,
-                            }
-                        }),
-                        model_id: r.model_id,
-                    }
-                })
-                .collect();
-
-            let agent_name = self.character_name().to_string();
-            let immediate_intents: Vec<cyber_jianghu_protocol::ImmediateIntentReport> =
-                immediate_records
-                    .into_iter()
-                    .map(|r| cyber_jianghu_protocol::ImmediateIntentReport {
-                        intent_id: r.intent_id,
-                        route_type: r.route_type,
-                        action_type: r.action_type,
-                        action_data: r
-                            .action_data
-                            .as_ref()
-                            .and_then(|s| serde_json::from_str(s).ok()),
-                        from_agent_name: Some(agent_name.clone()),
-                        speech_content: r.speech_content,
-                        send_status: r.send_status,
-                        send_error: r.send_error,
-                    })
-                    .collect();
-
-            let metadata = cyber_jianghu_protocol::SoulCycleMetadata {
-                world_time,
-                cycles,
-                immediate_intents,
-            };
-
-            let mut reported = false;
+            // 主 metadata 已随 intent 提交，此处仅发送 subsequent 的简化占位（过渡期保留）
+            let subsequent_count = final_intent.subsequent_intents.len();
             let max_retries = self.config.llm.soul_cycle_report_retries;
             let base_delay = self.config.llm.soul_cycle_report_base_delay_ms;
-            for attempt in 0..max_retries {
-                match self
-                    .client
-                    .send_soul_cycle_report(tick_id_for_report, 0, metadata.clone())
-                    .await
-                {
-                    Ok(()) => {
-                        debug!("三魂循环元数据上报成功: tick={}", tick_id_for_report);
-                        reported = true;
-                        break;
-                    }
-                    Err(e) => {
-                        warn!(
-                            "三魂循环元数据上报失败 (尝试 {}/{}): tick={}, err={}",
-                            attempt + 1,
-                            max_retries,
-                            tick_id_for_report,
-                            e
-                        );
-                        if attempt + 1 < max_retries {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(
-                                base_delay * (1 << attempt),
-                            ))
-                            .await;
-                        }
-                    }
-                }
-            }
-            if !reported {
-                error!("三魂循环元数据上报最终失败: tick={}", tick_id_for_report);
-            }
-
-            let subsequent_count = final_intent.subsequent_intents.len();
             if subsequent_count > 0 {
-                let world_time = metadata.world_time.clone();
+                let metadata = self.build_soul_cycle_metadata(tick_id_for_report).await;
+                let world_time = metadata
+                    .as_ref()
+                    .and_then(|m| m.world_time.clone());
                 for (idx, subsequent) in final_intent.subsequent_intents.iter().enumerate() {
                     let pipe_seq = (idx + 1) as i32;
                     let simplified_metadata = cyber_jianghu_protocol::SoulCycleMetadata {

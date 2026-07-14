@@ -873,6 +873,9 @@ async fn handle_client_message(
             action_data,
             priority,
             subsequent_intents,
+            soul_cycle_metadata,
+            chaos_marker,
+            dream_marker,
         } => {
             handle_intent(
                 *agent_id,
@@ -885,6 +888,9 @@ async fn handle_client_message(
                 action_data,
                 priority,
                 subsequent_intents,
+                soul_cycle_metadata,
+                chaos_marker,
+                dream_marker,
                 state,
             )
             .await
@@ -992,6 +998,9 @@ async fn handle_intent(
     action_data: Option<serde_json::Value>,
     priority: i32,
     subsequent_intents: Vec<Intent>,
+    soul_cycle_metadata: Option<cyber_jianghu_protocol::SoulCycleMetadata>,
+    chaos_marker: Option<cyber_jianghu_protocol::types::ChaosMarker>,
+    dream_marker: Option<cyber_jianghu_protocol::types::DreamMarker>,
     state: &Arc<crate::state::AppState>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 确定最终的 agent_id
@@ -1184,9 +1193,9 @@ async fn handle_intent(
         }
     }
 
-    // 构造 Intent
+    // 构造 Intent（chaos_marker/dream_marker 从 ClientMessage 透传，不再硬编码丢弃）
     let mut intent = Intent {
-        intent_id: req_intent_id.unwrap_or_else(uuid::Uuid::new_v4), // 如果 ClientMessage 中没有传 intent_id，这里生成一个新的
+        intent_id: req_intent_id.unwrap_or_else(uuid::Uuid::new_v4),
         agent_id,
         tick_id,
         thought_log,
@@ -1194,8 +1203,8 @@ async fn handle_intent(
         action_data: action_data.clone(),
         priority,
         reflector_thought: None,
-        chaos_marker: None,
-        dream_marker: None,
+        chaos_marker,
+        dream_marker,
         already_broadcast: false,
         session_id: None,
         subsequent_intents,
@@ -1296,6 +1305,20 @@ async fn handle_intent(
     }
 
     // 路由到 IntentWorker（非阻塞 try_send，队列满时返回错误）
+    // 提取 subsequent 信息（intent 即将被 move 进 WorkerMessage）
+    let subsequent_summaries: Vec<(String, Option<serde_json::Value>, Option<cyber_jianghu_protocol::types::ChaosMarker>, Option<cyber_jianghu_protocol::types::DreamMarker>)> = intent
+        .subsequent_intents
+        .iter()
+        .map(|si| {
+            (
+                si.action_type.to_string(),
+                si.action_data.clone(),
+                si.chaos_marker.clone(),
+                si.dream_marker.clone(),
+            )
+        })
+        .collect();
+
     match state
         .worker_tx
         .try_send(crate::tick::WorkerMessage::Intent {
@@ -1306,6 +1329,88 @@ async fn handle_intent(
                 "Intent queued for real-time processing: agent={}, action={}, tick={}",
                 agent_id, action_type, tick_id
             );
+
+            // 三魂元数据就地写入（与 intent 同一条消息到达，消除独立 SoulCycleReport 的丢失风险）
+            if let Some(ref metadata) = soul_cycle_metadata {
+                let metadata_json = serde_json::to_value(metadata).unwrap_or(serde_json::Value::Null);
+                if let Err(e) = crate::db::update_soul_cycle_metadata(
+                    &state.db_pool,
+                    agent_id,
+                    tick_id,
+                    0, // pipe_seq=0：主 intent
+                    &metadata_json,
+                )
+                .await
+                {
+                    warn!(
+                        "三魂元数据写入失败(随intent): agent={}, tick={}, err={:#}",
+                        agent_id, tick_id, e
+                    );
+                }
+
+                // subsequent 占位（pipe_seq≥1）
+                let world_time = metadata.world_time.clone();
+                for (idx, (act_type, act_data, chaos, dream)) in subsequent_summaries.iter().enumerate() {
+                    let pipe_seq = (idx + 1) as i32;
+                    let placeholder = cyber_jianghu_protocol::SoulCycleMetadata {
+                        world_time: world_time.clone(),
+                        cycles: vec![cyber_jianghu_protocol::SoulCycleAttempt {
+                            attempt: 0,
+                            renhun: cyber_jianghu_protocol::RenhunReport {
+                                narrative: Some("后续意图".to_string()),
+                                thought_log: None,
+                                earth_tool_calls: None,
+                            },
+                            tianhun: cyber_jianghu_protocol::TianhunReport {
+                                result: Some("approved".to_string()),
+                                layers: vec![
+                                    cyber_jianghu_protocol::LayerReport {
+                                        layer: "layer1".to_string(),
+                                        passed: true,
+                                        detail: None,
+                                    },
+                                    cyber_jianghu_protocol::LayerReport {
+                                        layer: "layer2".to_string(),
+                                        passed: true,
+                                        detail: None,
+                                    },
+                                    cyber_jianghu_protocol::LayerReport {
+                                        layer: "layer3".to_string(),
+                                        passed: true,
+                                        detail: None,
+                                    },
+                                ],
+                                reason: None,
+                            },
+                            final_intent: Some(cyber_jianghu_protocol::FinalIntentReport {
+                                intent_id: None,
+                                action_type: Some(act_type.clone()),
+                                action_data: act_data.clone(),
+                                pipeline_actions: None,
+                                chaos_marker: chaos.clone(),
+                                dream_marker: dream.clone(),
+                            }),
+                            model_id: None,
+                        }],
+                        immediate_intents: vec![],
+                    };
+                    let ph_json = serde_json::to_value(&placeholder).unwrap_or(serde_json::Value::Null);
+                    if let Err(e) = crate::db::update_soul_cycle_metadata(
+                        &state.db_pool,
+                        agent_id,
+                        tick_id,
+                        pipe_seq,
+                        &ph_json,
+                    )
+                    .await
+                    {
+                        warn!(
+                            "后续意图占位写入失败: agent={}, tick={}, pipe_seq={}, err={:#}",
+                            agent_id, tick_id, pipe_seq, e
+                        );
+                    }
+                }
+            }
         }
         Err(e) => {
             warn!(

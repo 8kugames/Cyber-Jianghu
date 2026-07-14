@@ -304,6 +304,9 @@ pub enum ServerMessage {
 ///     action_data: Some(json!({"content": "你好"})),
 ///     priority: 5,
 ///     subsequent_intents: vec![],
+///     soul_cycle_metadata: None,
+///     chaos_marker: None,
+///     dream_marker: None,
 /// };
 /// ```
 ///
@@ -335,6 +338,15 @@ pub enum ClientMessage {
         /// Pipeline 后续 Intent（multi-Intent 支持）
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         subsequent_intents: Vec<crate::types::Intent>,
+        /// 三魂循环元数据（随 intent 一次性提交，消除独立 SoulCycleReport 的丢失风险）
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        soul_cycle_metadata: Option<SoulCycleMetadata>,
+        /// 混沌行为标记（随 intent 提交，server 据此渲染"陷入混乱"徽章）
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chaos_marker: Option<crate::types::ChaosMarker>,
+        /// 托梦影响标记（随 intent 提交，server 据此渲染"受托梦影响"徽章）
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dream_marker: Option<crate::types::DreamMarker>,
     },
 
     /// 对话消息
@@ -528,6 +540,34 @@ impl ClientMessage {
             action_data: intent.action_data,
             priority: intent.priority,
             subsequent_intents: intent.subsequent_intents,
+            soul_cycle_metadata: None,
+            chaos_marker: None,
+            dream_marker: None,
+        }
+    }
+
+    /// 从 Intent 创建 ClientMessage（携带三魂元数据 + 标记）
+    ///
+    /// 三魂审查在 intent 提交前完成，metadata 此时已就绪。
+    /// 随 intent 一次性提交，消除独立 SoulCycleReport 消息的丢失风险。
+    pub fn from_intent_with_extras(
+        intent: crate::types::Intent,
+        soul_cycle_metadata: Option<SoulCycleMetadata>,
+    ) -> Self {
+        let chaos_marker = intent.chaos_marker.clone();
+        let dream_marker = intent.dream_marker.clone();
+        ClientMessage::Intent {
+            intent_id: Some(intent.intent_id),
+            tick_id: intent.tick_id,
+            agent_id: Some(intent.agent_id),
+            thought_log: intent.thought_log,
+            action_type: intent.action_type.to_string(),
+            action_data: intent.action_data,
+            priority: intent.priority,
+            subsequent_intents: intent.subsequent_intents,
+            soul_cycle_metadata,
+            chaos_marker,
+            dream_marker,
         }
     }
 
