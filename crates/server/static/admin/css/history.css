@@ -2,6 +2,11 @@ body {
     background: var(--bg-base);
     min-height: 100vh;
     padding: 24px;
+    /* 覆盖 dashboard.css 为 SPA 布局设的 body 锁死（history.html 是独立滚动页） */
+    height: auto !important;
+    overflow-y: auto !important;
+    display: block !important;
+    flex-direction: initial !important;
 }
 
 .page-header {
@@ -908,6 +913,24 @@ body {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    max-height: 280px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color, #4a5568) transparent;
+    padding-right: 4px;
+}
+
+.highlight-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.highlight-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.highlight-list::-webkit-scrollbar-thumb {
+    background: var(--border-color, #4a5568);
+    border-radius: 3px;
 }
 
 .highlight-item {
@@ -987,6 +1010,33 @@ body {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    max-height: 240px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color, #4a5568) transparent;
+    padding-right: 4px;
+}
+
+.emergence-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.emergence-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.emergence-list::-webkit-scrollbar-thumb {
+    background: var(--border-color, #4a5568);
+    border-radius: 3px;
+}
+
+/* 周期字段中的 Tick 区间小字 */
+.chr-tick-range {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-family: monospace;
+    margin-top: 2px;
+    font-weight: 400;
 }
 .emergence-item {
     padding: 10px 14px;
@@ -1027,4 +1077,84 @@ body {
     margin-top: 4px;
     margin-left: 4px;
     font-family: monospace;
+}
+
+/* ============================================================================
+   经历日志卡片流（替换原 10 列密表）
+   ============================================================================ */
+.exp-cards-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.exp-card {
+    background: var(--bg-level-1, #161b22);
+    border: 1px solid var(--border-color, #30363d);
+    border-radius: var(--radius-md, 8px);
+    padding: 14px 16px;
+}
+
+.exp-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-subtle, #21262d);
+}
+
+.exp-card-time {
+    font-size: 12px;
+    color: var(--text-secondary, #8b949e);
+}
+
+.exp-card-agent {
+    font-weight: 600;
+    color: var(--text-primary, #e6edf3);
+}
+
+.exp-card-loc {
+    font-size: 12px;
+    color: var(--text-secondary, #8b949e);
+}
+
+.exp-card-action {
+    font-size: 13px;
+    color: var(--text-primary, #e6edf3);
+    padding: 8px 0;
+    line-height: 1.6;
+}
+
+.exp-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 4px;
+}
+
+.exp-soul-block {
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.exp-soul-label {
+    display: inline-block;
+    color: var(--accent, #14b8a6);
+    font-weight: 600;
+    font-size: 11px;
+    margin-right: 6px;
+}
+
+.exp-soul-content {
+    display: inline;
+    color: var(--text-secondary, #8b949e);
+}
+
+.exp-card-footer {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border-subtle, #21262d);
+    font-size: 11px;
+    color: var(--text-subtle, #6e7681);
 }

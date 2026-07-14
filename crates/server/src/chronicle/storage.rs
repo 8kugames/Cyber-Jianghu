@@ -9,15 +9,7 @@ use anyhow::{Context, Result};
 use sqlx::Row;
 
 use super::collector::CollectedData;
-use super::{AgentSummary, Chronicle, Highlight, LocationStat};
-use crate::game_data::registry::TimeRegistry;
-use cyber_jianghu_protocol::game_day_to_chinese;
-
-fn format_game_day(game_day: i64) -> String {
-    TimeRegistry::get_calendar_config()
-        .map(|cal| game_day_to_chinese(game_day, &cal))
-        .unwrap_or_else(|| format!("第{}日", game_day))
-}
+use super::{format_game_day, AgentSummary, Chronicle, Highlight, LocationStat};
 
 /// 存储群像传记（兼容旧接口，summary_llm = None）
 pub async fn store(
@@ -202,6 +194,35 @@ pub async fn update_template_summary(
     .context("更新模板摘要失败")?;
 
     Ok(())
+}
+
+/// 获取上一周期的群像摘要（供 LLM 前情提要，保持跨周期人设一致）。
+///
+/// 优先返回 `summary_llm`（叙事体，风格锚点），为空时回退 `summary`（模板统计体）。
+/// 首周期无上一条记录时返回 None。
+pub async fn get_previous_chronicle_summary(
+    db_pool: &crate::db::DbPool,
+    current_period_start: i64,
+) -> Result<Option<String>> {
+    let row = sqlx::query(
+        r#"
+        SELECT summary_llm, summary
+        FROM chronicles
+        WHERE period_end < $1
+        ORDER BY period_start DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(current_period_start)
+    .fetch_optional(db_pool)
+    .await
+    .context("查询上一周期 chronicle 失败")?;
+
+    Ok(row.map(|r| {
+        let llm: Option<String> = r.get("summary_llm");
+        let tmpl: String = r.get("summary");
+        llm.filter(|s| !s.is_empty()).unwrap_or(tmpl)
+    }))
 }
 
 /// 获取所有群像传记（列表）

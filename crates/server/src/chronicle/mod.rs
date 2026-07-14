@@ -307,6 +307,15 @@ pub async fn generate_and_store(
         data.highlights.len()
     );
 
+    // 1.1 查询上一周期摘要（前情提要），供 LLM 保持跨周期人设一致。
+    // 首周期无前情时为 None；查询失败仅 warn 不阻断生成。
+    let previous_summary = storage::get_previous_chronicle_summary(db_pool, period_start)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("查询前情提要失败，跳过: {}", e);
+            None
+        });
+
     // 2. 生成策略：LLM 优先，模板兜底，两个版本都生成
     // - LLM 成功：summary_llm = LLM, summary = 模板（同步），异步生成 LLM 补充
     // - LLM 失败：summary = 模板（同步），summary_llm = None，异步生成 LLM 补充
@@ -321,7 +330,7 @@ pub async fn generate_and_store(
     };
 
     // 2.2 尝试 LLM（如果成功则作为补充版本异步存储）
-    let summary_llm = match generator::generate_llm(&data).await {
+    let summary_llm = match generator::generate_llm(&data, previous_summary.as_deref()).await {
         Ok(llm_summary) => {
             tracing::info!("LLM 生成成功");
             Some(llm_summary)
@@ -355,10 +364,11 @@ pub async fn generate_and_store(
         let data_clone = data.clone();
         let db_pool_clone = db_pool.clone();
         let tracker_clone = tracker.clone();
+        let prev_clone = previous_summary.clone();
 
         tokio::spawn(async move {
             tracing::info!("[任务 {}] 开始异步重试生成 LLM 版本", chronicle_id_clone);
-            match generator::generate_llm(&data_clone).await {
+            match generator::generate_llm(&data_clone, prev_clone.as_deref()).await {
                 Ok(llm_summary) => {
                     tracing::info!("[任务 {}] LLM 重试成功，更新数据库", chronicle_id_clone);
                     if let Err(e) = storage::update_llm_summary(
@@ -403,6 +413,16 @@ pub async fn generate_and_store(
     }
 
     Ok(chronicle)
+}
+
+/// 游戏日（整数）转中文日期字符串。
+///
+/// 配置驱动：从 `TimeRegistry` 读取 `CalendarConfig`（time.yaml），
+/// 无配置时 fallback "第N日"。storage / generator 共用此函数，避免格式化逻辑重复。
+pub(crate) fn format_game_day(game_day: i64) -> String {
+    crate::game_data::registry::TimeRegistry::get_calendar_config()
+        .map(|cal| cyber_jianghu_protocol::game_day_to_chinese(game_day, &cal))
+        .unwrap_or_else(|| format!("第{}日", game_day))
 }
 
 /// 计算周期的起始 tick_id

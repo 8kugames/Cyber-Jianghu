@@ -128,7 +128,7 @@ async fn collect_emergence_events(
 /// 1 游戏日对应的真实秒数
 /// 公式: real_seconds_per_tick * ticks_per_hour * hours_per_day
 /// 与 TimeRegistry::get_current_season() 保持一致 (time_registry.rs:37-45)
-fn real_seconds_per_game_day() -> Result<i64> {
+pub(crate) fn real_seconds_per_game_day() -> Result<i64> {
     let time_config =
         crate::game_data::registry::TimeRegistry::get_config().context("时间配置不可用")?;
     let registry = crate::game_data::registry_or_error()
@@ -285,18 +285,26 @@ async fn collect_agents(
     .await
     .context("查询每日摘要失败")?;
 
-    // 按 agent_id 分组，所有 game_day 摘要拼接为一个字符串
+    // 按 agent_id 分组，所有 game_day 摘要拼接为一个多日自述字符串。
+    //
+    // 每段以中文日期头标注（配置驱动，经 format_game_day → game_day_to_chinese），
+    // 替代旧的 [游戏日 N] 数字前缀——后者是秒级 game_day 整数，与日历尺度错位且对人无意义。
+    // agent 端 LLM 日记正文不保证自带日期头（日期仅作为 prompt 变量注入），
+    // 故由 collector 统一注入，确保多日拼接后日间分隔清晰可读。
     let daily_summaries_map: std::collections::HashMap<uuid::Uuid, String> = daily_summary_rows
         .iter()
         .fold(std::collections::HashMap::new(), |mut acc, row| {
             let agent_id: uuid::Uuid = row.get("agent_id");
             let game_day: i64 = row.get("game_day");
             let summary: String = row.get("summary");
+            // 中文日期头 + 摘要正文，确保每日起始可辨识
+            let entry = format!("{}\n{}", super::format_game_day(game_day), summary);
             acc.entry(agent_id)
                 .and_modify(|s| {
-                    *s += &format!("\n[游戏日 {}] {}", game_day, summary);
+                    s.push_str("\n\n");
+                    s.push_str(&entry);
                 })
-                .or_insert_with(|| format!("[游戏日 {}] {}", game_day, summary));
+                .or_insert_with(|| entry.clone());
             acc
         });
 

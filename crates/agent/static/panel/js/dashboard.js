@@ -3,9 +3,6 @@
 import { API, get } from './api.js';
 import { escapeHtml, showLoading, getAttrColor, fmtNum, STATUS_MAP, formatDateTime } from './ui.js';
 import { onEvent } from './app.js';
-import { renderTickCard, groupByTick } from './panels.js';
-
-const DASHBOARD_EVENT_LIMIT = 5;
 
 export const dashboardPage = {
     mount(container) {
@@ -44,9 +41,10 @@ function render(container) {
         </div>
         <div class="dashboard-center" id="dash-center">
             <div class="card">
-                <div class="card-header">最近事件</div>
-                <div class="card-body" id="dash-events">
-                    <p class="text-muted">加载中...</p>
+                <div class="card-header">经历日志</div>
+                <div class="card-body" style="text-align:center;padding:30px;color:var(--text-muted);">
+                    <p style="margin-bottom:12px;">经历日志已迁移至角色面板</p>
+                    <a href="#/characters" style="color:var(--accent,#14b8a6);font-size:14px;">前往查看 →</a>
                 </div>
             </div>
         </div>
@@ -59,7 +57,6 @@ function render(container) {
 async function loadAll() {
     await Promise.allSettled([
         loadCharStatus(),
-        loadEvents(),
         loadMonitor(),
     ]);
 }
@@ -136,40 +133,6 @@ async function loadCharStatus() {
         drawRadar(allAttrs, categories, displayNames);
     } catch (e) {
         el.innerHTML = `<p class="text-muted">角色状态不可用</p>`;
-    }
-}
-
-async function loadEvents() {
-    const el = document.getElementById('dash-events');
-    if (!el) return;
-
-    try {
-        const data = await get(`${API.SOUL_CYCLES}?page=1&limit=${DASHBOARD_EVENT_LIMIT}`);
-        let recordMap = data.records || {};
-        if (Array.isArray(recordMap)) {
-            recordMap = groupByTick(recordMap);
-        }
-
-        const immediateMap = data.immediate_intents || {};
-        const tickIds = Object.keys(recordMap).sort((a, b) => Number(b) - Number(a));
-
-        if (tickIds.length === 0) {
-            el.innerHTML = '<p class="text-muted">暂无事件记录</p>';
-            return;
-        }
-
-        let html = '<div class="exp-list">';
-        for (const tickId of tickIds.slice(0, DASHBOARD_EVENT_LIMIT)) {
-            const attempts = recordMap[tickId] || [];
-            const immediate = immediateMap[tickId] || [];
-            if (!attempts[0] && immediate.length === 0) continue;
-            html += renderTickCard(tickId, attempts, immediate);
-        }
-        html += '</div>';
-        html += `<div style="text-align:center;margin-top:8px"><a href="#/characters" class="text-link">查看完整经历 →</a></div>`;
-        el.innerHTML = html;
-    } catch (e) {
-        el.innerHTML = '<p class="text-muted">事件流不可用</p>';
     }
 }
 
