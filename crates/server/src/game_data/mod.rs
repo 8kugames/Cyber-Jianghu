@@ -32,7 +32,9 @@ pub use registry::{
     ActionField, ActionRegistry, InitialInventoryRegistry, InventoryRegistry, ItemRegistry,
     NetworkRegistry, StateRegistry, init_registry, registry, registry_or_error,
 };
-pub use types::{ActionEffect, ActionRequirement, GameData, ItemConfigEntry, ItemEffect};
+pub use types::{
+    ActionEffect, ActionRequirement, GameData, ItemConfigEntry, ItemEffect, Operation,
+};
 
 #[cfg(test)]
 pub use test_utils::init_test_registry;

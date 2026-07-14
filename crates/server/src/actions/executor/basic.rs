@@ -224,18 +224,11 @@ impl BasicActionExecutor {
             .effects
             .iter()
             .filter_map(|effect| {
-                if effect.operation == "add"
-                    || effect.operation == "set"
-                    || effect.operation == "multiply"
-                {
-                    effect.value_as_i32().map(|v| super::super::ItemEffect {
-                        attribute: effect.attribute.clone(),
-                        operator: effect.operation.clone(),
-                        value: v,
-                    })
-                } else {
-                    None
-                }
+                effect.value_as_i32().map(|v| super::super::ItemEffect {
+                    attribute: effect.attribute.clone(),
+                    operation: effect.operation,
+                    value: v,
+                })
             })
             .collect();
 

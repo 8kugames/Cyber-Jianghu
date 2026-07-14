@@ -392,7 +392,7 @@ mod tests {
             valid_targets: None,
             required_fields: vec![],
             optional_fields: vec![],
-            ooc_risk: "low".to_string(),
+            ooc_risk: cyber_jianghu_protocol::types::OocRisk::Low,
             requirements: vec![],
             effects: vec![],
         }
@@ -433,7 +433,7 @@ mod tests {
             valid_targets: None,
             required_fields: vec!["content".to_string()],
             optional_fields: vec!["channel".to_string(), "target_agent_id".to_string()],
-            ooc_risk: "high".to_string(),
+            ooc_risk: cyber_jianghu_protocol::types::OocRisk::High,
             requirements: vec![],
             effects: vec![],
         };
@@ -462,7 +462,7 @@ mod tests {
                 "quantity".to_string(),
             ],
             optional_fields: vec!["recipient_id".to_string()],
-            ooc_risk: "low".to_string(),
+            ooc_risk: cyber_jianghu_protocol::types::OocRisk::Low,
             requirements: vec![],
             effects: vec![],
         };
@@ -487,7 +487,7 @@ mod tests {
                 "quantity".to_string(),
             ],
             optional_fields: vec!["source_id".to_string()],
-            ooc_risk: "medium".to_string(),
+            ooc_risk: cyber_jianghu_protocol::types::OocRisk::Medium,
             requirements: vec![],
             effects: vec![],
         };
@@ -507,7 +507,7 @@ mod tests {
             valid_targets: None,
             required_fields: vec!["recipe_id".to_string()],
             optional_fields: vec![],
-            ooc_risk: "low".to_string(),
+            ooc_risk: cyber_jianghu_protocol::types::OocRisk::Low,
             requirements: vec![],
             effects: vec![],
         };

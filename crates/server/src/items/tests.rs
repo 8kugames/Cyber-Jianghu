@@ -1,7 +1,7 @@
 #[cfg(test)]
 use super::registry::*;
 #[cfg(test)]
-use crate::game_data::{ItemConfigEntry, ItemEffect};
+use crate::game_data::{ItemConfigEntry, ItemEffect, Operation};
 #[cfg(test)]
 use crate::models::ItemType;
 
@@ -34,7 +34,7 @@ fn test_init_item_cache_from_config() {
         effects: vec![ItemEffect {
             description: "恢复饱食度".to_string(),
             attribute: "satiation".to_string(),
-            operation: "add".to_string(),
+            operation: Operation::Add,
             value: serde_json::json!(1),
         }],
         stack_size: 10,
@@ -83,7 +83,7 @@ fn test_get_item_definition() {
         effects: vec![ItemEffect {
             description: "恢复饱食度".to_string(),
             attribute: "satiation".to_string(),
-            operation: "add".to_string(),
+            operation: Operation::Add,
             value: serde_json::json!(1),
         }],
         stack_size: 10,
@@ -124,7 +124,7 @@ fn test_item_usability() {
             effects: vec![ItemEffect {
                 description: "恢复饱食度".to_string(),
                 attribute: "satiation".to_string(),
-                operation: "add".to_string(),
+                operation: Operation::Add,
                 value: serde_json::json!(1),
             }],
             stack_size: 10,

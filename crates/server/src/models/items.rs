@@ -9,6 +9,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
+use crate::game_data::Operation;
+
 /// 物品类型（业务逻辑枚举）
 ///
 /// 用于业务逻辑判断，数据库存储为字符串
@@ -53,8 +55,9 @@ pub struct ItemEffect {
     /// 目标属性
     pub attribute: String,
 
-    /// 操作类型（add/subtract/multiply/set）
-    pub operation: String,
+    /// 操作类型（add / set / multiply）
+    #[serde(default)]
+    pub operation: Operation,
 
     /// 效果值
     pub value: JsonValue,
