@@ -29,6 +29,7 @@ pub mod governance;
 pub mod locations;
 pub mod narrative;
 pub mod prompt_template;
+pub mod relationship;
 pub mod rules;
 pub mod world;
 
@@ -40,6 +41,7 @@ pub use governance::*;
 pub use locations::*;
 pub use narrative::*;
 pub use prompt_template::*;
+pub use relationship::*;
 pub use rules::*;
 pub use world::*;
 
