@@ -51,9 +51,9 @@ item 5（关系协议）为 C 阶段正确性预留契约，不污染 A。
 | `config_type` | `agent/infra/transport/websocket.rs:822-934` 7 分支 if-else + `runtime/claw/protocol.rs:411` match | String |
 | `validation_type` | `actions/validator.rs:192` 6 分支 match（TYPE_* 常量） | String + `_=>{}` 静默吞 |
 | `operation`(ItemEffect) | `executor/basic.rs:227` + `processor/executor.rs:127` | String |
-| `item_type` | 枚举已存在 `models/items.rs:17`（5 变体）但多处漂移 | **已炸 bug**：registry.rs:57 把 Material/Tool 降级成 Consumable；manager.rs:347 的 "armor" 幽灵变体无对应枚举 |
-| `effect_type`(ActionEffect) | `executor/mod.rs:135` 5 分支（const 闭集） | **隐藏死代码**：`_=>{}` 吞掉 remove_item/teleport 两个已定义类型 |
-| `requirement_type`(ActionRequirement) | `executor/mod.rs:103` + `validator.rs:133` 4 分支 | location/skill 落 `_=>{}` 死分支 |
+| `item_type` | 枚举已存在 `models/items.rs:17`（5 变体）但多处漂移 | **已炸 bug**：registry.rs:57 把 Material/Tool 降级成 Consumable。5 变体（Consumable/Weapon/Currency/Material/Tool）均由 items.yaml 配置支撑。"armor" 是 manager.rs:347 的永不命中死代码，items.yaml 零配置，**删除不立法** |
+| `effect_type`(ActionEffect) | `executor/mod.rs:135` | 3 变体（attribute_change/attribute_max_change/add_item）均由 actions.yaml 配置支撑。remove_item/teleport 是 `#[allow(dead_code)]` 预留常量，**0 配置 0 实现 0 调用，删除不枚举化** |
+| `requirement_type`(ActionRequirement) | `validator.rs:133` | 2 变体（attribute/item）有配置或实现支撑。location/skill 是 `#[allow(dead_code)]` 预留常量，**0 配置 0 实现 0 调用，删除不枚举化** |
 
 **保持 String 的数据驱动字段**（枚举化是破坏根基的伪需求）：
 
@@ -67,11 +67,15 @@ item 5（关系协议）为 C 阶段正确性预留契约，不污染 A。
 **注意**：`weather`/`category` 不是"零 match"，是"match 但带可扩展兜底"。枚举化它们的危害是破坏配置层已设计的扩展点。
 
 **已炸 bug 修复清单**（枚举化时顺带修复）：
-1. `items/registry.rs:57`：Material/Tool 降级成 Consumable
-2. `game_data/cache.rs:223`：region 节点吞成 Map
-3. `inventory/manager.rs:347`："armor" 幽灵变体（枚举无 Armor）
-4. `executor/mod.rs:135`：effect_type 的 teleport/remove_item 死分支
-5. `executor/mod.rs:103`：requirement_type 的 location/skill 死分支
+1. `items/registry.rs:57`：Material/Tool 降级成 Consumable（真 bug，items.yaml 有配置）
+2. `game_data/cache.rs:223`：region 节点吞成 Map（真 bug，locations.yaml 有配置）
+
+**臆造能力删除清单**（`#[allow(dead_code)]` 预留常量，0 配置 0 实现 0 调用，删除而非枚举化）：
+3. `inventory/manager.rs:347` + agent `engine_prompts.rs:371`：删除 "armor" 幽灵匹配（items.yaml 零 armor 物品；agent 认 armor 只是 prompt 兜底过度泛化）
+4. `actions.rs:393-394`：删除 EFFECT_TYPE_REMOVE_ITEM/EFFECT_TYPE_TELEPORT 常量（actions.yaml 零配置）
+5. `actions.rs:341-342`：删除 REQUIREMENT_TYPE_LOCATION/REQUIREMENT_TYPE_SKILL 常量（actions.yaml 零配置）
+
+> **反对虚假实现**：绝不用 `tracing::warn!("未实现，跳过")` 给臆造分支盖实现戳。臆造的删除，真缺失的实现。
 
 ### Item 2：哨兵值→Option + serde 可往返 + 权威路径时间戳统一
 
@@ -85,8 +89,10 @@ item 5（关系协议）为 C 阶段正确性预留契约，不污染 A。
 - ~~`rebirth_delay=-1` 表"不可重生"~~：全仓库不存在，字段实为 `rebirth_delay_ticks: i32`，生产配置 `delay_ticks: 5`
 - ~~`max_durability=-1` 表"无限"~~：仅存在于测试夹具，生产 YAML 无此键
 
-**serde 可往返**（仅传输路径缺陷）：
-- `Attribute.metadata` 的 `#[serde(skip)]`（`protocol/types/attributes.rs:22`）：序列化丢字段 → 修复使其可往返
+**serde 可往返**：经查证，权威路径无 serde 可往返缺陷。
+
+**剔除的误判**（审查查证后确认非缺陷）：
+- ~~`Attribute.metadata` 的 `#[serde(skip)]`~~：`Attribute` 结构体从不进 WS/DB 序列化路径（传输用 `HashMap<String,i32>`，`entities.rs:47`；DB 用 `get_attributes_for_protocol()` 拍平为 i32）。agent 端零 import `protocol::Attribute`。skip 是冗余但正确的防御标注，不丢数据。
 
 **剔除的误判**：
 - ~~`SkillDefinition.content` 的 skip~~：是 SKILL.md 文件加载结构，不进 WS 传输路径（传输用 `SkillContent`）。配置加载型 skip，合理。
