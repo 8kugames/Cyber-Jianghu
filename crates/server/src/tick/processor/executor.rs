@@ -124,8 +124,8 @@ pub async fn apply_state_change(
                 if let Some(state) = agent_states.iter_mut().find(|s| s.agent_id == *agent_id) {
                     let context = state.get_formula_context();
                     for effect in effects {
-                        let value_to_apply = match effect.operator.as_str() {
-                            "set" => {
+                        let value_to_apply = match effect.operation {
+                            crate::game_data::Operation::Set => {
                                 if let Ok(current_value) = state
                                     .status
                                     .collection
@@ -139,7 +139,7 @@ pub async fn apply_state_change(
                                     effect.value
                                 }
                             }
-                            "multiply" => {
+                            crate::game_data::Operation::Multiply => {
                                 if let Ok(current_value) = state
                                     .status
                                     .collection
@@ -153,7 +153,7 @@ pub async fn apply_state_change(
                                     effect.value
                                 }
                             }
-                            _ => effect.value,
+                            crate::game_data::Operation::Add => effect.value,
                         };
 
                         if state

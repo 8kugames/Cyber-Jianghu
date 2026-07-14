@@ -58,6 +58,24 @@ fn default_decay_rate() -> i32 {
 // 物品效果（数据驱动）
 // ============================================================================
 
+/// 属性修改操作类型（数学语义闭集，dispatch 在 executor/basic.rs + processor/executor.rs）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Operation {
+    /// 加法：current + value
+    Add,
+    /// 设定：current = value
+    Set,
+    /// 乘法：current * value
+    Multiply,
+}
+
+impl Default for Operation {
+    fn default() -> Self {
+        Self::Add
+    }
+}
+
 /// 物品效果（数据驱动结构）
 ///
 /// 使用 JsonValue 存储效果值，支持任意类型
@@ -72,9 +90,9 @@ pub struct ItemEffect {
     #[serde(default)]
     pub attribute: String,
 
-    /// 操作类型（如 "add", "set", "multiply"）
+    /// 操作类型（add / set / multiply）
     #[serde(default)]
-    pub operation: String,
+    pub operation: Operation,
 
     /// 效果值（可以是数字、字符串、布尔值等）
     #[serde(default)]

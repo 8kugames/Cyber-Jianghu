@@ -2,6 +2,8 @@ use cyber_jianghu_protocol::AttributeValue;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::game_data::Operation;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionExecutionResult {
     pub intent_id: Option<Uuid>,
@@ -48,7 +50,8 @@ impl ActionExecutionResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ItemEffect {
     pub attribute: String,
-    pub operator: String,
+    #[serde(default)]
+    pub operation: Operation,
     pub value: i32,
 }
 
