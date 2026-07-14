@@ -221,11 +221,7 @@ impl LocationRegistry {
                 node_id: node.node_id.clone(),
                 name: node.name.clone(),
                 node_type: node.node_type,
-                parent_id: if node.parent_id.is_empty() {
-                    None
-                } else {
-                    Some(node.parent_id.clone())
-                },
+                parent_id: node.parent_id.clone(),
                 environmental_damage: node.environmental_damage,
                 gatherable_items: node.gatherable_items.clone().unwrap_or_default(),
                 implicit_travel_cost: None,
@@ -307,7 +303,7 @@ data:
     - node_id: test_region
       name: 测试区域
       type: "region"
-      parent_id: ""
+      parent_id: None
   edges: []
 "#;
         let config: UnifiedLocationsConfig = serde_yaml::from_str(yaml).unwrap();
@@ -584,7 +580,7 @@ data:
                         node_id: "lobby".to_string(),
                         name: "大堂".to_string(),
                         node_type: cyber_jianghu_protocol::LocationNodeType::SubScene,
-                        parent_id: "inn".to_string(),
+                        parent_id: Some("inn".to_string()),
                         description: None,
                         environmental_damage: None,
                         gatherable_items: None,
@@ -593,7 +589,7 @@ data:
                         node_id: "kitchen".to_string(),
                         name: "厨房".to_string(),
                         node_type: cyber_jianghu_protocol::LocationNodeType::SubScene,
-                        parent_id: "inn".to_string(),
+                        parent_id: Some("inn".to_string()),
                         description: None,
                         environmental_damage: None,
                         gatherable_items: None,

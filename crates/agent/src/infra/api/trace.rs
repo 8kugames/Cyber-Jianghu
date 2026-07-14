@@ -272,7 +272,7 @@ async fn flush_loop(cfg: TraceConfig) {
                     prompt_tokens: t.prompt_tokens,
                     completion_tokens: t.completion_tokens,
                     ok: t.ok,
-                    wall_clock: Some(t.wall_clock.to_rfc3339()),
+                    wall_clock: Some(t.wall_clock.timestamp_millis()),
                 })
                 .collect();
             let msg = cyber_jianghu_protocol::ClientMessage::TraceReport { traces: entries };

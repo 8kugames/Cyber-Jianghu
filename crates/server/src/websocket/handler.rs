@@ -936,11 +936,13 @@ async fn handle_trace_report(
     let traces_dir = crate::paths::get_data_dir().join("traces");
     for entry in traces {
         let soul = &entry.soul_stage;
-        // date 用 trace 真实产生时间（wall_clock 前10位=YYYY-MM-DD），非 server 接收时间
+        // date 用 trace 真实产生时间（Unix 毫秒），非 server 接收时间
         let date = entry
             .wall_clock
-            .as_deref()
-            .and_then(|wc| wc.get(..10).map(|s| s.to_string()))
+            .and_then(|ms| {
+                chrono::DateTime::from_timestamp_millis(ms)
+                    .map(|dt| dt.format("%Y-%m-%d").to_string())
+            })
             .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
         let dir = traces_dir
             .join(format!("soul={}", soul))
