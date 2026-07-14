@@ -725,23 +725,10 @@ pub struct AttributeNarrativeData {
     pub drive: Option<AttributeDriveData>,
 }
 
-/// 属性驱动配置（配置编辑器用）
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct AttributeDriveData {
-    pub name: String,
-    pub reason: String,
-    pub goal: String,
-}
-
-/// 阈值数据
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ThresholdData {
-    pub min: i32,
-    pub max: i32,
-    pub description: String,
-    #[serde(default)]
-    pub urgency: u8,
-}
+// AttributeDriveData / ThresholdData 已合并到 protocol（字段全同），
+// 以 protocol::AttributeDriveConfig / NarrativeThreshold 为唯一真相源。
+pub use cyber_jianghu_protocol::types::AttributeDriveConfig as AttributeDriveData;
+pub use cyber_jianghu_protocol::types::NarrativeThreshold as ThresholdData;
 
 /// 状态效果叙事数据
 #[derive(Debug, Clone, Deserialize, Serialize)]
