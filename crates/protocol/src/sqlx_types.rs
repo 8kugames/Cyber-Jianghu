@@ -120,6 +120,12 @@ pub enum ItemType {
 
     /// 货币（如银子）
     Currency,
+
+    /// 材料（如面粉、木材）
+    Material,
+
+    /// 工具（制作时需要，不消耗）
+    Tool,
 }
 
 impl fmt::Display for ItemType {
@@ -128,6 +134,8 @@ impl fmt::Display for ItemType {
             Self::Consumable => write!(f, "consumable"),
             Self::Weapon => write!(f, "weapon"),
             Self::Currency => write!(f, "currency"),
+            Self::Material => write!(f, "material"),
+            Self::Tool => write!(f, "tool"),
         }
     }
 }
@@ -140,6 +148,8 @@ impl FromStr for ItemType {
             "consumable" => Ok(Self::Consumable),
             "weapon" => Ok(Self::Weapon),
             "currency" => Ok(Self::Currency),
+            "material" => Ok(Self::Material),
+            "tool" => Ok(Self::Tool),
             _ => Err(format!("Invalid item type: {}", s)),
         }
     }

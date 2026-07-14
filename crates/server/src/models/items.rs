@@ -11,41 +11,8 @@ use serde_json::Value as JsonValue;
 
 use crate::game_data::Operation;
 
-/// 物品类型（业务逻辑枚举）
-///
-/// 用于业务逻辑判断，数据库存储为字符串
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ItemType {
-    /// 消耗品（如馒头、水）
-    Consumable,
-
-    /// 武器（如刀）
-    Weapon,
-
-    /// 货币（如银子）
-    Currency,
-
-    /// 材料（如面粉、木材）
-    Material,
-
-    /// 工具（制作时需要，不消耗）
-    Tool,
-}
-
-impl ItemType {
-    /// 从字符串解析
-    pub fn parse(s: &str) -> Self {
-        match s {
-            "consumable" => ItemType::Consumable,
-            "weapon" => ItemType::Weapon,
-            "currency" => ItemType::Currency,
-            "material" => ItemType::Material,
-            "tool" => ItemType::Tool,
-            _ => ItemType::Consumable, // 默认值
-        }
-    }
-}
+// 物品类型统一以 protocol 为权威定义（带 sqlx 支持），此处仅 re-export
+pub use cyber_jianghu_protocol::sqlx_types::ItemType;
 
 /// 物品效果（数据库模型）
 ///
