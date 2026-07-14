@@ -54,3 +54,9 @@ data:
     approve_threshold: 2
     poll_interval_secs: 60
     group_stale_secs: 1800
+
+  # 天魂层展示名映射（数据驱动，前端从 API 拉取渲染，零硬编码）
+  layer_display:
+    layer1: "动作审查"
+    layer2: "规则校验"
+    layer3: "意图审查"

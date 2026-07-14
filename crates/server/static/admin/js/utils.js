@@ -215,9 +215,61 @@ var LAYER_NAMES = {
     layer3: "意图审查",
 };
 
-// 解析 target_agent_id → 角色名称（agent_id）（history.html + agents.js 共用）
+// 从 API 获取天魂层展示名（数据驱动），返回 LAYER_NAMES 的超集
+// 优先从 souls.yaml layer_display 配置读取，失败时降级到 LAYER_NAMES
+var _layerDisplayCache = null;
+async function getLayerDisplay() {
+    if (_layerDisplayCache) return _layerDisplayCache;
+    try {
+        var resp = await fetch('/api/dashboard/layer-display');
+        if (resp.ok) {
+            var apiMap = await resp.json();
+            _layerDisplayCache = Object.assign({}, LAYER_NAMES, apiMap);
+            return _layerDisplayCache;
+        }
+    } catch (e) { console.warn("layer-display API 不可用，降级到硬编码默认值", e); }
+    _layerDisplayCache = LAYER_NAMES;
+    return _layerDisplayCache;
+}
+
+// 取动作 source_type 来源中文化（UI 标签，由 QuData.source_type 固定枚举决定）
+var SOURCE_TYPE_NAMES = {
+    ground: "地面",
+    agent: "角色",
+    resource: "资源点",
+};
+
+// ============================================================================
+// Display Map（展示名映射缓存）
+// 经历日志渲染前必须 await loadDisplayMap() 就绪，用于翻译 target_agent_id。
+// 数据源：后端 /api/dashboard/display-map（items.yaml + agents 表），单一权威源。
+// ============================================================================
+var displayMapCache = { agents: {}, items: {}, _loaded: false, _promise: null };
+
+function loadDisplayMap() {
+    if (displayMapCache._loaded || displayMapCache._promise) return displayMapCache._promise;
+    displayMapCache._promise = apiFetch(API.BASE + "/display-map")
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            displayMapCache.agents = data.agents || {};
+            displayMapCache.items = data.items || {};
+            displayMapCache._loaded = true;
+        })
+        .catch(function (e) {
+            console.warn("加载展示名映射失败:", e);
+            displayMapCache._promise = null; // 允许重试
+        });
+    return displayMapCache._promise;
+}
+
+// 解析 target_agent_id → 角色名称（history.html + agents.js 共用）
+// 优先查 displayMapCache.agents（权威映射），其次 allAgentsMap，兜底短 ID。
 function resolveTargetName(targetId) {
     if (!targetId) return "某人";
+    // 权威映射优先（覆盖已死亡/离线角色）
+    if (displayMapCache.agents[targetId]) {
+        return displayMapCache.agents[targetId] + "（" + targetId.substring(0, 8) + "）";
+    }
     if (typeof allAgentsMap !== "undefined" && allAgentsMap && allAgentsMap[targetId]) {
         var agent = allAgentsMap[targetId];
         var name = agent.name || targetId;
@@ -225,4 +277,63 @@ function resolveTargetName(targetId) {
         return name + "（" + shortId + "）";
     }
     return targetId.substring(0, 8) + "...";
+}
+
+// 来源类型中文化（UI 标签，非业务数据）
+function resolveSourceName(sourceType) {
+    if (!sourceType) return "";
+    return SOURCE_TYPE_NAMES[sourceType] || sourceType;
+}
+
+// 判断字符串是否为 UUID 格式（用于识别 LLM 幻觉产生的无效 item_id）
+var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// ============================================================================
+// 统一动作渲染器（替代 history.js renderSingleAction 和 agents.js 旧内联渲染）
+// 返回 HTML-escaped 纯文本（不含标签），由调用方决定外层包裹。
+// ============================================================================
+function renderActionText(aType, aData) {
+    if (!aData) aData = {};
+    if (typeof aData === "string") { try { aData = JSON.parse(aData); } catch (e) { aData = {}; } }
+    var content = aData.content || "";
+
+    // 说话类：对目标 / 向在场众人 / 密语 / 大喊
+    if (isSpeakAtype(aType, aData) && content)
+        return "向在场众人说话：\"" + escapeHtml(content) + "\"";
+    if (isWhisperAtype(aType, aData) && content)
+        return "向" + escapeHtml(resolveTargetName(aData.target_agent_id)) + "密语：\"" + escapeHtml(content) + "\"";
+    if (isShoutAtype(aType, aData) && content)
+        return "大喊：\"" + escapeHtml(content) + "\"";
+
+    var text = escapeHtml(getActionTypeDisplay(aType));
+
+    // 物品类字段结构化展示
+    if (aData.item_id) {
+        // 合法物品 ID（items.yaml 里是中文）→ display-map 翻译物品名
+        // UUID 格式 → LLM 幻觉，标注无效（历史遗留记录兜底）
+        if (UUID_RE.test(aData.item_id)) {
+            text += " [无效物品]";
+        } else if (displayMapCache.items[aData.item_id]) {
+            text += " " + escapeHtml(displayMapCache.items[aData.item_id]);
+        } else {
+            text += " " + escapeHtml(aData.item_id);
+        }
+    }
+    if (aData.quantity) text += " x" + aData.quantity;
+    if (aData.source_type) text += "（" + escapeHtml(resolveSourceName(aData.source_type)) + "）";
+    if (aData.recipient_type) text += "（→" + escapeHtml(resolveSourceName(aData.recipient_type)) + "）";
+    if (aData.content) text += " \"" + escapeHtml(content) + "\"";
+    if (aData.target_agent_id) text += " → " + escapeHtml(resolveTargetName(aData.target_agent_id));
+    if (aData.target_location) text += " → " + escapeHtml(aData.target_location);
+
+    // 剩余未知字段：键值对中文化（非暴力 JSON.stringify）
+    var known = ["content", "item_id", "quantity", "source_type", "source_id",
+                 "recipient_type", "recipient_id", "target_agent_id", "target_location", "channel"];
+    var extra = Object.keys(aData).filter(function (k) { return known.indexOf(k) === -1; });
+    if (extra.length > 0) {
+        text += " " + extra.map(function (k) {
+            return escapeHtml(k) + ":" + escapeHtml(String(aData[k]).substring(0, 30));
+        }).join("，");
+    }
+    return text;
 }

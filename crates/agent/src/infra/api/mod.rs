@@ -456,6 +456,10 @@ pub fn create_api_router() -> Router<HttpApiState> {
             get(handlers::get_soul_cycles_handler),
         ) // 获取三魂循环完整记录（本地内存）
         .route(
+            "/api/dashboard/layer-display",
+            get(handlers::get_layer_display),
+        ) // 天魂层展示名映射（数据驱动，从 souls.yaml 读取）
+        .route(
             "/api/v1/character/biography",
             get(handlers::get_biography_handler),
         ) // 获取角色传记（缓存）
@@ -627,7 +631,7 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
         .with_state(api_state.clone())
         .fallback(move |req: axum::extract::Request| static_file_handler(req, static_dir.clone()));
 
-    let addr = format!("127.0.0.1:{}", port);
+    let addr = format!("0.0.0.0:{}", port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => l,
         Err(e) => {
@@ -641,17 +645,17 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
     let local_addr = listener.local_addr()?;
     info!("[http] API Server listening on {}", local_addr);
     info!("[http] HTTP_PORT={}", local_addr.port());
-    info!("[http] Web Panel: http://127.0.0.1:{}/", local_addr.port());
+    info!("[http] Web Panel: http://0.0.0.0:{}/", local_addr.port());
     info!(
-        "[http] - Dashboard:       http://127.0.0.1:{}/#/dashboard",
+        "[http] - Dashboard:       http://0.0.0.0:{}/#/dashboard",
         local_addr.port()
     );
     info!(
-        "[http] - Character info:  http://127.0.0.1:{}/#/characters",
+        "[http] - Character info:  http://0.0.0.0:{}/#/characters",
         local_addr.port()
     );
     info!(
-        "[http] - Settings:        http://127.0.0.1:{}/#/settings",
+        "[http] - Settings:        http://0.0.0.0:{}/#/settings",
         local_addr.port()
     );
 

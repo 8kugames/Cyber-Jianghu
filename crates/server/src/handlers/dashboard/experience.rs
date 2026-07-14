@@ -100,17 +100,17 @@ pub async fn get_agent_experiences(
         .unwrap_or(20);
     let offset = (page - 1) * limit;
 
-    // 获取总数
+    // 获取经历日志总 tick 数（按 tick_id 分组计数）
     let total: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM agent_action_logs WHERE agent_id = $1")
+        sqlx::query_scalar("SELECT COUNT(DISTINCT tick_id) FROM agent_action_logs WHERE agent_id = $1")
             .bind(agent_id)
             .fetch_one(&state.db_pool)
             .await
             .unwrap_or(0);
 
-    // 获取经历日志
-    let rows = sqlx::query(
-        "SELECT tick_id, action_type, action_type_display, action_data, result, result_message, thought_log, reflector_thought, narrative, soul_cycle_metadata, created_at
+    // 先获取分页的 tick_id 列表，再批量拉取全部 pipe_seq 行
+    let tick_ids: Vec<i64> = sqlx::query_scalar(
+        "SELECT DISTINCT tick_id
          FROM agent_action_logs
          WHERE agent_id = $1
          ORDER BY tick_id DESC
@@ -122,39 +122,105 @@ pub async fn get_agent_experiences(
     .fetch_all(&state.db_pool)
     .await
     .map_err(|e| {
+        tracing::error!("Failed to fetch experience tick_ids: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    if tick_ids.is_empty() {
+        return Ok(Json(ExperiencesResponse {
+            experiences: Vec::new(),
+            total,
+            page,
+            limit,
+        }));
+    }
+
+    // 构建 IN 子句参数（sqlx 不支持变长 IN，用 = ANY 替代）
+    let rows = sqlx::query(
+        "SELECT tick_id, action_type, action_type_display, action_data, result, result_message,
+                thought_log, reflector_thought, narrative, soul_cycle_metadata, pipe_seq, created_at
+         FROM agent_action_logs
+         WHERE agent_id = $1 AND tick_id = ANY($2)
+         ORDER BY tick_id DESC, pipe_seq ASC",
+    )
+    .bind(agent_id)
+    .bind(&tick_ids)
+    .fetch_all(&state.db_pool)
+    .await
+    .map_err(|e| {
         tracing::error!("Failed to fetch experiences: {}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let experiences: Vec<ExperienceEntry> = rows
+    // 按 tick_id 分组，合并多 pipe_seq 行为 execution_results
+    use std::collections::HashMap;
+    let mut grouped: HashMap<i64, Vec<sqlx::postgres::PgRow>> = HashMap::new();
+    for row in rows {
+        let tid: i64 = row.get("tick_id");
+        grouped.entry(tid).or_default().push(row);
+    }
+
+    let experiences: Vec<ExperienceEntry> = grouped
         .into_iter()
-        .map(|row| {
-            let metadata: Option<serde_json::Value> = row.get("soul_cycle_metadata");
+        .map(|(_tid, group)| {
+            // 按 pipe_seq 升序排列（已由 SQL 保证）
+            // pipe_seq=0 行为主行，含完整三魂元数据
+            let primary = group.first().expect("group must have at least one row");
+            let metadata: Option<serde_json::Value> = primary.get("soul_cycle_metadata");
             let world_time_json: Option<String> = metadata
                 .as_ref()
                 .and_then(|m| m.get("world_time"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
+
+            // 构建 execution_results: key=pipe_seq → {success, error, state_change_summary}
+            let execution_results: Option<serde_json::Value> = {
+                let mut map = serde_json::Map::new();
+                for row in &group {
+                    let pipe_seq: i32 = row.get("pipe_seq");
+                    let result: Option<String> = row.get("result");
+                    let result_msg: Option<String> = row.get("result_message");
+                    let is_success = result.as_deref() == Some("success");
+                    map.insert(
+                        pipe_seq.to_string(),
+                        serde_json::json!({
+                            "success": is_success,
+                            "error": if is_success { serde_json::Value::Null } else { serde_json::Value::String(result_msg.clone().unwrap_or_default()) },
+                            "state_change_summary": if is_success { serde_json::Value::String(result_msg.clone().unwrap_or_default()) } else { serde_json::Value::Null },
+                        }),
+                    );
+                }
+                Some(serde_json::Value::Object(map))
+            };
+
+            // 将 execution_results 注入 soul_cycle_metadata
+            let enriched_metadata = metadata.map(|mut m| {
+                if let serde_json::Value::Object(ref mut obj) = m {
+                    obj.insert("execution_results".to_string(), execution_results.clone().unwrap_or(serde_json::Value::Null));
+                }
+                m
+            });
+
             ExperienceEntry {
-                tick_id: row.get("tick_id"),
-                action_type: row.get("action_type"),
-                action_type_display: row.get("action_type_display"),
-                action_data: row
+                tick_id: primary.get("tick_id"),
+                action_type: primary.get("action_type"),
+                action_type_display: primary.get("action_type_display"),
+                action_data: primary
                     .get::<Option<serde_json::Value>, _>("action_data")
                     .unwrap_or(serde_json::Value::Null),
-                result: row.get("result"),
-                result_message: row.get("result_message"),
-                thought_log: row.get("thought_log"),
-                reflector_thought: row.get("reflector_thought"),
-                narrative: row.get("narrative"),
-                soul_cycle_metadata: metadata,
+                result: primary.get("result"),
+                result_message: primary.get("result_message"),
+                thought_log: primary.get("thought_log"),
+                reflector_thought: primary.get("reflector_thought"),
+                narrative: primary.get("narrative"),
+                soul_cycle_metadata: enriched_metadata,
                 game_day: crate::time_utils::world_time_json_to_game_day(
                     world_time_json.as_deref(),
                 ),
                 formatted_time: crate::time_utils::world_time_json_to_chinese(
                     world_time_json.as_deref(),
                 ),
-                created_at: row.get("created_at"),
+                created_at: primary.get("created_at"),
             }
         })
         .collect();
@@ -400,4 +466,99 @@ pub async fn get_items() -> Json<Vec<ItemSummary>> {
         })
         .collect();
     Json(items)
+}
+
+// ============================================================================
+// Display Map API（展示名映射，供经历日志前端翻译 agent_id / item_id）
+// ============================================================================
+
+/// 展示名映射响应
+///
+/// - `items`：item_id → 物品名（来自 items.yaml 权威配置源）
+/// - `agents`：agent_id → 角色名（来自 agents 表，含全部状态：在线/离线/死亡）
+#[derive(Debug, Serialize)]
+pub struct DisplayMapResponse {
+    pub items: HashMap<String, String>,
+    pub agents: HashMap<String, String>,
+}
+
+/// 获取展示名映射
+///
+/// GET /api/dashboard/display-map
+///
+/// 前端经历日志在渲染前拉取本端点，用于将 action_data 中的 target_agent_id
+/// 翻译为角色名。agents 映射查全表（无状态过滤、无 LIMIT），覆盖历史日志中
+/// 已死亡/离线的目标角色——这是根治"角色 ID 未翻译"的单一数据源。
+pub async fn get_display_map(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<DisplayMapResponse>, StatusCode> {
+    // items：从物品配置注册表（items.yaml）生成，单一权威源、零硬编码
+    let items: HashMap<String, String> =
+        crate::game_data::registry::ItemRegistry::all_item_ids()
+            .iter()
+            .filter_map(|id| {
+                crate::game_data::registry::ItemRegistry::get(id)
+                    .map(|entry| (entry.item_id, entry.name))
+            })
+            .collect();
+
+    // agents：一条轻量 SQL，全状态、无 JOIN
+    let rows = sqlx::query("SELECT agent_id, name FROM agents")
+        .fetch_all(&state.db_pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("display-map 查询 agents 失败: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let agents: HashMap<String, String> = rows
+        .iter()
+        .map(|r| {
+            let aid: Uuid = r.get("agent_id");
+            let name: String = r.get("name");
+            (aid.to_string(), name)
+        })
+        .collect();
+
+    Ok(Json(DisplayMapResponse { items, agents }))
+}
+
+/// 天魂层展示名映射（数据驱动，从 souls.yaml layer_display 读取）
+///
+/// GET /api/dashboard/layer-display
+pub async fn get_layer_display(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<std::collections::HashMap<String, String>>, StatusCode> {
+    let yaml_path = state.config_dir.join("souls.yaml");
+    let content = std::fs::read_to_string(&yaml_path).map_err(|e| {
+        tracing::error!("读取 souls.yaml 失败: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let parsed: serde_json::Value = serde_yaml::from_str(&content).map_err(|e| {
+        tracing::error!("解析 souls.yaml 失败: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let map = parsed
+        .get("data")
+        .and_then(|d| d.get("tianhun"))
+        .and_then(|t| t.get("layer_display"))
+        .map(|v| {
+            serde_json::from_value::<std::collections::HashMap<String, String>>(v.clone())
+                .unwrap_or_else(|e| {
+                    tracing::warn!("souls.yaml layer_display 字段解析失败: {}", e);
+                    std::collections::HashMap::new()
+                })
+        })
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| {
+            // 向后兼容：若无配置，返回默认映射
+            let mut m = std::collections::HashMap::new();
+            m.insert("layer1".to_string(), "动作审查".to_string());
+            m.insert("layer2".to_string(), "规则校验".to_string());
+            m.insert("layer3".to_string(), "意图审查".to_string());
+            m
+        });
+
+    Ok(Json(map))
 }

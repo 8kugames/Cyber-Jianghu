@@ -58,6 +58,35 @@ fn event_type_display(event_type: &str) -> String {
     }
 }
 
+/// game_day 区间（整数）→ "x年x月x日至x年x月x日"。
+/// 配置驱动：复用 mod.rs 的 format_game_day（读 TimeRegistry CalendarConfig）。
+fn format_date_range(game_day_start: i32, game_day_end: i32) -> String {
+    format!(
+        "{}至{}",
+        super::format_game_day(game_day_start as i64),
+        super::format_game_day(game_day_end as i64)
+    )
+}
+
+/// tick 区间（秒级真实时间戳）→ "x年x月x日至x年x月x日"。
+///
+/// 涌现事件的 tick_start/tick_end 是真实秒数，必须先除以 real_seconds_per_game_day
+/// 转为 game_day，再转中文日期。配置缺失时 fallback 标注为 tick 而非"日"，避免尺度错位。
+fn format_tick_range_chinese(tick_start: i64, tick_end: i64) -> String {
+    match super::collector::real_seconds_per_game_day() {
+        Ok(rspgd) if rspgd > 0 => {
+            let gd_start = tick_start / rspgd + 1;
+            let gd_end = tick_end / rspgd + 1;
+            format!(
+                "{}至{}",
+                super::format_game_day(gd_start),
+                super::format_game_day(gd_end)
+            )
+        }
+        _ => format!("tick {}–{}", tick_start, tick_end),
+    }
+}
+
 /// 模板生成
 pub fn generate_template(data: &CollectedData) -> Result<String> {
     let mut summary = String::new();
@@ -65,8 +94,9 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
 
     // 标题
     summary.push_str(&format!(
-        "【第{}日至第{}日】{}季·群像传记{nl}{nl}",
-        data.game_day_start, data.game_day_end, data.season
+        "【{}】{}季·群像传记{nl}{nl}",
+        format_date_range(data.game_day_start, data.game_day_end),
+        data.season
     ));
 
     // 概述
@@ -250,9 +280,8 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
                 .map(|id| agent_name_in(id, data).unwrap_or("?"))
                 .collect();
             summary.push_str(&format!(
-                "- 第{}–{}日：{} 共 {} 次互动（{}）\n",
-                e.tick_start,
-                e.tick_end,
+                "- {}：{} 共 {} 次互动（{}）\n",
+                format_tick_range_chinese(e.tick_start, e.tick_end),
                 names.join("、"),
                 e.action_count,
                 e.categories_covered.join("、"),
@@ -286,8 +315,9 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
     // 结语
     summary.push_str(&format!("--{nl}{nl}"));
     summary.push_str(&format!(
-        "第{}日至第{}日，{}季。江湖儿女们在这片天地间继续书写着属于自己的故事。\n",
-        data.game_day_start, data.game_day_end, data.season
+        "{}, {}季。江湖儿女们在这片天地间继续书写着属于自己的故事。\n",
+        format_date_range(data.game_day_start, data.game_day_end),
+        data.season
     ));
 
     Ok(summary)
@@ -297,7 +327,10 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
 ///
 /// 配置方式：从 llm.yaml 配置文件读取
 /// 添加超时和重试机制
-pub async fn generate_llm(data: &CollectedData) -> Result<String> {
+pub async fn generate_llm(
+    data: &CollectedData,
+    previous_summary: Option<&str>,
+) -> Result<String> {
     // 从配置文件读取 LLM 配置
     let config = match crate::game_data::loaders::load_llm(&crate::paths::get_config_dir()) {
         Ok(cfg) => cfg,
@@ -317,7 +350,7 @@ pub async fn generate_llm(data: &CollectedData) -> Result<String> {
         anyhow::bail!("LLM API 密钥未设置");
     }
 
-    let prompt = build_llm_prompt(data);
+    let prompt = build_llm_prompt(data, previous_summary);
 
     tracing::info!(
         "正在调用 LLM 生成群像传记 (provider: {}, model: {}, base_url: {})",
@@ -432,14 +465,26 @@ pub async fn generate_llm(data: &CollectedData) -> Result<String> {
 }
 
 /// 构建 LLM prompt
-fn build_llm_prompt(data: &CollectedData) -> String {
+fn build_llm_prompt(data: &CollectedData, previous_summary: Option<&str>) -> String {
     let mut prompt = String::new();
     let agent_count = data.agents.len() as i32;
 
     prompt.push_str(&format!(
-        "请为以下江湖周期撰写一份群像传记（第{}日至第{}日，{}季）：\n\n",
-        data.game_day_start, data.game_day_end, data.season
+        "请为以下江湖周期撰写一份群像传记（{}，{}季）：\n\n",
+        format_date_range(data.game_day_start, data.game_day_end),
+        data.season
     ));
+
+    // 前情提要（上一周期纪事）——整体注入，不截断，保持跨周期人设一致。
+    // 首周期无前情时 previous_summary 为 None，跳过。
+    if let Some(prev) = previous_summary {
+        let trimmed = prev.trim();
+        if !trimmed.is_empty() {
+            prompt.push_str("前情提要（上一周期纪事）：\n");
+            prompt.push_str(trimmed);
+            prompt.push_str("\n\n");
+        }
+    }
 
     prompt.push_str(&format!("- 参与人数: {} 人\n", agent_count));
     prompt.push_str(&format!("- 总行动数: {} 次\n", data.action_stats.total));
@@ -524,9 +569,8 @@ fn build_llm_prompt(data: &CollectedData) -> String {
                 .map(|id| agent_name_in(id, data).unwrap_or("?"))
                 .collect();
             prompt.push_str(&format!(
-                "- 第{}–{}日，{} 之间出现 {} 互动链\n",
-                e.tick_start,
-                e.tick_end,
+                "- {}，{} 之间出现 {} 互动链\n",
+                format_tick_range_chinese(e.tick_start, e.tick_end),
                 names.join("、"),
                 e.categories_covered.join("、"),
             ));
@@ -581,6 +625,7 @@ mod tests {
 
     #[test]
     fn test_template_generation() {
+        crate::game_data::init_test_registry();
         let data = CollectedData {
             period_start: 1,
             period_end: 168,
@@ -614,7 +659,8 @@ mod tests {
         };
 
         let summary = generate_template(&data).unwrap();
-        assert!(summary.contains("第1日至第7日"));
+        // game_day 1→一年元月一日, 7→一年元月七日（days_per_season=10, seasons_per_year=4）
+        assert!(summary.contains("一年元月一日至一年元月七日"));
         assert!(summary.contains("春"));
         assert!(summary.contains("1 位江湖儿女"));
         assert!(summary.contains("100 次行动"));
@@ -623,6 +669,7 @@ mod tests {
     /// AC: build_llm_prompt 含 agent narrative 文本（3a 信息源增强）
     #[test]
     fn test_llm_prompt_contains_narrative() {
+        crate::game_data::init_test_registry();
         let data = CollectedData {
             period_start: 1,
             period_end: 168,
@@ -651,16 +698,62 @@ mod tests {
             emergence_status: EmergenceCollectStatus::Ok,
         };
 
-        let prompt = build_llm_prompt(&data);
+        let prompt = build_llm_prompt(&data, None);
         // narrative 应被注入 prompt（让 LLM 拿到角色素材）
         assert!(prompt.contains("今日与旧友重逢"), "LLM prompt 应包含 agent narrative");
         assert!(prompt.contains("李四"));
+    }
+
+    /// AC: build_llm_prompt 含前情提要（跨周期人设一致性）
+    #[test]
+    fn test_llm_prompt_contains_previous_summary() {
+        crate::game_data::init_test_registry();
+        let data = CollectedData {
+            period_start: 169,
+            period_end: 336,
+            game_day_start: 8,
+            game_day_end: 14,
+            season: "春".to_string(),
+            agents: vec![],
+            highlights: vec![],
+            action_stats: ActionStats {
+                total: 0,
+                by_type: HashMap::new(),
+                success_rate: 1.0,
+            },
+            location_stats: vec![],
+            deaths: 0,
+            births: 0,
+            emergence_events: vec![],
+            emergence_status: EmergenceCollectStatus::Ok,
+        };
+
+        let prev = "上一周期，张三与李四在龙门客栈结为生死之交。";
+        let prompt = build_llm_prompt(&data, Some(prev));
+        assert!(prompt.contains("前情提要"), "LLM prompt 应含前情提要段");
+        assert!(
+            prompt.contains("张三与李四在龙门客栈结为生死之交"),
+            "前情提要应完整注入，不截断"
+        );
+    }
+
+    /// AC: format_tick_range_chinese 把秒级 tick 转为中文日期（tick 不再当"日"渲染）
+    #[test]
+    fn test_format_tick_range_chinese() {
+        crate::game_data::init_test_registry();
+        // 测试配置: rspgd=60*1*24=1440；tick 2880→game_day 3, tick 4320→game_day 4
+        // game_day 3→一年元月三日, 4→一年元月四日
+        assert_eq!(
+            format_tick_range_chinese(2880, 4320),
+            "一年元月三日至一年元月四日"
+        );
     }
 
     /// AC: build_llm_prompt 含涌现事件（3c 涌现流入 chronicle）
     #[test]
     fn test_llm_prompt_contains_emergence_events() {
         use crate::emergence::EmergenceEvent;
+        crate::game_data::init_test_registry();
         let agent_a = uuid::Uuid::new_v4();
         let agent_b = uuid::Uuid::new_v4();
         let data = CollectedData {
@@ -711,7 +804,7 @@ mod tests {
             emergence_status: EmergenceCollectStatus::Ok,
         };
 
-        let prompt = build_llm_prompt(&data);
+        let prompt = build_llm_prompt(&data, None);
         assert!(prompt.contains("因果涌现事件"), "LLM prompt 应包含涌现事件段");
         assert!(prompt.contains("王五") && prompt.contains("赵六"));
     }

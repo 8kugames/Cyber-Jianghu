@@ -780,6 +780,19 @@ async fn main() -> Result<()> {
                 handlers::auth::require_read_token,
             )),
         )
+        // 展示名映射（经历日志前端翻译 agent_id/item_id 用）
+        .route(
+            "/api/dashboard/display-map",
+            get(handlers::dashboard::get_display_map).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            )),
+        )
+        // 天魂层展示名映射（数据驱动，从 souls.yaml 读取）
+        .route(
+            "/api/dashboard/layer-display",
+            get(handlers::dashboard::get_layer_display),
+        )
         // Dashboard API (需要 Read 权限)
         .route(
             "/api/dashboard/stats",
@@ -975,8 +988,10 @@ async fn main() -> Result<()> {
                 )),
         )
         // LLM Config API (独立于通用配置编辑器)
+        // 前端 settings.html 经 API.BASE="/api/dashboard" 发请求，
+        // 故路由需带 /dashboard 前缀以与其它 dashboard 接口一致。
         .route(
-            "/api/config/llm",
+            "/api/dashboard/config/llm",
             get(handlers::config_llm::get_llm_config)
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
@@ -990,14 +1005,14 @@ async fn main() -> Result<()> {
         )
         // LLM Status & Enabled API
         .route(
-            "/api/config/llm/status",
+            "/api/dashboard/config/llm/status",
             get(handlers::config_llm::get_llm_status).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 handlers::auth::require_read_token,
             )),
         )
         .route(
-            "/api/config/llm/enabled",
+            "/api/dashboard/config/llm/enabled",
             get(handlers::config_llm::get_llm_enabled)
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),

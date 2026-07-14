@@ -204,12 +204,22 @@ async function mountBiography(container, ctx) {
 
 let expPage = 1;
 
-const LAYER_NAMES = { layer1: '动作审查', layer2: '规则校验', layer3: '意图审查' };
+// 天魂层名：可被 tryFetchLayerDisplay() 覆盖（从服务器 souls.yaml 配置驱动）
+var LAYER_NAMES = { layer1: '动作审查', layer2: '规则校验', layer3: '意图审查' };
 const SPEAK_TYPES = { speak: true, talk: true, say: true, chat: true, 说话: true };
+
+// 尝试从服务器 souls.yaml layer_display 配置拉取天魂层名（失败时静默保留 LAYER_NAMES 硬编码值）
+async function tryFetchLayerDisplay() {
+    try {
+        var resp = await fetch('/api/dashboard/layer-display');
+        if (resp.ok) Object.assign(LAYER_NAMES, await resp.json());
+    } catch (_) {}
+}
 
 async function mountExperiences(container, ctx) {
     expPage = 1;
     showLoading(container);
+    tryFetchLayerDisplay(); // best-effort 从服务器拉取层配置；失败时静默保留硬编码
     await loadExpPage(container, ctx);
 }
 
@@ -290,7 +300,7 @@ export function renderTickCard(tickId, attempts, immediate) {
         if (attempts.length > 1) html += `<div class="tick-attempt-label">行动 ${idx + 1}</div>`;
         html += renderRenhun(att.renhun);
         html += renderTianhun(att.tianhun);
-        if (att.final_intent) html += renderDihun(att.final_intent);
+        if (att.final_intent) html += renderDihun(att.final_intent, att.execution_results);
         html += `</div>`;
     });
     html += `</div></div>`;
@@ -355,7 +365,7 @@ function renderTianhun(data) {
     return html;
 }
 
-function renderDihun(data) {
+function renderDihun(data, executionResults) {
     if (!data) return '';
     let html = `<div class="exp-dihun"><span class="exp-soul-label">地魂</span><div class="exp-soul-content">`;
 
@@ -365,13 +375,23 @@ function renderDihun(data) {
         pipeline.forEach((pa, idx) => {
             if (multi) html += `<div style="font-size:10px;color:var(--text-muted);margin-top:${idx > 0 ? '4px' : '0'}">意图 ${idx + 1}</div>`;
             html += renderActionText(pa.action_type, pa.action_data);
+            html += renderExecutionBadge(executionResults, idx);
         });
     } else if (data.action_type) {
         html += renderActionText(data.action_type, data.action_data);
+        html += renderExecutionBadge(executionResults, 0);
     }
 
     html += `</div></div>`;
     return html;
+}
+
+function renderExecutionBadge(executionResults, pipeSeq) {
+    if (!executionResults) return '';
+    const entry = executionResults[String(pipeSeq)];
+    if (!entry) return '';
+    const isOk = entry.success;
+    return `<div style="margin-top:2px;"><span class="result-badge ${isOk ? 'result-success' : 'result-failed'}">${isOk ? '执行成功' : (entry.error || '执行失败')}</span></div>`;
 }
 
 function renderActionText(actionType, actionData) {

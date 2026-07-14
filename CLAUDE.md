@@ -342,6 +342,8 @@ use super::builder::AgentBuilder;
 - `GET /api/dashboard/actions-map` - Actions mapping
 - `GET /api/dashboard/items` - List items
 - `GET /api/dashboard/status-configs` - Status configurations
+- `GET /api/dashboard/display-map` - Action type display name mapping
+- `GET /api/dashboard/layer-display` - Tianhun layer display name mapping (data-driven)
 
 **Dashboard (Write Token)**:
 - `POST /api/dashboard/agents/cleanup` - Cleanup offline agents
