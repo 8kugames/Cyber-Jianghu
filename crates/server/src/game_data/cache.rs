@@ -220,11 +220,7 @@ impl LocationRegistry {
             let location_node = LocationNode {
                 node_id: node.node_id.clone(),
                 name: node.name.clone(),
-                node_type: match node.node_type.as_str() {
-                    "map" => cyber_jianghu_protocol::LocationNodeType::Map,
-                    "sub_scene" => cyber_jianghu_protocol::LocationNodeType::SubScene,
-                    _ => cyber_jianghu_protocol::LocationNodeType::Map,
-                },
+                node_type: node.node_type,
                 parent_id: if node.parent_id.is_empty() {
                     None
                 } else {
@@ -299,6 +295,31 @@ impl LocationRegistry {
 mod tests {
     use super::*;
     use crate::game_data::types::*;
+
+    /// 回归测试：locations.yaml 的 region 节点不能被降级为 Map。
+    /// 之前 cache.rs 手写 match 只认 map/sub_scene，region 落默认 Map。
+    #[test]
+    fn test_location_node_type_region_not_swallowed() {
+        let yaml = r#"
+version: "1.0"
+data:
+  nodes:
+    - node_id: test_region
+      name: 测试区域
+      type: "region"
+      parent_id: ""
+  edges: []
+"#;
+        let config: UnifiedLocationsConfig = serde_yaml::from_str(yaml).unwrap();
+        let registry = LocationRegistry::from_config(&config);
+        let node = registry.graph.nodes.get("test_region");
+        assert!(node.is_some(), "region 节点应存在");
+        assert_eq!(
+            node.unwrap().node_type,
+            cyber_jianghu_protocol::LocationNodeType::Region,
+            "region 不应被降级为 Map"
+        );
+    }
 
     fn create_test_game_data() -> GameData {
         GameData {
@@ -562,7 +583,7 @@ mod tests {
                     LocationNodeData {
                         node_id: "lobby".to_string(),
                         name: "大堂".to_string(),
-                        node_type: "sub_scene".to_string(),
+                        node_type: cyber_jianghu_protocol::LocationNodeType::SubScene,
                         parent_id: "inn".to_string(),
                         description: None,
                         environmental_damage: None,
@@ -571,7 +592,7 @@ mod tests {
                     LocationNodeData {
                         node_id: "kitchen".to_string(),
                         name: "厨房".to_string(),
-                        node_type: "sub_scene".to_string(),
+                        node_type: cyber_jianghu_protocol::LocationNodeType::SubScene,
                         parent_id: "inn".to_string(),
                         description: None,
                         environmental_damage: None,
