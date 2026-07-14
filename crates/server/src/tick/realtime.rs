@@ -243,24 +243,28 @@ impl IntentWorker {
             }
         }
 
-        // 5. 持久化到 DB（await 确认）
-        let persisted_version =
-            match crate::db::upsert_agent_state(&self.db_pool, &result.updated_state).await {
-                Ok(version) => version,
-                Err(e) => {
-            // persist 失败 → DashMap 不更新 → 反馈失败给 Agent + 释放 whisper session
-            self.send_error_to_agent(
-                agent_id,
-                intent_id,
-                "persist_failed",
-                "状态持久化失败，Intent 未生效",
-                tick_id,
-            )
-            .await;
-            self.close_session_if_whisper(&action_type, &intent).await;
-            return Err(e).context(format!("Agent {} 状态持久化失败", agent_id));
-                }
-            };
+        // 5. 持久化结果：processor 已在 tx 内完成 agent_states UPSERT 并 commit，
+        //    此处仅读取返回的 state_version。`persisted_version = None` 表示
+        //    tx 已 rollback（执行失败 / CAS 冲突 / commit 失败）→ DashMap 不更新。
+        let persisted_version = match result.persisted_version {
+            Some(version) => version,
+            None => {
+                // persist 失败 → DashMap 不更新 → 反馈失败给 Agent + 释放 whisper session
+                self.send_error_to_agent(
+                    agent_id,
+                    intent_id,
+                    "persist_failed",
+                    "状态持久化失败，Intent 未生效",
+                    tick_id,
+                )
+                .await;
+                self.close_session_if_whisper(&action_type, &intent).await;
+                return Err(anyhow::anyhow!(
+                    "Agent {} 状态持久化失败（tx 已回滚）",
+                    agent_id
+                ));
+            }
+        };
 
         // 6. 更新 DashMap（persist 成功后）
         let mut persisted_state = result.updated_state.clone();
@@ -441,8 +445,8 @@ impl IntentWorker {
             .process_single_intent(tick_id, agent_state, intent, &all_states, pipe_seq)
             .await;
 
-        let (updated_state, event_tuples) = match result {
-            Ok(r) => (r.updated_state, r.events),
+        let (updated_state, event_tuples, persisted_version) = match result {
+            Ok(r) => (r.updated_state, r.events, r.persisted_version),
             Err(e) => {
                 // 执行失败 → 发 failure notification + 清理 whisper session
                 self.send_error_to_agent(
@@ -459,25 +463,26 @@ impl IntentWorker {
             }
         };
 
-        // 持久化
-        let persisted_version =
-            match crate::db::upsert_agent_state(&self.db_pool, &updated_state).await {
-                Ok(version) => version,
-                Err(e) => {
-            // persist 失败 → 发 failure notification + 清理 whisper session（不更新 DashMap）
-            self.send_error_to_agent(
-                agent_id,
-                intent.intent_id,
-                "persist_failed",
-                "状态持久化失败，Intent 未生效",
-                tick_id,
-            )
-            .await;
-            self.close_session_if_whisper(intent.action_type.as_ref(), intent)
+        // 持久化结果：processor 已在 tx 内完成 agent_states UPSERT 并 commit，
+        // 此处仅读取返回的 state_version。`persisted_version = None` 表示
+        // tx 已 rollback → 不更新 DashMap。
+        let persisted_version = match persisted_version {
+            Some(version) => version,
+            None => {
+                // persist 失败 → 发 failure notification + 清理 whisper session（不更新 DashMap）
+                self.send_error_to_agent(
+                    agent_id,
+                    intent.intent_id,
+                    "persist_failed",
+                    "状态持久化失败，Intent 未生效",
+                    tick_id,
+                )
                 .await;
-            return Err(e).context("Subsequent intent 持久化失败");
-                }
-            };
+                self.close_session_if_whisper(intent.action_type.as_ref(), intent)
+                    .await;
+                return Err(anyhow::anyhow!("Subsequent intent 持久化失败（tx 已回滚）"));
+            }
+        };
 
         // persist 成功后更新 DashMap
         let mut persisted_state = updated_state.clone();
