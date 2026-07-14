@@ -214,21 +214,27 @@ pub struct FieldValidation {
     pub field: String,
 
     /// 验证类型
-    pub validation_type: String,
+    pub validation_type: ValidationType,
 
     /// 验证参数
     #[serde(flatten)]
     pub params: std::collections::HashMap<String, serde_json::Value>,
 }
 
-impl FieldValidation {
-    pub const TYPE_NOT_EMPTY: &str = "not_empty";
-    pub const TYPE_MIN_VALUE: &str = "min_value";
-    pub const TYPE_MAX_VALUE: &str = "max_value";
-    pub const TYPE_MIN_LENGTH: &str = "min_length";
-    pub const TYPE_MAX_LENGTH: &str = "max_length";
+/// 字段校验类型（6 值闭集，dispatch 在 actions/validator.rs:192 的 match）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationType {
+    NotEmpty,
+    MinValue,
+    MaxValue,
+    MinLength,
+    MaxLength,
     /// 校验字段值（如 item_id）必须在物品注册表（items.yaml）中存在
-    pub const TYPE_ITEM_EXISTS: &str = "item_exists";
+    ItemExists,
+}
+
+impl FieldValidation {
 
     /// 获取 i32 参数
     pub fn get_i32(&self, key: &str) -> Option<i32> {

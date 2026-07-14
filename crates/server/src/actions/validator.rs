@@ -3,8 +3,8 @@ use crate::actions::{
     YongData, YuData, parse_action_data,
 };
 use crate::db::DbPool;
-use crate::game_data::types::actions::ValidatorKind;
-use crate::game_data::types::{ActionValidation, FieldValidation};
+use crate::game_data::types::actions::{ValidationType, ValidatorKind};
+use crate::game_data::types::ActionValidation;
 use crate::game_data::{ActionRegistry, ActionRequirement};
 use crate::models::{AgentState, Intent};
 use cyber_jianghu_protocol::GameError;
@@ -189,8 +189,8 @@ fn apply_field_validations(
 ) -> Result<(), GameError> {
     for fv in &validation.field_validations {
         let field = &fv.field;
-        match fv.validation_type.as_str() {
-            FieldValidation::TYPE_NOT_EMPTY => {
+        match &fv.validation_type {
+            ValidationType::NotEmpty => {
                 let value =
                     parsed
                         .get_field_str(field)
@@ -204,7 +204,7 @@ fn apply_field_validations(
                     });
                 }
             }
-            FieldValidation::TYPE_MIN_VALUE => {
+            ValidationType::MinValue => {
                 let min_value =
                     fv.get_i32("min_value")
                         .ok_or_else(|| GameError::InvalidActionData {
@@ -222,7 +222,7 @@ fn apply_field_validations(
                     });
                 }
             }
-            FieldValidation::TYPE_MAX_VALUE => {
+            ValidationType::MaxValue => {
                 let max_value =
                     fv.get_i32("max_value")
                         .ok_or_else(|| GameError::InvalidActionData {
@@ -240,7 +240,7 @@ fn apply_field_validations(
                     });
                 }
             }
-            FieldValidation::TYPE_MIN_LENGTH => {
+            ValidationType::MinLength => {
                 let min_length =
                     fv.get_i32("min_length")
                         .ok_or_else(|| GameError::InvalidActionData {
@@ -258,7 +258,7 @@ fn apply_field_validations(
                     });
                 }
             }
-            FieldValidation::TYPE_MAX_LENGTH => {
+            ValidationType::MaxLength => {
                 let max_length =
                     fv.get_i32("max_length")
                         .ok_or_else(|| GameError::InvalidActionData {
@@ -276,7 +276,7 @@ fn apply_field_validations(
                     });
                 }
             }
-            FieldValidation::TYPE_ITEM_EXISTS => {
+            ValidationType::ItemExists => {
                 // 校验字段值（通常是 item_id）必须是 items.yaml 中已配置的合法物品。
                 // 拦截 LLM 幻觉产生的、不在物品注册表中的无效 ID。
                 // 若该字段在此动作类型上不存在（get_field_str 返回 None），跳过校验——
@@ -290,7 +290,6 @@ fn apply_field_validations(
                     });
                 }
             }
-            _ => {}
         }
     }
     Ok(())
