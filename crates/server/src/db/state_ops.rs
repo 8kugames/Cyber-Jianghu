@@ -311,6 +311,73 @@ pub async fn upsert_agent_state(pool: &PgPool, state: &AgentState) -> Result<i64
     Ok(next_version)
 }
 
+/// 单条 Agent 状态持久化（实时模式，事务内版本）
+///
+/// 与 [`upsert_agent_state`] 等价的 UPSERT 语义（同 `(agent_id, tick_id)` 时使用
+/// `state_version` 做 CAS 更新，否则插入新行并返回版本号 0），但接受
+/// `&mut sqlx::PgConnection` 而非 `&PgPool`，使其可纳入 caller 的事务作用域。
+///
+/// # 设计意图（P0-3 原子化重构）
+/// 之前 `processor.rs::process_single_intent` 在 tx 内写 inventory/ground_items/
+/// action_log 后 commit，然后 realtime.rs 用 pool（独立连接）调
+/// `upsert_agent_state`。若 commit 后、upsert 前崩溃 → inventory 已改、
+/// agent_states 没改、DashMap 回退 = 跨表自相矛盾。
+///
+/// 此函数允许 processor 把 agent_states UPSERT 纳入同一 Saga 事务，与
+/// `batch_insert_action_logs(&mut *tx, ...)` 的模式一致，消除跨表部分提交窗口。
+///
+/// # 参数
+/// - conn: 事务连接（caller 传 `&mut *tx`）
+/// - state: Agent 状态
+///
+/// # 返回
+/// - `Ok(i64)`: 持久化后的 `state_version`（新行=0，CAS 更新=旧值+1）
+/// - `Err`: 持久化失败（包括 CAS 版本冲突——单消费者 FIFO 下几乎不可能发生）
+///
+/// # CAS 失败语义
+/// UPSERT 用乐观锁 `WHERE agent_states.state_version = $6`。CAS 失败 →
+/// `fetch_optional` 返回 `None` → 返 `Err` → caller 的 tx 会 rollback，
+/// intent 视为失败（发 persist_failed），不 retry。
+pub async fn upsert_agent_state_in_tx(
+    conn: &mut sqlx::PgConnection,
+    state: &AgentState,
+) -> Result<i64> {
+    let attributes_json = serialize_attributes_with_skills(state)?;
+
+    let next_version = sqlx::query_scalar::<_, i64>(
+        r#"
+        INSERT INTO agent_states (agent_id, tick_id, attributes, node_id, is_alive, state_version)
+        VALUES ($1, $2, $3, $4, $5, 0)
+        ON CONFLICT (agent_id, tick_id) DO UPDATE SET
+            attributes = EXCLUDED.attributes,
+            node_id = EXCLUDED.node_id,
+            is_alive = EXCLUDED.is_alive,
+            state_version = agent_states.state_version + 1
+        WHERE agent_states.state_version = $6
+        RETURNING state_version
+        "#,
+    )
+    .bind(state.agent_id)
+    .bind(state.tick_id)
+    .bind(attributes_json)
+    .bind(&state.node_id)
+    .bind(state.is_alive)
+    .bind(state.state_version)
+    .fetch_optional(conn)
+    .await
+    .context(format!("单条 UPSERT(tx) Agent {} 状态失败", state.agent_id))?
+    .ok_or_else(|| {
+        anyhow::anyhow!(
+            "Agent {} 状态版本冲突: tick={}, expected_version={}",
+            state.agent_id,
+            state.tick_id,
+            state.state_version
+        )
+    })?;
+
+    Ok(next_version)
+}
+
 // ============================================================================
 // Tick日志相关操作
 // ============================================================================

@@ -58,7 +58,7 @@ pub use audit_ops::{AuditLogEntry, build_audit_request_context, insert_audit_log
 pub use state_ops::{
     batch_insert_agent_states, get_all_alive_agents_latest_states, get_current_world_tick_id,
     get_last_tick_time, get_latest_agent_state, get_latest_state_tick_id,
-    get_or_init_deployment_time, upsert_agent_state,
+    get_or_init_deployment_time, upsert_agent_state, upsert_agent_state_in_tx,
 };
 
 // 导出公共API - Tick日志操作

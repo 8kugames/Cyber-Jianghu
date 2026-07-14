@@ -22,6 +22,16 @@ pub struct SingleProcessingResult {
     pub updated_state: AgentState,
     /// 生成的事件列表
     pub events: Vec<(uuid::Uuid, WorldEvent)>,
+    /// 持久化后的 state_version（仅当 agent_states UPSERT 成功并 commit 后才有值）。
+    ///
+    /// P0-3 原子化重构：upsert_agent_state 已纳入 tx（commit 前调用），故
+    /// commit 成功 = persist 成功 = `Some(version)`。realtime.rs 据此直接更新
+    /// DashMap，不再用 pool 二次 upsert。
+    ///
+    /// 失败路径（执行失败 / action_log 写入失败 / upsert CAS 冲突 / commit 失败）
+    /// 全部 rollback，此字段为 `None`；realtime.rs 视为 persist 失败，发
+    /// `persist_failed` 并保持 DashMap 不变。
+    pub persisted_version: Option<i64>,
 }
 
 /// 状态处理器
@@ -263,22 +273,50 @@ impl StateProcessor {
             execution_failed = true;
         }
 
-        // Sagas: 回滚/提交（action_log 已纳入 tx，commit/rollback 对两者同时生效）
+        // P0-3 原子化重构：agent_states UPSERT 纳入 tx（commit 前），消除跨表
+        // 部分提交窗口。失败路径：
+        //   - action_log insert 失败（上面）→ execution_failed=true → 不 upsert → rollback
+        //   - upsert CAS 冲突（单消费者 FIFO 下几乎不可能）→ 返 Err → 标记失败 → rollback
+        //   - upsert 序列化/DB 错误 → 同上
+        // 成功路径：返回新 state_version，与 inventory/ground_items/action_log 在
+        // 同一事务一起 commit。realtime.rs 据此直接更新 DashMap，不再用 pool 二次 upsert。
+        let mut persisted_version: Option<i64> = None;
+        if !execution_failed {
+            match crate::db::upsert_agent_state_in_tx(&mut tx, &agent_state).await {
+                Ok(version) => {
+                    persisted_version = Some(version);
+                }
+                Err(e) => {
+                    warn!(
+                        "agent_states UPSERT(tx) 失败（将回滚整个 Saga）: agent={}, {:#}",
+                        agent_state.agent_id, e
+                    );
+                    execution_failed = true;
+                }
+            }
+        }
+
+        // Sagas: 回滚/提交（action_log + agent_states 均已纳入 tx，
+        // commit/rollback 对 inventory / ground_items / action_log / agent_states 同时生效）
         if execution_failed {
             agent_state = agent_state_snapshot;
             events.truncate(events_len_before);
+            persisted_version = None;
             if let Err(e) = tx.rollback().await {
                 warn!("Saga tx 回滚失败: {}", e);
             }
         } else {
             if let Err(e) = tx.commit().await {
                 warn!("Saga tx 提交失败: {}", e);
+                // commit 失败：DB 未持久化任何内容，DashMap 不应更新
+                persisted_version = None;
             }
         }
 
         Ok(SingleProcessingResult {
             updated_state: agent_state,
             events,
+            persisted_version,
         })
     }
 
