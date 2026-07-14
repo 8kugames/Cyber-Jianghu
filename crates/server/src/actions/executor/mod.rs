@@ -10,7 +10,7 @@ use cyber_jianghu_protocol::AttributeValue;
 use super::ActionExecutionResult;
 use super::ParsedActionData;
 use super::types::StateChange;
-use crate::game_data::{ActionEffect, ActionRegistry, ActionRequirement};
+use crate::game_data::ActionRegistry;
 use crate::models::{AgentState, Intent};
 
 use basic::BasicActionExecutor;
@@ -100,8 +100,8 @@ impl ActionExecutor {
             let context = agent_state.get_formula_context();
 
             for req in &config.requirements {
-                match req.requirement_type.as_str() {
-                    ActionRequirement::REQUIREMENT_TYPE_ATTRIBUTE => {
+                match req.requirement_type {
+                    cyber_jianghu_protocol::RequirementType::Attribute => {
                         let attribute = req.get_attribute().unwrap_or("unknown");
                         if let Some(cost) = req.get_cost() {
                             let delta = -cost;
@@ -115,8 +115,7 @@ impl ActionExecutor {
                             consumed.insert(attribute.to_string());
                         }
                     }
-                    ActionRequirement::REQUIREMENT_TYPE_ITEM => {}
-                    _ => {}
+                    cyber_jianghu_protocol::RequirementType::Item => {}
                 }
             }
         }
@@ -132,8 +131,8 @@ impl ActionExecutor {
         let action_name = intent.action_type.to_string();
         if let Some(config) = ActionRegistry::get(&action_name) {
             for effect in &config.effects {
-                match effect.effect_type.as_str() {
-                    ActionEffect::EFFECT_TYPE_ATTRIBUTE_CHANGE => {
+                match effect.effect_type {
+                    cyber_jianghu_protocol::EffectType::AttributeChange => {
                         let attribute = effect.get_str("attribute").unwrap_or("unknown");
                         if skip_attrs.contains(attribute) {
                             continue;
@@ -150,7 +149,7 @@ impl ActionExecutor {
                             delta: AttributeValue::Delta { value: delta },
                         });
                     }
-                    ActionEffect::EFFECT_TYPE_ADD_ITEM => {
+                    cyber_jianghu_protocol::EffectType::AddItem => {
                         if let Some(item_id) = effect.get_str("item_id") {
                             let quantity = effect.get_i32("quantity").unwrap_or(1);
                             result.add_change(StateChange::ItemAcquired {
@@ -161,7 +160,7 @@ impl ActionExecutor {
                             });
                         }
                     }
-                    ActionEffect::EFFECT_TYPE_ATTRIBUTE_MAX_CHANGE => {
+                    cyber_jianghu_protocol::EffectType::AttributeMaxChange => {
                         let attribute = effect.get_str("attribute").unwrap_or("unknown");
                         let value = effect.get_i32("value").unwrap_or(0);
                         result.add_change(StateChange::AttributeMaxChanged {
@@ -170,7 +169,6 @@ impl ActionExecutor {
                             delta: value,
                         });
                     }
-                    _ => {}
                 }
             }
         }

@@ -23,7 +23,7 @@ use url::Url;
 use uuid::Uuid;
 
 use cyber_jianghu_protocol::{
-    ClientMessage, DialogueMessage, GameRules, Intent, ServerMessage, SkillContent,
+    ClientMessage, ConfigType, DialogueMessage, GameRules, Intent, ServerMessage, SkillContent,
     WorldBuildingRules, WorldState,
 };
 
@@ -813,123 +813,130 @@ async fn websocket_background_task(
                                 } = msg
                                 {
                                     info!(
-                                        "Background: ConfigUpdate type={}, config_type={}, v={}, +{}, -{}",
+                                        "Background: ConfigUpdate type={}, config_type={:?}, v={}, +{}, -{}",
                                         update_type, config_type, version,
                                         updated_items.len(), removed_items.len()
                                     );
 
-                                    // 处理 skills 配置更新
-                                    if config_type == "skills" {
-                                        // 目前仅支持 full update_type，增量更新暂未实现
-                                        if update_type != "full" {
-                                            warn!(
-                                                "ConfigUpdate: skills update_type={} not fully supported, treating as full",
-                                                update_type
-                                            );
-                                        }
-
-                                        if let Ok(skills) = serde_json::from_value::<Vec<SkillContent>>(content.clone()) {
-                                            if let Some(ref cb) = skill_update_cb {
-                                                cb(skills, removed_items.clone());
-                                            }
-                                        } else {
-                                            warn!("Failed to parse skills content from ConfigUpdate");
-                                        }
-                                    // 处理 actions 配置更新
-                                    // 当前仅支持 full update，增量更新暂未实现
-                                    // actions 通过 action_update_callback 透传整个 ServerMessage
-                                    } else if config_type == "actions" {
-                                        if let Some(ref cb) = action_update_cb {
-                                            cb(msg.clone());
-                                        }
-                                    // 处理 game_rules 配置更新
-                                    } else if config_type == "game_rules" {
-                                        if let Ok(game_rules) = serde_json::from_value::<GameRules>(content.clone()) {
-                                            // 更新本地缓存
-                                            {
-                                                let mut guard = state.write().await;
-                                                guard.game_rules = Some(game_rules.clone());
-                                            }
-                                            // 调用回调
-                                            if let Some(ref cb) = game_rules_cb {
-                                                cb(game_rules);
-                                            }
-                                        } else {
-                                            warn!("Failed to parse game_rules content from ConfigUpdate");
-                                        }
-                                    // 处理 world_building_rules 配置更新
-                                    } else if config_type == "world_building_rules" {
-                                        if let Ok(wb_rules) = serde_json::from_value::<WorldBuildingRules>(content.clone()) {
-                                            // 更新本地缓存
-                                            {
-                                                let mut guard = state.write().await;
-                                                guard.world_building_rules = Some(wb_rules.clone());
-                                            }
-                                            // 调用回调
-                                            if let Some(ref cb) = wb_rules_cb {
-                                                cb(wb_rules);
-                                            }
-                                        } else {
-                                            warn!("Failed to parse world_building_rules content from ConfigUpdate");
-                                        }
-                                    // 处理 prompt_templates 配置更新（JSON 格式 + hash skip）
-                                    } else if config_type == "prompt_templates" {
-                                        // hash skip: 内容未变则跳过更新
-                                        let should_update = {
-                                            let state_guard = state.read().await;
-                                            match (content_hash.as_ref(), state_guard.prompt_template_hash.as_ref()) {
-                                                (Some(new_hash), Some(old_hash)) => new_hash != old_hash,
-                                                _ => true,
-                                            }
-                                        };
-                                        if should_update {
-                                            // 无论解析成功与否，先记录 hash，防止相同坏数据反复重试
-                                            if let Some(hash) = content_hash.as_ref() {
-                                                let mut state_guard = state.write().await;
-                                                state_guard.prompt_template_hash = Some(hash.clone());
-                                            }
-                                            if let Ok(config) = cyber_jianghu_protocol::PromptTemplateConfig::from_json_value(content.clone()) {
-                                                // 标记 WS 已成功投递，HTTP 拉取可跳过
-                                                {
-                                                    let mut state_guard = state.write().await;
-                                                    state_guard.prompt_template_received = true;
-                                                }
-                                                if let Some(ref cb) = prompt_template_cb {
-                                                    cb(config);
-                                                }
-                                            } else {
-                                                warn!("Failed to parse prompt_templates JSON from ConfigUpdate");
-                                            }
-                                        } else {
-                                            debug!("prompt_templates skip: hash unchanged");
-                                        }
-                                    // 处理 persona_event_rules 配置更新
-                                    } else if config_type == "persona_event_rules" {
-                                        #[derive(serde::Deserialize)]
-                                        struct RulesJson {
-                                            rules: Vec<crate::component::persona::TraitMappingRule>,
-                                        }
-                                        match serde_json::from_value::<RulesJson>(content.clone()) {
-                                            Ok(parsed) => {
-                                                if let Some(ref cb) = persona_event_rules_cb {
-                                                    cb(parsed.rules);
-                                                }
-                                            }
-                                            Err(e) => {
+                                    match config_type {
+                                        ConfigType::Skills => {
+                                            // 目前仅支持 full update_type，增量更新暂未实现
+                                            if update_type != "full" {
                                                 warn!(
-                                                    "Failed to parse persona_event_rules content from ConfigUpdate: {}",
-                                                    e
+                                                    "ConfigUpdate: skills update_type={} not fully supported, treating as full",
+                                                    update_type
                                                 );
                                             }
-                                        }
-                                    // 处理 narrative_config 配置更新
-                                    } else if config_type == "narrative_config" {
-                                        if let Ok(nc) = serde_json::from_value::<cyber_jianghu_protocol::NarrativeConfig>(content.clone()) {
-                                            if let Some(ref cb) = narrative_config_cb {
-                                                cb(nc, content_hash.clone());
+
+                                            if let Ok(skills) = serde_json::from_value::<Vec<SkillContent>>(content.clone()) {
+                                                if let Some(ref cb) = skill_update_cb {
+                                                    cb(skills, removed_items.clone());
+                                                }
+                                            } else {
+                                                warn!("Failed to parse skills content from ConfigUpdate");
                                             }
-                                        } else {
-                                            warn!("Failed to parse narrative_config content from ConfigUpdate");
+                                        }
+                                        // 处理 actions 配置更新
+                                        // 当前仅支持 full update，增量更新暂未实现
+                                        // actions 通过 action_update_callback 透传整个 ServerMessage
+                                        ConfigType::Actions => {
+                                            if let Some(ref cb) = action_update_cb {
+                                                cb(msg.clone());
+                                            }
+                                        }
+                                        // 处理 game_rules 配置更新
+                                        ConfigType::GameRules => {
+                                            if let Ok(game_rules) = serde_json::from_value::<GameRules>(content.clone()) {
+                                                // 更新本地缓存
+                                                {
+                                                    let mut guard = state.write().await;
+                                                    guard.game_rules = Some(game_rules.clone());
+                                                }
+                                                // 调用回调
+                                                if let Some(ref cb) = game_rules_cb {
+                                                    cb(game_rules);
+                                                }
+                                            } else {
+                                                warn!("Failed to parse game_rules content from ConfigUpdate");
+                                            }
+                                        }
+                                        // 处理 world_building_rules 配置更新
+                                        ConfigType::WorldBuildingRules => {
+                                            if let Ok(wb_rules) = serde_json::from_value::<WorldBuildingRules>(content.clone()) {
+                                                // 更新本地缓存
+                                                {
+                                                    let mut guard = state.write().await;
+                                                    guard.world_building_rules = Some(wb_rules.clone());
+                                                }
+                                                // 调用回调
+                                                if let Some(ref cb) = wb_rules_cb {
+                                                    cb(wb_rules);
+                                                }
+                                            } else {
+                                                warn!("Failed to parse world_building_rules content from ConfigUpdate");
+                                            }
+                                        }
+                                        // 处理 prompt_templates 配置更新（JSON 格式 + hash skip）
+                                        ConfigType::PromptTemplates => {
+                                            // hash skip: 内容未变则跳过更新
+                                            let should_update = {
+                                                let state_guard = state.read().await;
+                                                match (content_hash.as_ref(), state_guard.prompt_template_hash.as_ref()) {
+                                                    (Some(new_hash), Some(old_hash)) => new_hash != old_hash,
+                                                    _ => true,
+                                                }
+                                            };
+                                            if should_update {
+                                                // 无论解析成功与否，先记录 hash，防止相同坏数据反复重试
+                                                if let Some(hash) = content_hash.as_ref() {
+                                                    let mut state_guard = state.write().await;
+                                                    state_guard.prompt_template_hash = Some(hash.clone());
+                                                }
+                                                if let Ok(config) = cyber_jianghu_protocol::PromptTemplateConfig::from_json_value(content.clone()) {
+                                                    // 标记 WS 已成功投递，HTTP 拉取可跳过
+                                                    {
+                                                        let mut state_guard = state.write().await;
+                                                        state_guard.prompt_template_received = true;
+                                                    }
+                                                    if let Some(ref cb) = prompt_template_cb {
+                                                        cb(config);
+                                                    }
+                                                } else {
+                                                    warn!("Failed to parse prompt_templates JSON from ConfigUpdate");
+                                                }
+                                            } else {
+                                                debug!("prompt_templates skip: hash unchanged");
+                                            }
+                                        }
+                                        // 处理 persona_event_rules 配置更新
+                                        ConfigType::PersonaEventRules => {
+                                            #[derive(serde::Deserialize)]
+                                            struct RulesJson {
+                                                rules: Vec<crate::component::persona::TraitMappingRule>,
+                                            }
+                                            match serde_json::from_value::<RulesJson>(content.clone()) {
+                                                Ok(parsed) => {
+                                                    if let Some(ref cb) = persona_event_rules_cb {
+                                                        cb(parsed.rules);
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    warn!(
+                                                        "Failed to parse persona_event_rules content from ConfigUpdate: {}",
+                                                        e
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        // 处理 narrative_config 配置更新
+                                        ConfigType::NarrativeConfig => {
+                                            if let Ok(nc) = serde_json::from_value::<cyber_jianghu_protocol::NarrativeConfig>(content.clone()) {
+                                                if let Some(ref cb) = narrative_config_cb {
+                                                    cb(nc, content_hash.clone());
+                                                }
+                                            } else {
+                                                warn!("Failed to parse narrative_config content from ConfigUpdate");
+                                            }
                                         }
                                     }
                                 }

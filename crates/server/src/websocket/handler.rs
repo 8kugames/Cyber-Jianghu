@@ -362,7 +362,7 @@ async fn handle_websocket(
 
         if !skill_contents.is_empty() {
             let config_update = ServerMessage::ConfigUpdate {
-                config_type: "skills".to_string(),
+                config_type: cyber_jianghu_protocol::ConfigType::Skills,
                 update_type: "full".to_string(),
                 version: "1.0.0".to_string(),
                 content: serde_json::to_value(&skill_contents).unwrap_or_default(),
@@ -399,7 +399,7 @@ async fn handle_websocket(
         let cache = state.prompt_template_cache.read().await;
         if let Some(ref pt_cache) = *cache {
             let config_update = ServerMessage::ConfigUpdate {
-                config_type: "prompt_templates".to_string(),
+                config_type: cyber_jianghu_protocol::ConfigType::PromptTemplates,
                 update_type: "full".to_string(),
                 version: pt_cache.version.clone(),
                 content: pt_cache.json_value.clone(),
@@ -436,7 +436,7 @@ async fn handle_websocket(
             Ok(yaml_content) => match serde_yaml::from_str::<serde_json::Value>(&yaml_content) {
                 Ok(json_value) => {
                     let config_update = ServerMessage::ConfigUpdate {
-                        config_type: "persona_event_rules".to_string(),
+                        config_type: cyber_jianghu_protocol::ConfigType::PersonaEventRules,
                         update_type: "full".to_string(),
                         version: "1.0".to_string(),
                         content: json_value,
@@ -491,7 +491,7 @@ async fn handle_websocket(
             (narrative, hash)
         };
         let config_update = ServerMessage::ConfigUpdate {
-            config_type: "narrative_config".to_string(),
+            config_type: cyber_jianghu_protocol::ConfigType::NarrativeConfig,
             update_type: "full".to_string(),
             version: "1.0".to_string(),
             content: serde_json::to_value(&nc).unwrap_or_default(),

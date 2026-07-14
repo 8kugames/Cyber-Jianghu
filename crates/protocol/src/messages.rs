@@ -78,6 +78,22 @@ pub struct DialogueSession {
 // 服务端消息
 // ============================================================================
 
+/// 配置更新类型（Server → Agent 跨进程契约）
+///
+/// 真闭集：值域由 agent 端 `match &config_type { ... }` 穷尽匹配（7 分支）。
+/// 新增类型必须同时修改本枚举、agent dispatch、server 构造点。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigType {
+    Skills,
+    Actions,
+    GameRules,
+    WorldBuildingRules,
+    PromptTemplates,
+    PersonaEventRules,
+    NarrativeConfig,
+}
+
 /// 服务端下发的消息
 ///
 /// # 消息类型
@@ -156,12 +172,12 @@ pub enum ServerMessage {
 
     /// 通用配置更新（统一收拢所有配置下发消息）
     ///
-    /// config_type: "game_rules" | "actions" | "world_building_rules" | "skills" | "narrative_config"
+    /// config_type: [`ConfigType`] 枚举（7 个变体）
     /// update_type: "full" | "incremental"
     /// content: JSON 格式的具体配置内容
     ConfigUpdate {
         /// 配置类型
-        config_type: String,
+        config_type: ConfigType,
         /// 更新类型
         update_type: String,
         /// 版本号
@@ -818,7 +834,7 @@ mod tests {
             known_item_ids: Vec::new(),
         };
         let msg = ServerMessage::ConfigUpdate {
-            config_type: "world_building_rules".to_string(),
+            config_type: ConfigType::WorldBuildingRules,
             update_type: "full".to_string(),
             version: rules.version.clone(),
             content: serde_json::to_value(&rules).unwrap(),

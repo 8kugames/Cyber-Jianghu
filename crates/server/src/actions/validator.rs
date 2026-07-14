@@ -5,7 +5,7 @@ use crate::actions::{
 use crate::db::DbPool;
 use crate::game_data::types::actions::{ValidationType, ValidatorKind};
 use crate::game_data::types::ActionValidation;
-use crate::game_data::{ActionRegistry, ActionRequirement};
+use crate::game_data::ActionRegistry;
 use crate::models::{AgentState, Intent};
 use cyber_jianghu_protocol::GameError;
 use uuid::Uuid;
@@ -130,8 +130,8 @@ async fn validate_generic_requirements(
     let action_name = intent.action_type.to_string();
     if let Some(config) = ActionRegistry::get(&action_name) {
         for req in &config.requirements {
-            match req.requirement_type.as_str() {
-                ActionRequirement::REQUIREMENT_TYPE_ATTRIBUTE => {
+            match req.requirement_type {
+                cyber_jianghu_protocol::RequirementType::Attribute => {
                     let attribute = req.get_str("attribute").unwrap_or("unknown");
                     let min = req.get_i32("min").unwrap_or(0);
 
@@ -143,7 +143,7 @@ async fn validate_generic_requirements(
                         )));
                     }
                 }
-                ActionRequirement::REQUIREMENT_TYPE_ITEM => {
+                cyber_jianghu_protocol::RequirementType::Item => {
                     let item_id = req.get_str("item_id").unwrap_or("unknown");
                     let min_qty = req.get_i32("quantity").unwrap_or(1);
 
@@ -156,7 +156,6 @@ async fn validate_generic_requirements(
                         )));
                     }
                 }
-                _ => {}
             }
         }
     }
