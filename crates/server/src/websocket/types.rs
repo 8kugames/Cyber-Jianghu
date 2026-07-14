@@ -237,6 +237,7 @@ pub fn load_world_building_rules() -> Option<WorldBuildingRules> {
         narrative_rules: data.narrative_rules,
         last_updated: data.last_updated.unwrap_or_else(|| Utc::now().to_rfc3339()),
         rules_json,
+        known_item_ids: crate::game_data::registry::ItemRegistry::all_item_ids(),
     };
 
     tracing::info!(

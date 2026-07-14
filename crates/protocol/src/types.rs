@@ -259,6 +259,7 @@ mod tests {
             narrative_rules: "测试".to_string(),
             last_updated: "2026-01-01T00:00:00Z".to_string(),
             rules_json: None,
+            known_item_ids: Vec::new(),
         };
         assert_eq!(rules.version, "0.0.1");
         assert!(rules.allowed_concepts.contains(&"内力".to_string()));
@@ -279,6 +280,7 @@ mod tests {
             narrative_rules: "测试规则".to_string(),
             last_updated: "2024-01-01T00:00:00Z".to_string(),
             rules_json: None,
+            known_item_ids: Vec::new(),
         };
 
         let json = serde_json::to_string(&rules).unwrap();

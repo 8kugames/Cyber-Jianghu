@@ -230,6 +230,8 @@ impl FieldValidation {
     pub const TYPE_MAX_VALUE: &str = "max_value";
     pub const TYPE_MIN_LENGTH: &str = "min_length";
     pub const TYPE_MAX_LENGTH: &str = "max_length";
+    /// 校验字段值（如 item_id）必须在物品注册表（items.yaml）中存在
+    pub const TYPE_ITEM_EXISTS: &str = "item_exists";
 
     /// 获取 i32 参数
     pub fn get_i32(&self, key: &str) -> Option<i32> {

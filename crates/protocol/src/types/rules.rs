@@ -369,6 +369,13 @@ pub struct WorldBuildingRules {
     /// 规则引擎验证规则（JSON，Agent 反序列化为 Vec<Rule>）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rules_json: Option<serde_json::Value>,
+
+    /// 全局合法物品 ID 集合（从 items.yaml 下发，供天魂校验 item_id 存在性）
+    ///
+    /// Agent 端无物品配置，无法自行判断 item_id 合法性。Server 通过此字段
+    /// 下发全物品注册表，让天魂在 Layer 2 拦截 LLM 幻觉产生的不存在物品 ID。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub known_item_ids: Vec<String>,
 }
 
 impl WorldBuildingRules {

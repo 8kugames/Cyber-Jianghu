@@ -80,6 +80,13 @@ pub async fn validate_action(
     let config = ActionRegistry::get(action_str).ok_or_else(|| GameError::InvalidActionData {
         reason: format!("未知的动作类型: {}", action_str),
     })?;
+    // 吃/喝 共享"用"的校验配置：归一化后再取一次 config，使 field_validations
+    // （含 item_exists）对快捷动作同样生效。与 parse_action_data_by_type 的归一化对齐。
+    let config = if matches!(action_str, "吃" | "喝") {
+        ActionRegistry::get("用").unwrap_or(config)
+    } else {
+        config
+    };
 
     validate_generic_requirements(intent, agent_state, db_pool).await?;
 
@@ -266,6 +273,20 @@ fn apply_field_validations(
                 if value.len() > max_length as usize {
                     return Err(GameError::InvalidActionData {
                         reason: format!("字段 {} 的长度必须 <= {}", field, max_length),
+                    });
+                }
+            }
+            FieldValidation::TYPE_ITEM_EXISTS => {
+                // 校验字段值（通常是 item_id）必须是 items.yaml 中已配置的合法物品。
+                // 拦截 LLM 幻觉产生的、不在物品注册表中的无效 ID。
+                // 若该字段在此动作类型上不存在（get_field_str 返回 None），跳过校验——
+                // 字段存在性已由 required_fields / not_empty 校验覆盖，避免误伤非物品动作。
+                let Some(value) = parsed.get_field_str(field) else {
+                    continue;
+                };
+                if !crate::game_data::registry::ItemRegistry::exists(&value) {
+                    return Err(GameError::InvalidActionData {
+                        reason: format!("物品 \"{}\" 不存在（不在物品配置中）", value),
                     });
                 }
             }
