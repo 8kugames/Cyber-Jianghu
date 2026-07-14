@@ -59,7 +59,7 @@ impl ItemDefinition {
     /// 所有物品均可使用（用/吃/喝），效果由 effects 定义：
     /// - consumable: 正向增益
     /// - material: 轻微正向 + 轻微负向
-    /// - currency/weapon/tool/armor: 负向减益（或不允许无效果）
+    /// - currency/weapon/tool: 负向减益（或不允许无效果）
     pub fn is_usable(&self) -> bool {
         true
     }

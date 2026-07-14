@@ -368,7 +368,6 @@ impl super::CognitiveEngine {
                     "weapon" => "武器，吞食有害",
                     "material" => "原材料，可生吃但效果差",
                     "tool" => "工具，不可食用",
-                    "armor" => "护甲，不可食用",
                     _ => "",
                 };
                 ws_parts.push(format!(

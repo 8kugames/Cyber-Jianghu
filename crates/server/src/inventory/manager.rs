@@ -342,9 +342,9 @@ impl InventoryManager {
             }
 
             // 当前数据模型只有 item_type，没有细分 equip_slot。
-            // 先按大类约束为 weapon/armor，避免继续依赖不存在的配置字段。
+            // 当前可装备的大类只有 weapon。
             if let Some(config) = crate::game_data::ItemRegistry::get(item_id) {
-                if matches!(config.item_type.as_str(), "weapon" | "armor") {
+                if matches!(config.item_type.as_str(), "weapon") {
                     sqlx::query("UPDATE agent_inventory SET is_equipped = false WHERE agent_id = $1")
                         .bind(agent_id)
                         .execute(&mut *conn)
