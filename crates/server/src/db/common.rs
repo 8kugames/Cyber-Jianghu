@@ -142,6 +142,39 @@ pub async fn init_db_pool(database: &crate::config::DatabaseConfig) -> Result<Pg
     Err(anyhow::anyhow!("Failed to connect to database"))
 }
 
+/// 执行 migrations 目录下的所有 SQL 文件（复刻 docker-entrypoint.sh 逻辑）。
+///
+/// 全量重跑幂等 SQL（与 entrypoint 行为一致），不引入 _sqlx_migrations 追踪表。
+/// 非 docker 部署（cargo run / 裸二进制）靠此函数保证 schema 就绪。
+pub async fn run_migrations(pool: &PgPool) -> Result<()> {
+    let migration_dir = std::path::Path::new("crates/server/migrations");
+    if !migration_dir.is_dir() {
+        tracing::warn!(
+            "迁移目录不存在: {:?}（docker 部署由 entrypoint 处理）",
+            migration_dir
+        );
+        return Ok(());
+    }
+
+    let mut files: Vec<_> = std::fs::read_dir(migration_dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "sql"))
+        .collect();
+    files.sort_by_key(|e| e.path());
+
+    for file in &files {
+        let filename = file.file_name().to_string_lossy().to_string();
+        let sql = std::fs::read_to_string(file.path())?;
+        tracing::info!("[migration] 执行: {}", filename);
+        sqlx::query(&sql)
+            .execute(pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("迁移失败 {}: {}", filename, e))?;
+    }
+    tracing::info!("[migration] 全部完成 ({} 个文件)", files.len());
+    Ok(())
+}
+
 /// 启动数据库运行期健康探针
 pub fn start_db_health_probe(
     pool: PgPool,

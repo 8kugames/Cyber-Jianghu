@@ -461,6 +461,9 @@ async fn main() -> Result<()> {
     // 5. 初始化数据库连接池
     let db_pool = init_db_pool(&config.database).await?;
     info!("数据库连接池初始化成功");
+
+    // C0: 非 docker 部署时自动跑迁移（docker 由 entrypoint 处理，幂等 SQL 可安全重复）
+    crate::db::run_migrations(&db_pool).await?;
     let db_runtime_health = crate::db::create_db_runtime_health_state();
     let _db_probe_handle = crate::db::start_db_health_probe(
         db_pool.clone(),
