@@ -54,6 +54,16 @@ pub struct ServerConfig {
     /// 管理员读写 Token (可选)
     /// 如果设置，则使用该 Token，否则自动生成
     pub admin_write_token: Option<String>,
+
+    /// 游戏客户端只读 Token (可选)
+    ///
+    /// 给前端/游戏客户端使用的低权限只读档：只能命中 dashboard 的 READ 端点，
+    /// 不能调任何 WRITE 端点（config 编辑、chronicle 生成、agent cleanup 等）。
+    ///
+    /// None 表示禁用客户端鉴权档 —— 此时 require_client_read_token 回退接受
+    /// admin read token（保持向后兼容）。
+    /// 不自动生成：客户端档应由部署方显式下发，避免随机 token 泄漏后被滥用。
+    pub client_read_token: Option<String>,
 }
 
 /// 数据库配置
@@ -163,6 +173,9 @@ impl Config {
                 .ok()
                 .filter(|s| !s.is_empty()),
             admin_write_token: std::env::var("ADMIN_WRITE_TOKEN")
+                .ok()
+                .filter(|s| !s.is_empty()),
+            client_read_token: std::env::var("CLIENT_READ_TOKEN")
                 .ok()
                 .filter(|s| !s.is_empty()),
         };
@@ -276,6 +289,7 @@ impl Default for Config {
                 port: 23333,
                 admin_read_token: None,
                 admin_write_token: None,
+                client_read_token: None,
             },
             database: DatabaseConfig {
                 url: "postgres://postgres:changeme@localhost:5432/cyber_jianghu".to_string(),

@@ -568,6 +568,15 @@ async fn main() -> Result<()> {
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
+    // 游戏客户端只读 Token：不自动生成。
+    // None 表示禁用客户端鉴权档，require_client_read_token 回退到 admin read token。
+    let client_read_token = config.server.client_read_token.clone();
+    if client_read_token.is_some() {
+        info!("客户端只读档已启用 (CLIENT_READ_TOKEN)，前端可使用低权限 token 取数据");
+    } else {
+        info!("客户端只读档未配置，require_client_read_token 将回退到 admin read token");
+    }
+
     let read_token_source = if config.server.admin_read_token.is_some() {
         "配置/环境变量"
     } else {
@@ -636,6 +645,7 @@ async fn main() -> Result<()> {
         dialogue_manager.clone(),
         admin_read_token,
         admin_write_token,
+        client_read_token,
         deployment_time,
         crate::paths::get_config_dir(),
         accepting_tick_id.clone(),
@@ -716,7 +726,7 @@ async fn main() -> Result<()> {
             get(handlers::vendor::get_vendor_refill_rules)
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ))
                 .put(handlers::vendor::set_vendor_refill_rule)
                 .layer(axum::middleware::from_fn_with_state(
@@ -738,7 +748,7 @@ async fn main() -> Result<()> {
             get(handlers::role::get_agent_roles_handler)
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ))
                 .post(handlers::role::assign_role_handler)
                 .layer(axum::middleware::from_fn_with_state(
@@ -750,7 +760,7 @@ async fn main() -> Result<()> {
             "/api/dashboard/roles",
             get(handlers::role::list_available_roles).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
-                handlers::auth::require_read_token,
+                handlers::auth::require_client_read_token,
             )),
         )
         .route(
@@ -780,7 +790,7 @@ async fn main() -> Result<()> {
             "/api/dashboard/items",
             get(handlers::dashboard::get_items).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
-                handlers::auth::require_read_token,
+                handlers::auth::require_client_read_token,
             )),
         )
         // 展示名映射（经历日志前端翻译 agent_id/item_id 用）
@@ -788,7 +798,7 @@ async fn main() -> Result<()> {
             "/api/dashboard/display-map",
             get(handlers::dashboard::get_display_map).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
-                handlers::auth::require_read_token,
+                handlers::auth::require_client_read_token,
             )),
         )
         // 天魂层展示名映射（数据驱动，从 souls.yaml 读取）
@@ -802,7 +812,7 @@ async fn main() -> Result<()> {
             get(handlers::dashboard::get_dashboard_stats).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -811,7 +821,7 @@ async fn main() -> Result<()> {
             get(handlers::dashboard::get_reward_trends).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -820,7 +830,7 @@ async fn main() -> Result<()> {
             get(handlers::dashboard::get_agent_lifetime_reward).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -829,7 +839,7 @@ async fn main() -> Result<()> {
             get(handlers::dashboard::get_emergence).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -838,7 +848,7 @@ async fn main() -> Result<()> {
             get(handlers::dashboard::get_health).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -847,7 +857,7 @@ async fn main() -> Result<()> {
             get(handlers::dashboard::get_offline_agents).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -855,7 +865,7 @@ async fn main() -> Result<()> {
             "/api/dashboard/agents/dead",
             get(handlers::dashboard::get_dead_agents).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
-                handlers::auth::require_read_token,
+                handlers::auth::require_client_read_token,
             )),
         )
         .route(
@@ -863,7 +873,7 @@ async fn main() -> Result<()> {
             get(handlers::dashboard::get_agent_details).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -872,7 +882,7 @@ async fn main() -> Result<()> {
             get(handlers::dashboard::get_agent_experiences).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -880,7 +890,34 @@ async fn main() -> Result<()> {
             "/api/dashboard/agents",
             get(handlers::dashboard::get_all_agents).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
-                handlers::auth::require_read_token,
+                handlers::auth::require_client_read_token,
+            )),
+        )
+        // C3：统一世界快照（一次请求取 agents + tick_info + recent_events，
+        // 单只读事务隔离读，消除 tick 边界瞬时跨 agent 不一致）
+        .route(
+            "/api/dashboard/world-snapshot",
+            get(handlers::dashboard::get_world_snapshot).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_client_read_token,
+                ),
+            ),
+        )
+        // C4：地点拓扑图（节点+边，来自 LocationRegistry 内存快照）
+        .route(
+            "/api/dashboard/locations",
+            get(handlers::dashboard::get_locations).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_client_read_token,
+            )),
+        )
+        // C4：对话聚合（最近 speak 动作流，支持 ?limit & ?tick_from）
+        .route(
+            "/api/dashboard/dialogues",
+            get(handlers::dashboard::get_dialogues).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_client_read_token,
             )),
         )
         .route(
@@ -888,7 +925,7 @@ async fn main() -> Result<()> {
             get(handlers::dashboard::get_status_configs).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -896,7 +933,7 @@ async fn main() -> Result<()> {
             "/api/dashboard/experiences",
             get(handlers::dashboard::get_experiences).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
-                handlers::auth::require_read_token,
+                handlers::auth::require_client_read_token,
             )),
         )
         .route(
@@ -913,14 +950,14 @@ async fn main() -> Result<()> {
             "/api/dashboard/chronicles",
             get(handlers::chronicle::list_chronicles).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
-                handlers::auth::require_read_token,
+                handlers::auth::require_client_read_token,
             )),
         )
         .route(
             "/api/dashboard/chronicles/{id}",
             get(handlers::chronicle::get_chronicle).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
-                handlers::auth::require_read_token,
+                handlers::auth::require_client_read_token,
             )),
         )
         .route(
@@ -937,7 +974,7 @@ async fn main() -> Result<()> {
             "/api/dashboard/chronicles/llm-stats",
             get(handlers::chronicle::get_llm_stats).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
-                handlers::auth::require_read_token,
+                handlers::auth::require_client_read_token,
             )),
         )
         // 异步生成任务进度
@@ -946,7 +983,7 @@ async fn main() -> Result<()> {
             get(handlers::chronicle::get_pending_generations).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -956,7 +993,7 @@ async fn main() -> Result<()> {
             get(handlers::agent_daily_summaries::list_summaries).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -965,7 +1002,7 @@ async fn main() -> Result<()> {
             get(handlers::agent_daily_summaries::get_by_agent).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -975,7 +1012,7 @@ async fn main() -> Result<()> {
             get(handlers::agent_relationships::get_all_relationships).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -984,7 +1021,7 @@ async fn main() -> Result<()> {
             get(handlers::agent_relationships::get_relationships_by_agent).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -993,7 +1030,7 @@ async fn main() -> Result<()> {
             "/api/config",
             get(handlers::config_editor::list_configs).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
-                handlers::auth::require_read_token,
+                handlers::auth::require_client_read_token,
             )),
         )
         .route(
@@ -1001,7 +1038,7 @@ async fn main() -> Result<()> {
             get(handlers::config_editor::get_config_content)
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ))
                 .put(handlers::config_editor::update_config_content)
                 .layer(axum::middleware::from_fn_with_state(
@@ -1017,7 +1054,7 @@ async fn main() -> Result<()> {
             get(handlers::config_llm::get_llm_config)
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ))
                 .post(handlers::config_llm::save_llm_config)
                 .layer(axum::middleware::from_fn_with_state(
@@ -1030,7 +1067,7 @@ async fn main() -> Result<()> {
             "/api/dashboard/config/llm/status",
             get(handlers::config_llm::get_llm_status).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
-                handlers::auth::require_read_token,
+                handlers::auth::require_client_read_token,
             )),
         )
         .route(
@@ -1038,7 +1075,7 @@ async fn main() -> Result<()> {
             get(handlers::config_llm::get_llm_enabled)
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ))
                 .post(handlers::config_llm::set_llm_enabled)
                 .layer(axum::middleware::from_fn_with_state(
@@ -1079,7 +1116,7 @@ async fn main() -> Result<()> {
             get(handlers::dashboard::get_action_evolution_stats).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -1089,7 +1126,7 @@ async fn main() -> Result<()> {
             get(handlers::dashboard::get_proposal_groups).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -1099,7 +1136,7 @@ async fn main() -> Result<()> {
             get(handlers::dashboard::get_proposal_group_detail).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -1119,7 +1156,7 @@ async fn main() -> Result<()> {
             get(handlers::dashboard::list_telemetry_aggregations).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
@@ -1128,7 +1165,7 @@ async fn main() -> Result<()> {
             get(handlers::dashboard::get_telemetry_aggregation).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
-                    handlers::auth::require_read_token,
+                    handlers::auth::require_client_read_token,
                 ),
             ),
         )
