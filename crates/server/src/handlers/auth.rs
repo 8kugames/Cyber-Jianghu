@@ -42,32 +42,6 @@ pub(crate) fn authenticate_admin_token(
     check_token_value(token, expected_read, expected_write, require_write)
 }
 
-/// 验证读权限 (R)
-///
-/// 允许 R 或 RW Token；只接受 Authorization Header。
-pub async fn require_read_token(
-    State(state): State<Arc<AppState>>,
-    req: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    info!(
-        "require_read_token called: uri={}",
-        req.uri()
-    );
-
-    if authenticate_admin_token(
-        req.headers(),
-        &state.admin_read_token,
-        &state.admin_write_token,
-        false,
-    ) {
-        Ok(next.run(req).await)
-    } else {
-        warn!("Read access denied: Invalid or missing Bearer token");
-        Err(StatusCode::UNAUTHORIZED)
-    }
-}
-
 /// 验证游戏客户端读权限（低特权档）
 ///
 /// 专为前端/游戏客户端读取 dashboard 数据设计的低特权鉴权档。
@@ -130,7 +104,7 @@ fn authenticate_with_any_token(headers: &axum::http::HeaderMap, expected: &str) 
 }
 
 /// 常量时间字节比对（避免 token 长度/前缀差异泄露信息）
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
@@ -179,14 +153,14 @@ fn check_token_value(
         require_write
     );
 
-    // RW Token 拥有所有权限
-    if token == expected_write {
+    // RW Token 拥有所有权限（常量时间比对，避免计时侧信道）
+    if constant_time_eq(token.as_bytes(), expected_write.as_bytes()) {
         info!("Token authenticated as WRITE token");
         return true;
     }
 
-    // 如果不需要写权限，R Token 也可以
-    if !require_write && token == expected_read {
+    // 如果不需要写权限，R Token 也可以（常量时间比对）
+    if !require_write && constant_time_eq(token.as_bytes(), expected_read.as_bytes()) {
         info!("Token authenticated as READ token");
         return true;
     }

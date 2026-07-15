@@ -920,6 +920,14 @@ async fn main() -> Result<()> {
                 handlers::auth::require_client_read_token,
             )),
         )
+        // C4：死亡时间线（status='dead' 的 agent + 失败战斗动作叙事，支持 ?limit & ?tick_from）
+        .route(
+            "/api/dashboard/deaths",
+            get(handlers::dashboard::get_deaths).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_client_read_token,
+            )),
+        )
         .route(
             "/api/dashboard/status-configs",
             get(handlers::dashboard::get_status_configs).layer(
