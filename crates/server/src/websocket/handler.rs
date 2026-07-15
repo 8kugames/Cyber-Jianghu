@@ -910,6 +910,20 @@ async fn handle_client_message(
         ClientMessage::DailySummary { game_day, summary } => {
             handle_daily_summary(device_id, game_day, &summary, state).await
         }
+        ClientMessage::RelationshipSnapshot {
+            agent_id: msg_agent_id,
+            game_day,
+            relationships,
+        } => {
+            handle_relationship_snapshot(
+                device_id,
+                msg_agent_id,
+                game_day,
+                &relationships,
+                state,
+            )
+            .await
+        }
         ClientMessage::TraceReport { traces } => {
             handle_trace_report(device_id, &traces, state).await
         }
@@ -1719,6 +1733,72 @@ async fn handle_daily_summary(
     info!(
         "每日摘要已存储: agent_id={}, game_day={}",
         agent_id, game_day
+    );
+
+    Ok(())
+}
+
+/// 处理关系图谱全量快照上报
+///
+/// Agent 通过 WebSocket RelationshipSnapshot 消息上报游戏日结束时的完整关系列表。
+/// Server 全量覆盖（DELETE+INSERT，天然幂等），注入 synced_at（服务器权威时间）。
+///
+/// 归属校验：消息内 agent_id 必须与 device_id 解析出的当前 agent 一致，
+/// 否则拒绝（防止越权改写他人关系图谱）。
+async fn handle_relationship_snapshot(
+    device_id: uuid::Uuid,
+    msg_agent_id: uuid::Uuid,
+    game_day: i64,
+    relationships: &[cyber_jianghu_protocol::types::RelationshipMemory],
+    state: &Arc<crate::state::AppState>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // 通过 device_id 查找当前 agent
+    let agent_id = match crate::db::get_agent_by_device_id(&state.db_pool, device_id).await {
+        Ok(Some(agent)) => agent.agent_id,
+        Ok(None) => return Err("无关联角色".into()),
+        Err(e) => return Err(format!("查询角色失败: {}", e).into()),
+    };
+
+    // 归属校验：消息内 agent_id 必须与连接归属的 agent 一致
+    if msg_agent_id != agent_id {
+        warn!(
+            "关系快照归属校验失败: device={} resolved={} msg={}，拒绝写入",
+            device_id, agent_id, msg_agent_id
+        );
+        return Err(format!("关系快照 agent_id 不匹配: expected {agent_id}, got {msg_agent_id}").into());
+    }
+
+    // Server 注入时间戳（服务器权威时间）
+    let synced_at = chrono::Utc::now().timestamp_millis();
+
+    debug!(
+        "收到关系快照: agent_id={}, game_day={}, relationships={}",
+        agent_id,
+        game_day,
+        relationships.len()
+    );
+
+    if let Err(e) = crate::db::upsert_relationship_snapshot(
+        &state.db_pool,
+        agent_id,
+        game_day,
+        relationships,
+        synced_at,
+    )
+    .await
+    {
+        error!(
+            "写入关系快照失败: agent_id={}, game_day={}, err={}",
+            agent_id, game_day, e
+        );
+        return Err(format!("写入关系快照失败: {}", e).into());
+    }
+
+    info!(
+        "关系快照已存储: agent_id={}, game_day={}, count={}",
+        agent_id,
+        game_day,
+        relationships.len()
     );
 
     Ok(())

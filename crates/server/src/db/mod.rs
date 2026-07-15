@@ -31,6 +31,7 @@ mod audit_ops;
 mod common;
 mod ground_item_ops;
 mod item_ops;
+mod relationship_ops;
 mod role_ops;
 mod state_ops;
 mod vendor_ops;
@@ -97,6 +98,11 @@ pub use vendor_ops::{
 
 // 导出公共API - 角色身份操作
 pub use role_ops::{AgentRole, assign_role, get_agent_roles, remove_role};
+
+// 导出公共API - Agent 关系图谱操作（C1 全量快照同步）
+pub use relationship_ops::{
+    get_all_relationships, get_relationships_by_agent, upsert_relationship_snapshot,
+};
 
 // 数据库连接池类型别名
 pub type DbPool = sqlx::PgPool;

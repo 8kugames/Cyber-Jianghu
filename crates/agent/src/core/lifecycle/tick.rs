@@ -125,6 +125,84 @@ impl super::super::Agent {
                                         summary_game_day, max_retries
                                     );
                                 }
+
+                                // C1: 关系图谱全量快照同步
+                                // 游戏日结束时随 DailySummary 一起上报，server 全量覆盖（DELETE+INSERT）。
+                                // 时间戳转换：agent 本地 DateTime<Utc> → protocol i64 毫秒。
+                                if let Some(ref store) = self.relationship_store {
+                                    match store.get_all_relationships() {
+                                        Ok(local_rels) => {
+                                            let snapshot_id = world_state.agent_id
+                                                .unwrap_or_default();
+                                            if snapshot_id.is_nil() {
+                                                warn!(
+                                                    "关系快照跳过：agent_id 未知（game_day={}）",
+                                                    summary_game_day
+                                                );
+                                            } else {
+                                                let proto_rels: Vec<
+                                                    cyber_jianghu_protocol::types::RelationshipMemory,
+                                                > = local_rels
+                                                    .iter()
+                                                    .map(|r| {
+                                                        cyber_jianghu_protocol::types::RelationshipMemory {
+                                                            target_agent_id: r.target_agent_id,
+                                                            target_name: r.target_name.clone(),
+                                                            favorability: r.favorability,
+                                                            key_events: r
+                                                                .key_events
+                                                                .iter()
+                                                                .map(|e| {
+                                                                    cyber_jianghu_protocol::types::RelationshipKeyEvent {
+                                                                        tick_id: e.tick_id,
+                                                                        event_type: e.event_type.clone(),
+                                                                        description: e.description.clone(),
+                                                                        favorability_delta: e.favorability_delta,
+                                                                        timestamp: e.timestamp.timestamp_millis(),
+                                                                    }
+                                                                })
+                                                                .collect(),
+                                                            last_interaction_tick: r.last_interaction_tick,
+                                                            updated_at: r.updated_at.timestamp_millis(),
+                                                            self_description: r.self_description.clone(),
+                                                            description_tick: r.description_tick,
+                                                        }
+                                                    })
+                                                    .collect();
+
+                                                let count = proto_rels.len();
+                                                match self
+                                                    .client
+                                                    .send_relationship_snapshot(
+                                                        snapshot_id,
+                                                        summary_game_day,
+                                                        proto_rels,
+                                                    )
+                                                    .await
+                                                {
+                                                    Ok(()) => {
+                                                        info!(
+                                                            "游戏日 {} 关系快照已提交 Server (count={})",
+                                                            summary_game_day, count
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        warn!(
+                                                            "游戏日 {} 关系快照提交 Server 失败: {}",
+                                                            summary_game_day, e
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            warn!(
+                                                "游戏日 {} 读取本地关系存储失败，跳过快照: {}",
+                                                summary_game_day, e
+                                            );
+                                        }
+                                    }
+                                }
                             }
                         }
                         Err(e) => {

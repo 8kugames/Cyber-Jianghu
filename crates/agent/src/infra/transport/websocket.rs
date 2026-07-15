@@ -656,6 +656,36 @@ impl WebSocketClient {
         Ok(())
     }
 
+    /// 发送关系图谱全量快照到服务器
+    ///
+    /// 游戏日结束时随 DailySummary 一起发送，server 全量覆盖（DELETE+INSERT）。
+    /// 关系列表来自 `RelationshipStore::get_all_relationships()`，由 caller 完成向
+    /// protocol 类型（i64 毫秒时间戳）的转换后再传入。
+    pub async fn send_relationship_snapshot(
+        &self,
+        agent_id: uuid::Uuid,
+        game_day: i64,
+        relationships: Vec<cyber_jianghu_protocol::types::RelationshipMemory>,
+    ) -> Result<()> {
+        let msg = ClientMessage::RelationshipSnapshot {
+            agent_id,
+            game_day,
+            relationships,
+        };
+        let tx = {
+            let state = self.state.read().await;
+            state
+                .intent_tx
+                .as_ref()
+                .context("Not connected to server")?
+                .clone()
+        };
+        tx.send(msg)
+            .await
+            .context("Failed to send relationship snapshot")?;
+        Ok(())
+    }
+
     pub fn game_rules(&self) -> Option<GameRules> {
         self.state.try_read().ok()?.game_rules.clone()
     }
@@ -1219,6 +1249,19 @@ impl AgentClient {
     pub async fn send_daily_summary(&self, game_day: i64, summary: &str) -> Result<()> {
         let client = self.client.read().await;
         client.send_daily_summary(game_day, summary).await
+    }
+
+    /// 发送关系图谱全量快照
+    pub async fn send_relationship_snapshot(
+        &self,
+        agent_id: uuid::Uuid,
+        game_day: i64,
+        relationships: Vec<cyber_jianghu_protocol::types::RelationshipMemory>,
+    ) -> Result<()> {
+        let client = self.client.read().await;
+        client
+            .send_relationship_snapshot(agent_id, game_day, relationships)
+            .await
     }
 
     pub async fn is_connected(&self) -> bool {
