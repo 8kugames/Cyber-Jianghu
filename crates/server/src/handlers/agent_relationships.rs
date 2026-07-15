@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::db;
 use crate::state::AppState;
-use cyber_jianghu_protocol::types::{RelationshipKeyEvent, RelationshipMemory};
+use cyber_jianghu_protocol::types::RelationshipMemory;
 
 // ============================================================================
 // 响应类型
@@ -104,7 +104,3 @@ pub async fn get_relationships_by_agent(
         total,
     }))
 }
-
-// 静默使用 RelationshipKeyEvent（确保类型导入在序列化路径上被识别）
-#[allow(dead_code)]
-type _KeyEventUsed = RelationshipKeyEvent;

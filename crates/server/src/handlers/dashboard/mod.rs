@@ -4,6 +4,7 @@
 
 mod action_evolution;
 mod agents;
+mod deaths;
 mod dialogues;
 mod emergence;
 mod experience;
@@ -19,6 +20,7 @@ mod world_snapshot;
 
 pub use action_evolution::*;
 pub use agents::*;
+pub use deaths::*;
 pub use dialogues::*;
 pub use emergence::*;
 pub use experience::*;

@@ -97,9 +97,13 @@ pub async fn get_agent_context(
         }
     };
 
-    // Get agent name from WebSocket connections (or use a default for now)
-    // In a real implementation, you'd need to query the agent table or maintain a mapping
-    let agent_name = format!("Agent-{}", agent_id.to_string().split_at(8).0);
+    // Agent 名称：AgentState.name 已在 get_all_alive_agents_latest_states 中
+    // 通过 JOIN agents 表填充（state_ops.rs）。直接使用真实名称，避免伪造 Agent-<前8位>。
+    let agent_name = if agent_state.name.is_empty() {
+        format!("Agent-{}", &agent_id.to_string()[..8])
+    } else {
+        agent_state.name.clone()
+    };
 
     // 查询真实库存：从 agent_inventory 取 (item_id, quantity)，再用 ItemRegistry 解析名称
     // C4 修复：原占位符 "(查看物品详情需要额外查询)" 已替换为真实数据。
@@ -173,15 +177,20 @@ pub async fn get_agent_context(
     );
 
     // Build nearby entities (filter by same location)
+    // 名称取 AgentState.name（JOIN agents 表填充），为空时回退到 Agent-<前8位>。
     let nearby_entities: Vec<String> = all_agents
         .iter()
         .filter(|a| a.agent_id != agent_id && a.node_id == agent_state.node_id)
         .map(|a| {
-            let id_str = format!("Agent-{}", a.agent_id.to_string().split_at(8).0);
-            if a.is_alive {
-                format!("{} (存活)", id_str)
+            let display_name = if a.name.is_empty() {
+                format!("Agent-{}", &a.agent_id.to_string()[..8])
             } else {
-                format!("{} (已死亡)", id_str)
+                a.name.clone()
+            };
+            if a.is_alive {
+                format!("{} (存活)", display_name)
+            } else {
+                format!("{} (已死亡)", display_name)
             }
         })
         .collect();

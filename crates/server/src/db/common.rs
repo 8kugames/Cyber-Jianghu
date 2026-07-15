@@ -146,21 +146,33 @@ pub async fn init_db_pool(database: &crate::config::DatabaseConfig) -> Result<Pg
 ///
 /// 全量重跑幂等 SQL（与 entrypoint 行为一致），不引入 _sqlx_migrations 追踪表。
 /// 非 docker 部署（cargo run / 裸二进制）靠此函数保证 schema 就绪。
+///
+/// 路径探测顺序（适配多种部署形态）：
+///   1. `crates/server/migrations` —— cargo run（仓库根为 cwd）
+///   2. `migrations`               —— docker 容器（WORKDIR=/app，migrations 在 /app/migrations）
+///   3. 都不存在                   —— warn 后返回 Ok（由 docker entrypoint 兜底执行）
 pub async fn run_migrations(pool: &PgPool) -> Result<()> {
-    let migration_dir = std::path::Path::new("crates/server/migrations");
-    if !migration_dir.is_dir() {
+    // 多路径探测：cargo run 与 docker 两种 cwd 布局都覆盖
+    let migration_dir = ["crates/server/migrations", "migrations"]
+        .iter()
+        .map(std::path::Path::new)
+        .find(|p| p.is_dir());
+
+    let Some(migration_dir) = migration_dir else {
         tracing::warn!(
-            "迁移目录不存在: {:?}（docker 部署由 entrypoint 处理）",
-            migration_dir
+            "迁移目录不存在（尝试过 crates/server/migrations 与 migrations）；\
+             docker 部署由 entrypoint 处理，非 docker 部署请确认 cwd"
         );
         return Ok(());
-    }
+    };
 
     let mut files: Vec<_> = std::fs::read_dir(migration_dir)?
         .filter_map(|e| e.ok())
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "sql"))
         .collect();
     files.sort_by_key(|e| e.path());
+
+    tracing::info!("[migration] 使用迁移目录: {}", migration_dir.display());
 
     for file in &files {
         let filename = file.file_name().to_string_lossy().to_string();

@@ -6,19 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-// ============================================================================
-// 物品类型常量（数据驱动，禁止硬编码魔法字符串）
-// ============================================================================
-
-/// 可消耗品（食物/水/药品等）
-pub const ITEM_TYPE_CONSUMABLE: &str = "consumable";
-/// 武器
-pub const ITEM_TYPE_WEAPON: &str = "weapon";
-/// 材料
-pub const ITEM_TYPE_MATERIAL: &str = "material";
-/// 货币
-pub const ITEM_TYPE_CURRENCY: &str = "currency";
-
 /// 生存驱动（server 从 narratives.yaml 预计算后下发）
 ///
 /// 当属性值落入 urgency>0 的阈值段时，server 生成对应的驱动信息。
