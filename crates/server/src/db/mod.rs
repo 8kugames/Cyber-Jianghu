@@ -38,7 +38,7 @@ mod vendor_ops;
 // 导出公共API - 连接池初始化和工具函数
 pub use common::{
     DbRuntimeHealth, DbRuntimeHealthState, create_db_runtime_health_state, init_db_pool,
-    record_db_probe_result, start_db_health_probe,
+    record_db_probe_result, run_migrations, start_db_health_probe,
 };
 
 // 导出公共API - Agent操作
