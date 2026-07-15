@@ -398,6 +398,19 @@ pub enum ClientMessage {
         summary: String,
     },
 
+    /// 关系图谱全量快照上报（agent → server）
+    ///
+    /// 游戏日结束时随 DailySummary 一起发送，server 全量覆盖（DELETE+INSERT），
+    /// 天然幂等。携带 agent 端完整关系列表（对齐 protocol::types::RelationshipMemory 契约）。
+    RelationshipSnapshot {
+        /// 关系持有者
+        agent_id: uuid::Uuid,
+        /// 所属游戏日（用于幂等追踪）
+        game_day: i64,
+        /// 完整关系列表（全量覆盖）
+        relationships: Vec<crate::types::RelationshipMemory>,
+    },
+
     /// 训练 Trace 上报（agent → server）
     ///
     /// agent 端的结构化 LLM 调用 trace（已脱敏），批量回传 server 汇聚。

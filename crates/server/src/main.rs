@@ -969,6 +969,25 @@ async fn main() -> Result<()> {
                 ),
             ),
         )
+        // Agent 关系图谱 API（C1 全量快照同步）
+        .route(
+            "/api/dashboard/agent-relationships",
+            get(handlers::agent_relationships::get_all_relationships).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/dashboard/agent-relationships/{agent_id}",
+            get(handlers::agent_relationships::get_relationships_by_agent).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
         // Config API (List/Get 需要 Read 权限, Update 需要 Write 权限)
         .route(
             "/api/config",
