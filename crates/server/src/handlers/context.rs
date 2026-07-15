@@ -13,11 +13,13 @@ use axum::{
     http::StatusCode,
 };
 use serde::Serialize;
+use sqlx::Row;
 use std::sync::Arc;
 use tracing::{debug, info};
 use uuid::Uuid;
 
 use crate::game_data;
+use crate::game_data::registry::ItemRegistry;
 use crate::game_data::types::StatusComponentExt;
 use crate::state::AppState;
 
@@ -99,10 +101,9 @@ pub async fn get_agent_context(
     // In a real implementation, you'd need to query the agent table or maintain a mapping
     let agent_name = format!("Agent-{}", agent_id.to_string().split_at(8).0);
 
-    // Get inventory items (using agent_id to filter)
-    // For simplicity, we'll show the item_id instead of name since we don't have easy access to item names
-    // 预留：背包摘要（待集成到叙事上下文）
-    let _inventory_summary = "(查看物品详情需要额外查询)".to_string();
+    // 查询真实库存：从 agent_inventory 取 (item_id, quantity)，再用 ItemRegistry 解析名称
+    // C4 修复：原占位符 "(查看物品详情需要额外查询)" 已替换为真实数据。
+    let inventory_summary = build_inventory_summary(&state.db_pool, agent_id).await;
 
     // Get ground items at this location
     let scene_items =
@@ -171,9 +172,6 @@ pub async fn get_agent_context(
         hp_status, satiation_status, hydration_status, stamina_status
     );
 
-    // Build inventory summary (simplified for now)
-    let inventory_summary = "(查看背包详情需要额外查询)".to_string();
-
     // Build nearby entities (filter by same location)
     let nearby_entities: Vec<String> = all_agents
         .iter()
@@ -223,4 +221,43 @@ pub async fn get_agent_context(
         status_effects: Vec::new(),
         is_alive: agent_state.is_alive,
     }))
+}
+
+/// 构建叙事化背包摘要（C4 修复占位符）
+///
+/// 从 agent_inventory 表取 (item_id, quantity)，再用 ItemRegistry 把 item_id
+/// 解析成可读的物品名。查库失败或背包为空时返回友好占位，永不阻塞主流程。
+async fn build_inventory_summary(db_pool: &crate::db::DbPool, agent_id: Uuid) -> String {
+    let rows = match sqlx::query(
+        "SELECT item_id, quantity FROM agent_inventory WHERE agent_id = $1 AND quantity > 0 ORDER BY quantity DESC",
+    )
+    .bind(agent_id)
+    .fetch_all(db_pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!("查询 agent_inventory 失败 (agent={}): {}", agent_id, e);
+            return "背包状态未知".to_string();
+        }
+    };
+
+    if rows.is_empty() {
+        return "背包空空如也".to_string();
+    }
+
+    let items: Vec<String> = rows
+        .into_iter()
+        .map(|row| {
+            let item_id: String = row.get("item_id");
+            let quantity: i32 = row.get("quantity");
+            // 优先用 ItemRegistry 解析显示名，回退到 item_id
+            let display_name = ItemRegistry::get(&item_id)
+                .map(|cfg| cfg.name)
+                .unwrap_or(item_id);
+            format!("{} x{}", display_name, quantity)
+        })
+        .collect();
+
+    format!("背包: {}", items.join("、"))
 }

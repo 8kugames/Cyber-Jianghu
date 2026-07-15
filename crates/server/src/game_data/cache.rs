@@ -281,6 +281,19 @@ impl LocationRegistry {
         self.graph
             .get_all_neighbors(node_id, default_implicit_travel_cost)
     }
+
+    /// 导出整个图为 owned 可序列化结构（C4：地点端点用）
+    ///
+    /// 返回 `LocationGraph` 的 owned 克隆（节点+边），前端可以一次性拿到完整
+    /// 地图拓扑，无需逐节点遍历。`LocationGraph` 已实现 Serialize。
+    pub fn export_graph(&self) -> LocationGraph {
+        self.graph.clone()
+    }
+
+    /// 所有节点 id（owned，便于遍历）
+    pub fn all_node_ids(&self) -> Vec<String> {
+        self.graph.nodes.keys().cloned().collect()
+    }
 }
 
 // ============================================================================

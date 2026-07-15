@@ -231,6 +231,12 @@ pub struct AppState {
     /// 管理员读写 Token (RW)
     pub admin_write_token: String,
 
+    /// 游戏客户端只读 Token (可选)
+    ///
+    /// None 表示未配置 CLIENT_READ_TOKEN，require_client_read_token 回退到 admin
+    /// read token（保持向后兼容）。
+    pub client_read_token: Option<String>,
+
     /// 服务器部署时间（首次启动时持久化，重启不变）
     pub start_time: chrono::DateTime<chrono::Utc>,
 
@@ -266,6 +272,7 @@ impl AppState {
         dialogue_manager: Arc<dialogue::DialogueManager>,
         admin_read_token: String,
         admin_write_token: String,
+        client_read_token: Option<String>,
         start_time: chrono::DateTime<chrono::Utc>,
         config_dir: std::path::PathBuf,
         current_accepting_tick_id: Arc<AtomicI64>,
@@ -284,6 +291,7 @@ impl AppState {
             dialogue_manager,
             admin_read_token,
             admin_write_token,
+            client_read_token,
             start_time,
             config_dir,
             current_accepting_tick_id,

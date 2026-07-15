@@ -68,6 +68,79 @@ pub async fn require_read_token(
     }
 }
 
+/// 验证游戏客户端读权限（低特权档）
+///
+/// 专为前端/游戏客户端读取 dashboard 数据设计的低特权鉴权档。
+/// 优先校验 `client_read_token`（仅读，不能命中任何 WRITE 端点）；
+/// 若 `client_read_token` 未配置（None），则回退到 admin read token，
+/// 保证向后兼容（旧部署未设 CLIENT_READ_TOKEN 时前端照常工作）。
+///
+/// 安全说明：即便前端持有了 client_read_token，也无法用它调任何 require_write_token
+/// 端点 —— require_write_token 只认 admin write token，与本中间件完全隔离。
+pub async fn require_client_read_token(
+    State(state): State<Arc<AppState>>,
+    req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    info!(
+        "require_client_read_token called: uri={}",
+        req.uri()
+    );
+
+    // 1) 优先：如果配了 CLIENT_READ_TOKEN，先尝试用它鉴权
+    if let Some(client_token) = &state.client_read_token {
+        if authenticate_with_any_token(req.headers(), client_token) {
+            return Ok(next.run(req).await);
+        }
+    }
+
+    // 2) 回退：admin read token 或 admin write token 都接受
+    //    （保持向后兼容：旧部署未设 CLIENT_READ_TOKEN 时，前端用 admin read token）
+    if authenticate_admin_token(
+        req.headers(),
+        &state.admin_read_token,
+        &state.admin_write_token,
+        false,
+    ) {
+        Ok(next.run(req).await)
+    } else {
+        warn!(
+            "Client read access denied: Invalid or missing Bearer token (uri={})",
+            req.uri()
+        );
+        Err(StatusCode::UNAUTHORIZED)
+    }
+}
+
+/// 单 token 比对：从 Authorization Bearer 提取 token，与期望值做常量时间比对。
+///
+/// 不接受 query 参数、不接受 Basic scheme —— 与 authenticate_admin_token 的安全契约一致。
+fn authenticate_with_any_token(headers: &axum::http::HeaderMap, expected: &str) -> bool {
+    let Some(auth_header) = headers.get(header::AUTHORIZATION) else {
+        return false;
+    };
+    let Ok(auth_str) = auth_header.to_str() else {
+        return false;
+    };
+    let Some(token) = auth_str.strip_prefix("Bearer ") else {
+        return false;
+    };
+    // 常量时间比对，避免计时侧信道
+    constant_time_eq(token.as_bytes(), expected.as_bytes())
+}
+
+/// 常量时间字节比对（避免 token 长度/前缀差异泄露信息）
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// 验证读写权限 (RW)
 ///
 /// 仅允许 RW Token；只接受 Authorization Header。
@@ -233,5 +306,42 @@ mod tests {
             HeaderValue::from_static("Basic dXNlcjpwYXNz"),
         );
         assert!(!authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, false));
+    }
+
+    // ---- require_client_read_token 的纯函数 authenticate_with_any_token 单测 ----
+
+    use super::authenticate_with_any_token;
+    const CLIENT_TOKEN: &str = "c-token-cccccccccccccccc";
+
+    #[test]
+    fn test_authenticate_with_any_token_accepts_client_token() {
+        let h = headers_with_bearer(CLIENT_TOKEN);
+        assert!(authenticate_with_any_token(&h, CLIENT_TOKEN));
+    }
+
+    #[test]
+    fn test_authenticate_with_any_token_rejects_admin_token() {
+        // client_read_token 档只接受 client_token 自身，admin token 不应命中
+        let h_read = headers_with_bearer(READ_TOKEN);
+        let h_write = headers_with_bearer(WRITE_TOKEN);
+        assert!(!authenticate_with_any_token(&h_read, CLIENT_TOKEN));
+        assert!(!authenticate_with_any_token(&h_write, CLIENT_TOKEN));
+    }
+
+    #[test]
+    fn test_authenticate_with_any_token_rejects_missing_or_invalid() {
+        let empty = HeaderMap::new();
+        assert!(!authenticate_with_any_token(&empty, CLIENT_TOKEN));
+        let bad = headers_with_bearer("garbage");
+        assert!(!authenticate_with_any_token(&bad, CLIENT_TOKEN));
+    }
+
+    #[test]
+    fn test_constant_time_eq_handles_unequal_lengths() {
+        use super::constant_time_eq;
+        assert!(!constant_time_eq(b"abc", b"abcd"));
+        assert!(!constant_time_eq(b"abcd", b"abc"));
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
     }
 }

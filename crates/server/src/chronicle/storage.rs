@@ -21,15 +21,16 @@ pub async fn store(
 }
 
 /// 存储群像传记（支持同时指定主版本摘要）
+///
+/// 幂等策略：以 (period_start, period_end) 作为冲突仲裁键 ——
+/// 同一周期重复生成时（如 LLM 重试、定时任务抖动）覆盖现有记录而非报错。
+/// 这依赖 migration 023 建立的 UNIQUE 约束 uq_chronicles_period_start_period_end。
 pub async fn store_with_llm(
     db_pool: &crate::db::DbPool,
     data: &CollectedData,
     summary: &str,
     summary_llm: Option<&str>,
 ) -> Result<Chronicle> {
-    // 生成 chronicle_id
-    let chronicle_id = generate_chronicle_id(db_pool).await?;
-
     // 转换数据结构
     let agent_summaries: Vec<AgentSummary> = data
         .agents
@@ -83,7 +84,11 @@ pub async fn store_with_llm(
     };
     let summary_llm_value = summary_llm.map(|s| s.to_string());
 
-    let row = sqlx::query_scalar::<_, i64>(
+    // 幂等 INSERT ... ON CONFLICT：冲突时全字段覆盖（保留 chronicle_id 稳定）。
+    // RETURNING (id, chronicle_id)：
+    //   - 正常 INSERT 返回新值；
+    //   - ON CONFLICT 更新后返回被更新行的新值（含原 chronicle_id）。
+    let row = sqlx::query(
         r#"
         INSERT INTO chronicles (
             chronicle_id, period_start, period_end,
@@ -92,10 +97,27 @@ pub async fn store_with_llm(
             highlights, agent_summaries, action_stats,
             location_stats, deaths, births, raw_data, status
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-        RETURNING id
+        ON CONFLICT (period_start, period_end) DO UPDATE SET
+            chronicle_id      = EXCLUDED.chronicle_id,
+            game_day_start    = EXCLUDED.game_day_start,
+            game_day_end      = EXCLUDED.game_day_end,
+            season            = EXCLUDED.season,
+            summary           = EXCLUDED.summary,
+            summary_llm       = EXCLUDED.summary_llm,
+            agent_count       = EXCLUDED.agent_count,
+            actions_count     = EXCLUDED.actions_count,
+            highlights        = EXCLUDED.highlights,
+            agent_summaries   = EXCLUDED.agent_summaries,
+            action_stats      = EXCLUDED.action_stats,
+            location_stats    = EXCLUDED.location_stats,
+            deaths            = EXCLUDED.deaths,
+            births            = EXCLUDED.births,
+            raw_data          = EXCLUDED.raw_data,
+            status            = EXCLUDED.status
+        RETURNING id, chronicle_id
         "#,
     )
-    .bind(&chronicle_id)
+    .bind(generate_chronicle_id_for_period(db_pool, data.period_start, data.period_end).await?)
     .bind(data.period_start)
     .bind(data.period_end)
     .bind(data.game_day_start)
@@ -115,9 +137,10 @@ pub async fn store_with_llm(
     .bind(status)
     .fetch_one(db_pool)
     .await
-    .map_err(|e| anyhow::anyhow!("插入 chronicles 记录失败: {}", e))?;
+    .map_err(|e| anyhow::anyhow!("插入/更新 chronicles 记录失败: {}", e))?;
 
-    let id = row;
+    let id: i64 = row.get("id");
+    let chronicle_id: String = row.get("chronicle_id");
 
     Ok(Chronicle {
         id,
@@ -411,6 +434,34 @@ async fn generate_chronicle_id(db_pool: &crate::db::DbPool) -> Result<String> {
     .map_err(|e| anyhow::anyhow!("生成 chronicle_id 失败: {}", e))?;
 
     Ok(format!("C-{:03}", max_id + 1))
+}
+
+/// 为指定周期生成 chronicle_id（幂等版本）
+///
+/// 如果该周期已存在 chronicle，返回其 chronicle_id（用于 ON CONFLICT 的 EXCLUDED）；
+/// 否则按 MAX+1 生成新 ID。配合 store_with_llm 的 ON CONFLICT DO UPDATE，
+/// 保证重试/重复生成不会产生 chronicle_id 漂移。
+async fn generate_chronicle_id_for_period(
+    db_pool: &crate::db::DbPool,
+    period_start: i64,
+    period_end: i64,
+) -> Result<String> {
+    // 先查同周期是否已有记录
+    let existing: Option<String> = sqlx::query_scalar(
+        "SELECT chronicle_id FROM chronicles WHERE period_start = $1 AND period_end = $2 LIMIT 1",
+    )
+    .bind(period_start)
+    .bind(period_end)
+    .fetch_optional(db_pool)
+    .await
+    .map_err(|e| anyhow::anyhow!("查询周期 chronicle_id 失败: {}", e))?;
+
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+
+    // 没有冲突 → 生成新 ID
+    generate_chronicle_id(db_pool).await
 }
 
 /// Chronicle 列表元数据
