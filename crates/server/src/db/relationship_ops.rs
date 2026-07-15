@@ -243,3 +243,351 @@ pub async fn get_all_relationships(
 ) -> Result<Vec<(Uuid, RelationshipMemory)>> {
     fetch_relationships(pool, None).await
 }
+
+// ============================================================================
+// 测试
+// ============================================================================
+//
+// C1 关系图谱存储：upsert_relationship_snapshot 的全量覆盖语义（幂等、替换、
+// CHECK 约束）需要真实 PostgreSQL 才能验证 —— 复用 server 既有 DB 测试模式
+// （crates/server/src/db/common.rs::test_init_db_pool）：需要真实 PG 的测试
+// 用 #[ignore] 标注，通过环境变量 DATABASE_URL 驱动。
+//
+// 运行：DATABASE_URL=postgres://... cargo test --package cyber-jianghu-server \
+//       relationship_ops -- --ignored
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cyber_jianghu_protocol::types::{RelationshipKeyEvent, RelationshipMemory};
+
+    // ------------------------------------------------------------------------
+    // 纯静态测试（不需要 DB）—— 锁定 schema 契约
+    // ------------------------------------------------------------------------
+
+    /// 验证 C1：迁移 022 必须为 agent_relationships.favorability 设置
+    /// CHECK (favorability >= -100 AND favorability <= 100) 约束。
+    ///
+    /// 这是数据完整性底线：DB 层兜住非法 favorability（如 200），
+    /// 即使 agent/protocol 层 BUG 也不会落盘。
+    #[test]
+    fn test_c1_favorability_check_constraint_present_in_migration() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let migration = manifest_dir
+            .join("migrations")
+            .join("022_agent_relationships.sql");
+        let sql = std::fs::read_to_string(&migration).unwrap_or_else(|e| {
+            panic!(
+                "C1 迁移缺失：未找到 {}（{}）",
+                migration.display(),
+                e
+            )
+        });
+
+        let lower = sql.to_lowercase();
+        assert!(
+            lower.contains("check (favorability >= -100 and favorability <= 100)"),
+            "022 迁移必须包含 favorability CHECK 约束 [-100, 100]，实际内容:\n{sql}"
+        );
+    }
+
+    /// 验证 C1：迁移 022 必须为 agent_relationships 设置
+    /// PRIMARY KEY (source_agent_id, target_agent_id)，这是全量覆盖幂等的基础。
+    #[test]
+    fn test_c1_relationships_primary_key_on_source_target() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let migration = manifest_dir
+            .join("migrations")
+            .join("022_agent_relationships.sql");
+        let sql = std::fs::read_to_string(&migration).unwrap_or_else(|e| {
+            panic!(
+                "C1 迁移缺失：未找到 {}（{}）",
+                migration.display(),
+                e
+            )
+        });
+
+        let lower = sql.to_lowercase();
+        assert!(
+            lower.contains("primary key (source_agent_id, target_agent_id)"),
+            "022 迁移必须以 (source_agent_id, target_agent_id) 为主键，实际内容:\n{sql}"
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // 集成测试（需要真实 PostgreSQL）—— 用 #[ignore] 标注
+    // ------------------------------------------------------------------------
+
+    /// 测试辅助：连到 DATABASE_URL 并跑全量迁移（对齐 common.rs 既有模式）。
+    async fn relationship_test_pool() -> PgPool {
+        let url = std::env::var("DATABASE_URL")
+            .expect("DATABASE_URL must be set for relationship integration tests");
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(4)
+            .connect(&url)
+            .await
+            .expect("connect DATABASE_URL");
+        crate::db::run_migrations(&pool).await.expect("run_migrations");
+        pool
+    }
+
+    /// 构造一条关系记忆（带若干 key_events）。
+    fn make_rel(
+        target: Uuid,
+        target_name: &str,
+        favorability: i32,
+        events: Vec<RelationshipKeyEvent>,
+    ) -> RelationshipMemory {
+        RelationshipMemory {
+            target_agent_id: target,
+            target_name: target_name.into(),
+            favorability,
+            key_events: events,
+            last_interaction_tick: 100,
+            updated_at: 1000,
+            self_description: "d".into(),
+            description_tick: 50,
+        }
+    }
+
+    fn make_event(tick: i64, delta: i32) -> RelationshipKeyEvent {
+        RelationshipKeyEvent {
+            tick_id: tick,
+            event_type: "trade".into(),
+            description: format!("event@{tick}"),
+            favorability_delta: delta,
+            timestamp: tick * 1000,
+        }
+    }
+
+    /// 清理测试残留（避免测试间污染）。
+    async fn cleanup_source(pool: &PgPool, source: Uuid) {
+        // CASCADE 会带走 key_events；显式 DELETE 防御
+        let _ = sqlx::query("DELETE FROM agent_relationships WHERE source_agent_id = $1")
+            .bind(source)
+            .execute(pool)
+            .await;
+    }
+
+    /// C1 幂等性：同一 source 同一快照调用 upsert 两次，行数不翻倍
+    /// （关系数不变、key_events 数不变）。验证 DELETE-then-INSERT 语义。
+    #[tokio::test]
+    #[ignore = "需要 PostgreSQL（DATABASE_URL）；C1 幂等性集成测试"]
+    async fn test_upsert_snapshot_idempotent() {
+        let pool = relationship_test_pool().await;
+        let source = Uuid::new_v4();
+        cleanup_source(&pool, source).await;
+
+        let target_a = Uuid::new_v4();
+        let target_b = Uuid::new_v4();
+        let snapshot = vec![
+            make_rel(target_a, "A", 10, vec![make_event(1, 5), make_event(2, 5)]),
+            make_rel(
+                target_b,
+                "B",
+                -10,
+                vec![make_event(3, -5)],
+            ),
+        ];
+
+        // 第一次写入
+        upsert_relationship_snapshot(&pool, source, 1, &snapshot, 1_000)
+            .await
+            .expect("first upsert");
+        let after_first = get_relationships_by_agent(&pool, source)
+            .await
+            .expect("fetch after first");
+        assert_eq!(after_first.len(), 2, "first upsert should persist 2 relations");
+        let events_first: usize = after_first.iter().map(|r| r.key_events.len()).sum();
+        assert_eq!(events_first, 3, "first upsert should persist 3 key_events");
+
+        // 第二次完全相同的快照 —— 必须幂等
+        upsert_relationship_snapshot(&pool, source, 1, &snapshot, 2_000)
+            .await
+            .expect("second upsert");
+        let after_second = get_relationships_by_agent(&pool, source)
+            .await
+            .expect("fetch after second");
+        assert_eq!(
+            after_second.len(),
+            2,
+            "idempotent upsert must NOT duplicate relation rows"
+        );
+        let events_second: usize = after_second.iter().map(|r| r.key_events.len()).sum();
+        assert_eq!(
+            events_second, 3,
+            "idempotent upsert must NOT duplicate key_event rows"
+        );
+
+        cleanup_source(&pool, source).await;
+    }
+
+    /// C1 全量覆盖语义：先 upsert [A→B, A→C]，再 upsert [A→B]（只剩一条），
+    /// 验证 A→C 被删除（全量覆盖，而非增量合并）。
+    #[tokio::test]
+    #[ignore = "需要 PostgreSQL（DATABASE_URL）；C1 全量覆盖语义集成测试"]
+    async fn test_upsert_snapshot_replaces_full() {
+        let pool = relationship_test_pool().await;
+        let source = Uuid::new_v4();
+        cleanup_source(&pool, source).await;
+
+        let target_b = Uuid::new_v4();
+        let target_c = Uuid::new_v4();
+
+        // 第一次：两条关系
+        let first = vec![
+            make_rel(target_b, "B", 20, vec![make_event(1, 10)]),
+            make_rel(target_c, "C", -5, vec![make_event(2, -5)]),
+        ];
+        upsert_relationship_snapshot(&pool, source, 1, &first, 1_000)
+            .await
+            .expect("first upsert");
+        let after_first = get_relationships_by_agent(&pool, source)
+            .await
+            .expect("fetch after first");
+        assert_eq!(after_first.len(), 2);
+
+        // 第二次：只剩 [A→B]（A→C 应被全量覆盖删除）
+        let second = vec![make_rel(target_b, "B", 30, vec![make_event(1, 10)])];
+        upsert_relationship_snapshot(&pool, source, 2, &second, 2_000)
+            .await
+            .expect("second upsert");
+        let after_second = get_relationships_by_agent(&pool, source)
+            .await
+            .expect("fetch after second");
+
+        assert_eq!(
+            after_second.len(),
+            1,
+            "full-replace semantics: source must only retain the 2nd snapshot's relations"
+        );
+        // 剩下那条必须是 target_b（被覆盖更新，favorability=30）
+        let only = &after_second[0];
+        assert_eq!(only.target_agent_id, target_b);
+        assert_eq!(only.favorability, 30, "remaining relation must reflect new snapshot values");
+        // A→C 必须不再出现
+        assert!(
+            !after_second.iter().any(|r| r.target_agent_id == target_c),
+            "full-replace must delete relations absent from new snapshot (A→C)"
+        );
+
+        cleanup_source(&pool, source).await;
+    }
+
+    /// C1 CHECK 约束：favorability=200 必须被 DB 层拒绝（CHECK [-100, 100]）。
+    /// 锁定 schema 兜底，避免 agent/protocol 层 BUG 写入非法值。
+    #[tokio::test]
+    #[ignore = "需要 PostgreSQL（DATABASE_URL）；C1 favorability CHECK 约束测试"]
+    async fn test_favorability_check_constraint() {
+        let pool = relationship_test_pool().await;
+        let source = Uuid::new_v4();
+        cleanup_source(&pool, source).await;
+
+        let target = Uuid::new_v4();
+        // 200 越界 —— DB CHECK 必须拒绝整个事务
+        let bad = vec![make_rel(target, "bad", 200, vec![])];
+        let result = upsert_relationship_snapshot(&pool, source, 1, &bad, 1_000).await;
+
+        assert!(
+            result.is_err(),
+            "favorability=200 must violate CHECK constraint and be rejected"
+        );
+
+        // 事务回滚 —— 不应残留任何行
+        let after = get_relationships_by_agent(&pool, source)
+            .await
+            .expect("fetch after rejected upsert");
+        assert!(
+            after.is_empty(),
+            "rejected upsert must not leave partial rows (transaction rollback)"
+        );
+
+        // 合法边界值必须通过：favorability = 100（上界）与 -100（下界）
+        let valid = vec![
+            make_rel(Uuid::new_v4(), "hi", 100, vec![]),
+            make_rel(Uuid::new_v4(), "lo", -100, vec![]),
+        ];
+        upsert_relationship_snapshot(&pool, source, 1, &valid, 2_000)
+            .await
+            .expect("boundary favorability ±100 must be accepted");
+        let ok_rows = get_relationships_by_agent(&pool, source)
+            .await
+            .expect("fetch valid");
+        assert_eq!(ok_rows.len(), 2);
+
+        cleanup_source(&pool, source).await;
+    }
+
+    /// C1 空 Vec：只 DELETE 不 INSERT，不 panic，清空 source 全部关系。
+    #[tokio::test]
+    #[ignore = "需要 PostgreSQL（DATABASE_URL）；C1 空 Vec DELETE-only 路径"]
+    async fn test_upsert_snapshot_empty_vec_clears_all() {
+        let pool = relationship_test_pool().await;
+        let source = Uuid::new_v4();
+        cleanup_source(&pool, source).await;
+
+        // 先 seed 两条
+        let seed = vec![
+            make_rel(Uuid::new_v4(), "X", 5, vec![make_event(1, 1)]),
+            make_rel(Uuid::new_v4(), "Y", 5, vec![make_event(2, 1)]),
+        ];
+        upsert_relationship_snapshot(&pool, source, 1, &seed, 1_000)
+            .await
+            .expect("seed");
+        assert_eq!(
+            get_relationships_by_agent(&pool, source).await.unwrap().len(),
+            2
+        );
+
+        // 空 Vec —— DELETE-only
+        upsert_relationship_snapshot(&pool, source, 2, &[], 2_000)
+            .await
+            .expect("empty Vec upsert must not error");
+        let after = get_relationships_by_agent(&pool, source).await.unwrap();
+        assert!(
+            after.is_empty(),
+            "empty Vec snapshot must DELETE all source relations without panic"
+        );
+
+        cleanup_source(&pool, source).await;
+    }
+
+    /// C1 key_events 分组组装：fetch 必须把事件正确归到各自 (source, target) 对。
+    /// 锁定 fetch_relationships 的 HashMap 分组逻辑。
+    #[tokio::test]
+    #[ignore = "需要 PostgreSQL（DATABASE_URL）；C1 key_events 分组组装测试"]
+    async fn test_get_relationships_groups_key_events_by_pair() {
+        let pool = relationship_test_pool().await;
+        let source = Uuid::new_v4();
+        cleanup_source(&pool, source).await;
+
+        let target_a = Uuid::new_v4();
+        let target_b = Uuid::new_v4();
+        let snapshot = vec![
+            make_rel(target_a, "A", 10, vec![make_event(1, 1), make_event(3, 2)]),
+            make_rel(target_b, "B", 20, vec![make_event(2, 5)]),
+        ];
+        upsert_relationship_snapshot(&pool, source, 1, &snapshot, 1_000)
+            .await
+            .expect("upsert");
+
+        let rows = get_relationships_by_agent(&pool, source).await.unwrap();
+        assert_eq!(rows.len(), 2);
+        for rel in &rows {
+            match rel.target_agent_id {
+                t if t == target_a => {
+                    assert_eq!(rel.key_events.len(), 2, "target_a must have 2 events");
+                    // 按 tick_id ASC 排序（与 fetch_relationships 契约一致）
+                    let ticks: Vec<i64> = rel.key_events.iter().map(|e| e.tick_id).collect();
+                    assert_eq!(ticks, vec![1, 3], "key_events must be tick_id ASC");
+                }
+                t if t == target_b => {
+                    assert_eq!(rel.key_events.len(), 1, "target_b must have 1 event");
+                }
+                _ => panic!("unexpected target"),
+            }
+        }
+
+        cleanup_source(&pool, source).await;
+    }
+}

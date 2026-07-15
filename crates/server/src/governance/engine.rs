@@ -66,8 +66,8 @@ use super::llm_review::{
 use super::manifest::CapabilityManifest;
 use super::proposal_store::{PendingGroup, ProposalStore};
 use super::types::{
-    PolicyRule, ProposalEvidence, ProposalStage, ProposalStatus, ReviewRole, ReviewVerdict,
-    SoulsConfig, VoteChoice,
+    ComparisonOperator, PolicyRule, ProposalEvidence, ProposalStage, ProposalStatus, ReviewRole,
+    ReviewVerdict, SoulsConfig, VoteChoice,
 };
 
 // ---------------------------------------------------------------------------
@@ -227,17 +227,15 @@ impl SoulReviewEngine {
                         0.0
                     }
                 };
-                match operator.as_str() {
-                    ">" => value > *threshold,
-                    ">=" => value >= *threshold,
-                    "<" => value < *threshold,
-                    "<=" => value <= *threshold,
-                    "==" | "=" => (value - *threshold).abs() < f64::EPSILON,
-                    "!=" => (value - *threshold).abs() >= f64::EPSILON,
-                    _ => {
-                        warn!("未知 operator: {}", operator);
-                        false
+                match operator {
+                    ComparisonOperator::GreaterThan => value > *threshold,
+                    ComparisonOperator::GreaterThanOrEqual => value >= *threshold,
+                    ComparisonOperator::LessThan => value < *threshold,
+                    ComparisonOperator::LessThanOrEqual => value <= *threshold,
+                    ComparisonOperator::Equal | ComparisonOperator::AssignEqual => {
+                        (value - *threshold).abs() < f64::EPSILON
                     }
+                    ComparisonOperator::NotEqual => (value - *threshold).abs() >= f64::EPSILON,
                 }
             }
             PolicyRule::EffectRef {

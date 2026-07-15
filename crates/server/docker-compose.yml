@@ -58,6 +58,8 @@ services:
       # 管理后台访问凭证
       ADMIN_READ_TOKEN: ${ADMIN_READ_TOKEN:-}
       ADMIN_WRITE_TOKEN: ${ADMIN_WRITE_TOKEN:-}
+      # 游戏客户端只读鉴权 token（可选，未配置时回退 ADMIN_READ_TOKEN）
+      CLIENT_READ_TOKEN: ${CLIENT_READ_TOKEN:-}
 
       # 数据库配置
       DATABASE_URL: postgres://postgres:${DB_PASSWORD:-changeme}@postgres:5432/cyber_jianghu
