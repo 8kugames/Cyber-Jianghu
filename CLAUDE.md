@@ -91,8 +91,14 @@ docker compose exec db psql -U cyberjianghu -d cyberjianghu
 
 # Run migrations (handled automatically on startup)
 # Migration files: crates/server/migrations/*.sql
+# The Server runs migrations on every startup via run_migrations() (replicates
+# the entrypoint logic), so the `postgres` service no longer needs a mounted
+# migration volume in production. Files are applied in filename order.
 # Key tables: agents, agent_states, experiences, action_evolution_proposals,
 #   action_evolution_proposal_groups, soul_review_votes
+# Key migrations:
+#   022_agent_relationships.sql     - relationship graph table (agent_relationships)
+#   023_chronicle_period_unique.sql - chronicle period uniqueness constraint
 ```
 
 ### CI/CD Requirements
@@ -169,6 +175,12 @@ Key server modules:
 - `src/handlers/` - HTTP API endpoints (dashboard SPA via `/admin/*`)
 - `src/state.rs` - Shared AppState, AgentStateCache
 - `src/chronicle/` - Chronicle generation (群像传记): auto-generates every 7 game days
+
+**Migration Runner**: Server runs migrations on every startup via `run_migrations()` (replicates the Docker entrypoint logic), so the deploy does not depend on a mounted migration volume. Migration files in `crates/server/migrations/*.sql` are applied in filename order.
+
+**Dashboard Read Auth**: Dashboard READ endpoints use `require_client_read_token`, which accepts either `CLIENT_READ_TOKEN` (game-client read-only token) or the admin `ADMIN_READ_TOKEN`. When `CLIENT_READ_TOKEN` is unset, callers may use `ADMIN_READ_TOKEN` (fallback). This separates the game-client read credential from admin access.
+
+**Relationship Sync (Strategy B)**: Agents report a full per-game-day relationship snapshot via `ClientMessage::RelationshipSnapshot`. Strategy B is full-snapshot-per-day, which is naturally idempotent — re-sending the same day's snapshot overwrites the prior one for that `(agent_id, game_day)` key. The server stores these in the `agent_relationships` table (migration `022`).
 
 ### Agent Architecture
 
@@ -304,6 +316,35 @@ use super::builder::AgentBuilder;
 | Database migrations | `crates/server/migrations/*.sql` |
 | Docker stack | `docker-compose.yml`, `docker-compose.prod.yml` |
 
+### Environment Variables (auth)
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `ADMIN_READ_TOKEN` | optional | Dashboard / read API token. If unset, Server generates a random one at startup and logs it. |
+| `ADMIN_WRITE_TOKEN` | optional | Dashboard write API token. If unset, Server generates a random one at startup and logs it. |
+| `CLIENT_READ_TOKEN` | optional | Read-only auth token for game clients. If unset, dashboard READ endpoints fall back to `ADMIN_READ_TOKEN`. When set, dashboard READ endpoints (`require_client_read_token`) accept **either** `CLIENT_READ_TOKEN` or `ADMIN_READ_TOKEN`. |
+
+## Protocol Types
+
+The `crates/protocol` crate defines the wire types shared between Server, Agent, and Dashboard/Client. Key enums and contract structs:
+
+### Content & Risk Enums
+- `OocRisk` (`low` / `medium` / `high`) — out-of-character risk classification emitted during ReflectorSoul review / dialogue validation.
+
+### Config Enums (data-driven config model, `crates/server/config/*.yaml`)
+- `ConfigType` (`skills` / `actions` / `game_rules` / `world_building_rules` / `prompt_templates` / `persona_event_rules` / `narrative_config`) — discriminator for `GET/PUT /api/config/{filename}` payloads.
+- `EffectType` (`attribute_change` / `attribute_max_change` / `add_item`) — action effect kinds.
+- `RequirementType` (`attribute` / `item`) — gating requirements for actions/skills.
+- `Operation` (`add` / `set` / `multiply`) — arithmetic operation applied to an attribute in `EffectType`.
+- `ValidationType` (`not_empty` / `min_value` / `max_value` / `min_length` / `max_length` / `item_exists`) — declarative validators used by `actions.yaml`.
+
+### Relationship Protocol Contract (Strategy B, full snapshot per game day)
+- `RelationshipMemory` — relationship memory record with `i64` millisecond timestamps (epoch ms), agent IDs, valence/affinity score, and free-form metadata.
+- `RelationshipKeyEvent` — discrete event that shifted a relationship (fight, trade, gift, dialogue, etc.); `i64` ms timestamps.
+- `ClientMessage::RelationshipSnapshot` — variant carrying a full per-day relationship snapshot from Agent → Server. Naturally idempotent: each game day overwrites the prior snapshot for that `(agent_id, game_day)` key.
+
+Timestamps in the relationship protocol are `i64` milliseconds (Unix epoch), not `f64` seconds.
+
 ## API Endpoints
 
 ### Server (port 23333)
@@ -344,6 +385,14 @@ use super::builder::AgentBuilder;
 - `GET /api/dashboard/status-configs` - Status configurations
 - `GET /api/dashboard/display-map` - Action type display name mapping
 - `GET /api/dashboard/layer-display` - Tianhun layer display name mapping (data-driven)
+
+**Dashboard Read (Client Token)** — these endpoints use `require_client_read_token` (accepts `CLIENT_READ_TOKEN` or admin read token), designed for read-only game client access:
+- `GET /api/dashboard/agent-relationships` - Global relationship graph (all agents)
+- `GET /api/dashboard/agent-relationships/{agent_id}` - Single agent's relationships
+- `GET /api/dashboard/world-snapshot` - Unified world snapshot (read-only transaction isolation; aggregates world state in a single consistent read)
+- `GET /api/dashboard/locations` - Location/map graph structure
+- `GET /api/dashboard/dialogues` - Aggregated dialogue view (supports `?limit`, `?tick_from`)
+- `GET /api/dashboard/deaths` - Death timeline (supports `?limit`, `?tick_from`)
 
 **Dashboard (Write Token)**:
 - `POST /api/dashboard/agents/cleanup` - Cleanup offline agents

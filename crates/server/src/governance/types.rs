@@ -422,13 +422,50 @@ pub struct ReviewPolicy {
     pub soft_concern_if: Vec<PolicyRule>,
 }
 
+/// 比较运算符（PolicyRule::Metric 的 operator 字段闭集）
+///
+/// YAML 中以字面符号书写（`>`, `>=`, `<`, `<=`, `==`, `=`, `!=`）。
+/// `==` 与 `=` 语义相同（均判浮点近等），保留两者仅为兼容不同书写习惯。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum ComparisonOperator {
+    #[serde(rename = ">")]
+    GreaterThan,
+    #[serde(rename = ">=")]
+    GreaterThanOrEqual,
+    #[serde(rename = "<")]
+    LessThan,
+    #[serde(rename = "<=")]
+    LessThanOrEqual,
+    #[serde(rename = "==")]
+    Equal,
+    /// 单 `=`：与 `==` 同义（部分配置书写习惯）
+    #[serde(rename = "=")]
+    AssignEqual,
+    #[serde(rename = "!=")]
+    NotEqual,
+}
+
+impl ComparisonOperator {
+    /// 对给定值执行比较。穷尽匹配——无静默 fallback。
+    pub fn compare(self, value: f64, threshold: f64) -> bool {
+        match self {
+            Self::GreaterThan => value > threshold,
+            Self::GreaterThanOrEqual => value >= threshold,
+            Self::LessThan => value < threshold,
+            Self::LessThanOrEqual => value <= threshold,
+            Self::Equal | Self::AssignEqual => (value - threshold).abs() < f64::EPSILON,
+            Self::NotEqual => (value - threshold).abs() >= f64::EPSILON,
+        }
+    }
+}
+
 /// 策略规则
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum PolicyRule {
     Metric {
         metric: String,
-        operator: String,
+        operator: ComparisonOperator,
         threshold: f64,
         #[serde(default)]
         reason: String,

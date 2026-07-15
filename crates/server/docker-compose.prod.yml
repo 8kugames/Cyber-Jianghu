@@ -70,6 +70,8 @@ services:
       - TICK_DURATION_SECS=${TICK_DURATION_SECS:-60}
       - ADMIN_READ_TOKEN=${ADMIN_READ_TOKEN:-}
       - ADMIN_WRITE_TOKEN=${ADMIN_WRITE_TOKEN:-}
+      # 游戏客户端只读鉴权 token（可选，未配置时回退 ADMIN_READ_TOKEN）
+      - CLIENT_READ_TOKEN=${CLIENT_READ_TOKEN:-}
       - ENVIRONMENT=production
     ports:
       - "${SERVER_PORT:-23333}:23333"

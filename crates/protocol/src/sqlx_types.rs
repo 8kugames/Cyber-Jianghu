@@ -155,44 +155,6 @@ impl FromStr for ItemType {
     }
 }
 
-/// 物品效果类型（带 sqlx 支持）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
-pub enum EffectType {
-    /// 恢复饱食度
-    RestoreSatiation,
-
-    /// 恢复饱饮度
-    RestoreHydration,
-
-    /// 增加攻击力
-    IncreaseAttack,
-}
-
-impl fmt::Display for EffectType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::RestoreSatiation => write!(f, "restore_satiation"),
-            Self::RestoreHydration => write!(f, "restore_hydration"),
-            Self::IncreaseAttack => write!(f, "increase_attack"),
-        }
-    }
-}
-
-impl FromStr for EffectType {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "restore_satiation" => Ok(Self::RestoreSatiation),
-            "restore_hydration" => Ok(Self::RestoreHydration),
-            "increase_attack" => Ok(Self::IncreaseAttack),
-            _ => Err(format!("Invalid effect type: {}", s)),
-        }
-    }
-}
-
 // ============================================================================
 // 测试
 // ============================================================================
