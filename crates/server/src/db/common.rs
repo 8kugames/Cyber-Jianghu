@@ -178,7 +178,8 @@ pub async fn run_migrations(pool: &PgPool) -> Result<()> {
         let filename = file.file_name().to_string_lossy().to_string();
         let sql = std::fs::read_to_string(file.path())?;
         tracing::info!("[migration] 执行: {}", filename);
-        sqlx::query(&sql)
+        // sqlx::raw_sql 支持多语句 raw 执行（迁移文件含 plpgsql $$ 块 + 多 CREATE/COMMENT）
+        sqlx::raw_sql(&sql)
             .execute(pool)
             .await
             .map_err(|e| anyhow::anyhow!("迁移失败 {}: {}", filename, e))?;
