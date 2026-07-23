@@ -692,6 +692,11 @@ async fn main() -> Result<()> {
         )
         // 角色归隐 - 将活跃角色标记为 retired，允许创建新角色
         .route("/api/v1/agent/retire", post(handlers::agent::agent_retire))
+        // 设备→活跃角色查询（用于 agent 端 reload 已注册角色）
+        .route(
+            "/api/v1/agent/by-device",
+            post(handlers::agent_by_device::get_agent_by_device),
+        )
         // 自动重生 - Agent 死亡后延迟调用
         .route(
             "/api/v1/agent/auto-rebirth",
