@@ -47,6 +47,10 @@ pub struct LocationNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
 
+    /// 节点描述（YAML 配置驱动，game_data 转换时需保留）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
     /// 环境伤害（每Tick扣除的HP值）
     /// 如果为 0 或 None，则表示无环境伤害
     #[serde(default, skip_serializing_if = "Option::is_none")]
