@@ -591,21 +591,8 @@ pub struct LocationsData {
     pub edges: Vec<LocationEdgeData>,
 }
 
-/// 位置节点数据
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct LocationNodeData {
-    pub node_id: String,
-    pub name: String,
-    #[serde(rename = "type")]
-    pub node_type: cyber_jianghu_protocol::LocationNodeType,
-    pub parent_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub environmental_damage: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub gatherable_items: Option<Vec<String>>,
-}
+/// 位置节点数据（protocol LocationNode 的别名——消除重复 struct，protocol 为唯一真相源）
+pub type LocationNodeData = cyber_jianghu_protocol::LocationNode;
 
 /// 位置边数据
 #[derive(Debug, Clone, Deserialize, Serialize)]

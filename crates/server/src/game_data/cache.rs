@@ -222,8 +222,9 @@ impl LocationRegistry {
                 name: node.name.clone(),
                 node_type: node.node_type,
                 parent_id: node.parent_id.clone(),
+                description: node.description.clone(),
                 environmental_damage: node.environmental_damage,
-                gatherable_items: node.gatherable_items.clone().unwrap_or_default(),
+                gatherable_items: node.gatherable_items.clone(),
                 implicit_travel_cost: None,
             };
             graph.add_node(location_node);
@@ -596,7 +597,8 @@ data:
                         parent_id: Some("inn".to_string()),
                         description: None,
                         environmental_damage: None,
-                        gatherable_items: None,
+                        gatherable_items: vec![],
+                        implicit_travel_cost: None,
                     },
                     LocationNodeData {
                         node_id: "kitchen".to_string(),
@@ -605,7 +607,8 @@ data:
                         parent_id: Some("inn".to_string()),
                         description: None,
                         environmental_damage: None,
-                        gatherable_items: None,
+                        gatherable_items: vec![],
+                        implicit_travel_cost: None,
                     },
                 ],
                 edges: vec![LocationEdgeData {

@@ -174,6 +174,7 @@ mod tests {
             parent_id: Some("龙门客栈".to_string()),
             environmental_damage: None,
             gatherable_items: vec![],
+            description: None,
             implicit_travel_cost: None,
         };
 
@@ -195,6 +196,7 @@ mod tests {
             parent_id: None,
             environmental_damage: None,
             gatherable_items: vec![],
+            description: None,
             implicit_travel_cost: None,
         });
 
@@ -205,6 +207,7 @@ mod tests {
             parent_id: Some("龙门客栈".to_string()),
             environmental_damage: None,
             gatherable_items: vec![],
+            description: None,
             implicit_travel_cost: None,
         });
 
@@ -215,6 +218,7 @@ mod tests {
             parent_id: Some("龙门客栈".to_string()),
             environmental_damage: None,
             gatherable_items: vec![],
+            description: None,
             implicit_travel_cost: None,
         });
 
