@@ -445,6 +445,10 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/character/register",
             post(handlers::register_character_handler),
         ) // 创建新角色（转发到 Server）
+        .route(
+            "/api/v1/admin/reload-character",
+            post(handlers::reload_character),
+        ) // 从 server reload 已注册角色（解决 server API register 缺 WS Registered 通道 gap）
         // === 角色信息端点 ===
         .route(
             "/api/v1/attribute-meta",

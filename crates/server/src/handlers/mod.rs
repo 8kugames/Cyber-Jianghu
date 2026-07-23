@@ -1,5 +1,6 @@
 pub mod admin_auth;
 pub mod agent;
+pub mod agent_by_device;
 pub mod agent_daily_summaries;
 pub mod agent_relationships;
 pub mod auth;
