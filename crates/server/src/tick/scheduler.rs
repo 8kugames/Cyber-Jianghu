@@ -562,7 +562,7 @@ impl TickScheduler {
                     let mut success_count = 0;
                     let mut fail_count = 0;
 
-                    for (_device_id, connection) in connections.iter() {
+                    for connection in connections.values() {
                         if connection.is_dead() {
                             fail_count += 1;
                             continue;

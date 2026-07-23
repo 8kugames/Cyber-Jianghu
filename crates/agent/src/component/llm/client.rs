@@ -1481,7 +1481,7 @@ impl FallbackLlmClient {
                     if action == ErrorAction::FallbackAndDisable {
                         self.disable_model(idx, reason);
                     }
-                    let err_msg = format!("{:#}", &e);
+                    let err_msg = format!("{:#}", e);
                     if err_msg.contains("LLM API error 400") && !err_msg.contains("Prompt too long")
                     {
                         tracing::warn!(

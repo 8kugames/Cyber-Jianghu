@@ -62,10 +62,10 @@ pub async fn require_client_read_token(
     );
 
     // 1) 优先：如果配了 CLIENT_READ_TOKEN，先尝试用它鉴权
-    if let Some(client_token) = &state.client_read_token {
-        if authenticate_with_any_token(req.headers(), client_token) {
-            return Ok(next.run(req).await);
-        }
+    if let Some(client_token) = &state.client_read_token
+        && authenticate_with_any_token(req.headers(), client_token)
+    {
+        return Ok(next.run(req).await);
     }
 
     // 2) 回退：admin read token 或 admin write token 都接受

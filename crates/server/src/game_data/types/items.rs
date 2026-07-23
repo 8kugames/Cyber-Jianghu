@@ -59,21 +59,16 @@ fn default_decay_rate() -> i32 {
 // ============================================================================
 
 /// 属性修改操作类型（数学语义闭集，dispatch 在 executor/basic.rs + processor/executor.rs）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Operation {
     /// 加法：current + value
+    #[default]
     Add,
     /// 设定：current = value
     Set,
     /// 乘法：current * value
     Multiply,
-}
-
-impl Default for Operation {
-    fn default() -> Self {
-        Self::Add
-    }
 }
 
 /// 物品效果（数据驱动结构）

@@ -161,8 +161,8 @@ pub async fn get_agent_experiences(
     }
 
     let experiences: Vec<ExperienceEntry> = grouped
-        .into_iter()
-        .map(|(_tid, group)| {
+        .into_values()
+        .map(|group| {
             // 按 pipe_seq 升序排列（已由 SQL 保证）
             // pipe_seq=0 行为主行，含完整三魂元数据
             let primary = group.first().expect("group must have at least one row");

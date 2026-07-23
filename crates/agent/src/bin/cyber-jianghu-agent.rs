@@ -473,7 +473,7 @@ fn show_config() -> Result<()> {
             println!("  Device ID: {}", device.device_id);
             println!(
                 "  Auth Token: {}...",
-                &device.auth_token.chars().take(16).collect::<String>()
+                device.auth_token.chars().take(16).collect::<String>()
             );
         }
     } else {
