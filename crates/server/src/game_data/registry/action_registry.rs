@@ -97,7 +97,7 @@ impl ActionRegistry {
                         .as_ref()
                         .map(|v| v.optional_fields.clone())
                         .unwrap_or_default(),
-                    ooc_risk: config.ooc_risk.clone(),
+                    ooc_risk: config.ooc_risk,
                     requirements: config
                         .requirements
                         .iter()

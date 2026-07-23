@@ -196,7 +196,7 @@ impl ConversationHistory {
             .map(|t| {
                 format!(
                     "[Tick {}]\n输入: {}\n决策: {}",
-                    t.tick_id, &t.user, &t.assistant,
+                    t.tick_id, t.user, t.assistant,
                 )
             })
             .collect();

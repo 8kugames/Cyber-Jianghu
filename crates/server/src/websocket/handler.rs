@@ -1322,7 +1322,13 @@ async fn handle_intent(
 
     // 路由到 IntentWorker（非阻塞 try_send，队列满时返回错误）
     // 提取 subsequent 信息（intent 即将被 move 进 WorkerMessage）
-    let subsequent_summaries: Vec<(String, Option<serde_json::Value>, Option<cyber_jianghu_protocol::types::ChaosMarker>, Option<cyber_jianghu_protocol::types::DreamMarker>)> = intent
+    type SubsequentSummary = (
+        String,
+        Option<serde_json::Value>,
+        Option<cyber_jianghu_protocol::types::ChaosMarker>,
+        Option<cyber_jianghu_protocol::types::DreamMarker>,
+    );
+    let subsequent_summaries: Vec<SubsequentSummary> = intent
         .subsequent_intents
         .iter()
         .map(|si| {

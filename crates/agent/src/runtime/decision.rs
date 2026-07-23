@@ -88,7 +88,7 @@ pub fn cognitive_decision_with_chain(
                         // 避免工作记忆（环境观察/紧急事件）伪装成对话历史
                         let ws_summary = format!(
                             "Tick {} @ {}",
-                            world_state.tick_id, &world_state.location.node_id,
+                            world_state.tick_id, world_state.location.node_id,
                         );
                         // assistant 字段携带实际内容，让 LLM 在对话历史中看到自己说过什么
                         // 截断防止 token 膨胀（200 中文字 ≈ 300 tokens，8 轮 ≈ 2400 tokens ≈ 7.5% 窗口）

@@ -842,26 +842,25 @@ impl super::Agent {
                                                 for record in &records {
                                                     let mut found_pipe_seq: Option<usize> = None;
                                                     // 检查主 Intent 匹配 (pipe_seq=0)
-                                                    if let Some(ref fid) = record.final_intent_id {
-                                                        if fid == &rid {
-                                                            found_pipe_seq = Some(0);
-                                                        }
+                                                    if let Some(ref fid) = record.final_intent_id
+                                                        && fid == &rid
+                                                    {
+                                                        found_pipe_seq = Some(0);
                                                     }
                                                     // 检查 pipeline 子 Intent 匹配 (final_pipeline_json 现在含 intent_id)
-                                                    if found_pipe_seq.is_none() {
-                                                        if let Some(ref json) = record.final_pipeline_json {
-                                                            if let Ok(pipeline) = serde_json::from_str::<Vec<serde_json::Value>>(json) {
-                                                                for (i, entry) in pipeline.iter().enumerate() {
-                                                                    if entry.get("intent_id").and_then(|v| v.as_str()) == Some(&rid) {
-                                                                        found_pipe_seq = Some(i);
-                                                                        break;
-                                                                    }
-                                                                }
+                                                    if found_pipe_seq.is_none()
+                                                        && let Some(ref json) = record.final_pipeline_json
+                                                        && let Ok(pipeline) = serde_json::from_str::<Vec<serde_json::Value>>(json)
+                                                    {
+                                                        for (i, entry) in pipeline.iter().enumerate() {
+                                                            if entry.get("intent_id").and_then(|v| v.as_str()) == Some(&rid) {
+                                                                found_pipe_seq = Some(i);
+                                                                break;
                                                             }
                                                         }
                                                     }
                                                     if let Some(pipe_seq) = found_pipe_seq {
-                                                        let exec_map = attempt_results.entry((tick_id, record.attempt)).or_insert_with(serde_json::Map::new);
+                                                        let exec_map = attempt_results.entry((tick_id, record.attempt)).or_default();
                                                         exec_map.insert(
                                                             pipe_seq.to_string(),
                                                             serde_json::json!({

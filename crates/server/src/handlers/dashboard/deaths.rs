@@ -219,7 +219,7 @@ pub async fn get_deaths(
 
     // tick_from 过滤基于推算后的 death_tick（无法推算的视为不匹配）
     if let Some(tick_from) = query.tick_from {
-        deaths.retain(|d| d.death_tick.map_or(false, |t| t >= tick_from));
+        deaths.retain(|d| d.death_tick.is_some_and(|t| t >= tick_from));
     }
     deaths.truncate(limit as usize);
 

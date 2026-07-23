@@ -275,21 +275,16 @@ pub struct AvailableAction {
 
 /// 动作的 OOC（Out-of-Character）风险等级，决定天魂分级审核策略。
 /// 真闭集：值域被 websocket/types.rs:82 的 match 写死（3 分支 → always/adaptive/skip 桶）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OocRisk {
     /// 低风险，跳过审核
+    #[default]
     Low,
     /// 中风险，自适应审核
     Medium,
     /// 高风险，必须审核
     High,
-}
-
-impl Default for OocRisk {
-    fn default() -> Self {
-        Self::Low
-    }
 }
 
 // ============================================================================

@@ -344,10 +344,7 @@ impl super::super::Agent {
                 // 死亡事件：设置死亡标记并广播到 death_event_tx
                 // Cognitive 模式下 AgentDied 回调已做此操作，此路径确保 Claw 模式也能正确检测死亡
                 if let cyber_jianghu_protocol::ServerMessage::AgentDied {
-                    agent_id: _,
                     rebirth_delay_ticks,
-                    tick_id: _,
-                    description: _,
                     ..
                 } = &msg
                     && let Some(ref s) = api_state
