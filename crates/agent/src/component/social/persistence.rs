@@ -5,7 +5,7 @@ const CURRENT_SCHEMA_VERSION: i64 = 1;
 
 pub(super) fn init_pragmas(conn: &Connection) -> Result<()> {
     conn.execute_batch(
-        "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA cache_size = -32000;",
+        "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA cache_size = -31744;",
     )
     .context("设置 relationship SQLite PRAGMA 失败")?;
     Ok(())
