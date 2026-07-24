@@ -196,7 +196,8 @@ async function loadMonitor() {
 }
 
 function handleSSEEvent(event) {
-    if (event.type === 'death' || event.type === 'tick') {
+    // 后端 SSE 命名事件：agent_died（死亡）/ tick_update（tick 推进）
+    if (event.type === 'agent_died' || event.type === 'tick_update') {
         loadAll();
     }
 }

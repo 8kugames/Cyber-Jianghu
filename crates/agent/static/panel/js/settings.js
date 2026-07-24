@@ -41,6 +41,10 @@ async function loadData() {
         const streamEl = document.getElementById('s-streaming');
         if (streamEl) streamEl.checked = (c.enable_streaming ?? c.streaming) === true;
 
+        // API Key 状态徽标：后端不回显密钥，has_api_key=true 表示已配置，提示用户留空即可保持原值
+        const apiKeyBadge = document.getElementById('s-api-key-badge');
+        if (apiKeyBadge) apiKeyBadge.style.display = c.has_api_key === true ? '' : 'none';
+
         // Advanced
         const advFields = { 's-summary-trigger': c.summary_trigger_ratio, 's-keep-turns': c.keep_recent_turns ?? c.summary_keep_turns, 's-idle-rotate': c.idle_rotate_threshold };
         for (const [id, val] of Object.entries(advFields)) {
@@ -64,9 +68,12 @@ async function loadData() {
         const clawNotice = document.getElementById('s-claw-notice');
         if (clawNotice) clawNotice.classList.toggle('visible', mode === 'Claw');
 
-        // LLM disabled toggle
+        // LLM disabled toggle 从独立的 llmDisabled promise 读取
+        // （/config/llm 响应不含 llm_disabled 字段，必须用 /config/llm-disabled 的结果）
         const toggle = document.getElementById('s-llm-disabled');
-        if (toggle && resp.llm_disabled) toggle.checked = true;
+        if (toggle && llmDisabled.status === 'fulfilled' && llmDisabled.value?.llm_disabled) {
+            toggle.checked = true;
+        }
     }
 
     // Providers dropdown
@@ -187,8 +194,8 @@ function render(container) {
                             <input class="form-input" type="text" id="s-base-url" placeholder="如: http://localhost:11434">
                         </div>
                         <div class="form-group hidden" id="s-api-key-group">
-                            <label class="form-label">API Key</label>
-                            <input class="form-input" type="password" id="s-api-key" placeholder="输入 API Key">
+                            <label class="form-label">API Key <span id="s-api-key-badge" class="badge badge-success" style="display:none;font-size:11px;font-weight:normal;margin-left:6px;">已配置</span></label>
+                            <input class="form-input" type="password" id="s-api-key" placeholder="留空则保持原值不变">
                         </div>
                         <div style="display:flex;gap:12px;flex-wrap:wrap">
                             <div class="form-group" style="flex:1;min-width:120px">
@@ -271,7 +278,7 @@ function bindEvents() {
     // LLM disabled toggle
     document.getElementById('s-llm-disabled')?.addEventListener('change', async function () {
         try {
-            await post(API.CONFIG_LLM_DISABLED, { disabled: this.checked });
+            await post(API.CONFIG_LLM_DISABLED, { llm_disabled: this.checked });
             showSuccess(this.checked ? 'LLM 已停止' : 'LLM 已恢复');
         } catch (e) {
             showError('操作失败: ' + e.message);

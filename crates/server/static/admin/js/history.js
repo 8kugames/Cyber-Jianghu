@@ -323,7 +323,12 @@ let expFiltersLoaded = false;
 let experiencesLoaded = false;
 
 async function ensureExperiencesLoaded() {
-    await Promise.allSettled([loadDisplayMap(), getLayerDisplay()]); // 展示名 + 天魂层名映射必须在渲染前就绪
+    // 展示名映射 + 天魂层名 + 全量 agent 列表必须在渲染前就绪：
+    // - loadDisplayMap: target_agent_id → 角色名（权威源）
+    // - loadAllAgents: 全量 agent 填充 allAgentsMap（displayMap 失败时的第二查表路径）
+    // history 页与 agents 页共用 agents.js，但原 history 页从不调用 loadAllAgents，
+    // 导致 allAgentsMap 恒为空对象、resolveTargetName 第二查表失效。此处补齐。
+    await Promise.allSettled([loadDisplayMap(), getLayerDisplay(), loadAllAgents()]);
     if (!expFiltersLoaded) await initExpFilters();
     // URL 参数 ?agent=xxx 自动预选角色筛选（来自详情页跳转）
     const urlAgent = new URLSearchParams(location.search).get("agent");
@@ -431,7 +436,10 @@ function renderExpCards() {
             const renhunHtml = renderRenhunCell(cycles, e, executionResults);
             const dihunHtml = renderDihunCell(cycles);
             const tianhunHtml = renderTianhunCell(cycles, e);
-            const modelId = (cycles[0] && cycles[0].model_id) || "-";
+            // model_id：遍历 cycles 取首个非空（避免 subsequent 占位 cycles[0].model_id=null 误降级为 "-")
+            // subsequent-intent 占位（reporting.rs:175 / handler.rs:1415）显式置 model_id=None，
+            // 但 stream endpoint 每行/pipe_seq 都返回自己的 metadata，故以首个真实 cycle 为准。
+            const modelId = (cycles.find((c) => c && c.model_id) || {}).model_id || "-";
 
             // 动作摘要行（首条 pipeline action 或主 intent）
             let actionSummary = "-";

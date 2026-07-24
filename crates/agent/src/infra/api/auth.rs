@@ -66,13 +66,18 @@ pub fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
 ///
 /// - 公开路径 → `Ok(())`
 /// - `device_config` 未初始化 → `Err(503)`（fail-closed：启动早期不该有业务流量）
-/// - 无 Authorization header → `Err(401)`
+/// - 无 Authorization header 且无合法 query token → `Err(401)`
 /// - token 不匹配 → `Err(401)`
 /// - token 匹配 → `Ok(())`
+///
+/// `uri` 为完整 URI（含 query），用于支持 SSE 端点的 query token。
+/// 浏览器 `EventSource` 不支持自定义 header，故对 `/api/v1/events` 额外接受
+/// `?token=<token>` 作为 Bearer 的等价物。query token 仅对 SSE 端点生效。
 pub fn check_auth(
     expected_token: Option<&str>,
     headers: &HeaderMap,
     path: &str,
+    uri: &axum::http::Uri,
 ) -> Result<(), StatusCode> {
     if is_public_path(path) {
         return Ok(());
@@ -86,24 +91,50 @@ pub fn check_auth(
         StatusCode::SERVICE_UNAVAILABLE
     })?;
 
-    let provided = extract_bearer_token(headers).ok_or_else(|| {
-        debug!(
-            "P0-11(b) 认证拒绝：缺少或格式错误的 Authorization header，path={}",
-            path
-        );
-        StatusCode::UNAUTHORIZED
-    })?;
-
-    if provided == expected {
-        Ok(())
-    } else {
+    // 优先 Bearer header（普通 fetch 路径）
+    if let Some(provided) = extract_bearer_token(headers) {
+        if provided == expected {
+            return Ok(());
+        }
         warn!(
             "P0-11(b) 认证拒绝：token 不匹配，path={}（提供的前 4 字符：{:?}）",
             path,
             provided.chars().take(4).collect::<String>()
         );
-        Err(StatusCode::UNAUTHORIZED)
+        return Err(StatusCode::UNAUTHORIZED);
     }
+
+    // SSE 端点退化接受 query token（EventSource 无法带 header）
+    // 注意：仅 /api/v1/events 开放此通道，且仅作 Bearer 的等价物。
+    // 前端用 encodeURIComponent(token) 编码（app.js），后端须 percent-decode 后比较，
+    // 否则含 + / / = 等保留字符的 token 格式会静默失配（SSE 永久 401）。
+    if path == "/api/v1/events"
+        && let Some(q) = uri.query()
+    {
+        for pair in q.split('&') {
+            if let Some(raw) = pair.strip_prefix("token=") {
+                // query token 经 encodeURIComponent 编码，这里解码后与明文 expected 比较
+                let provided = percent_encoding::percent_decode_str(raw)
+                    .decode_utf8()
+                    .map(|cow| cow.into_owned())
+                    .unwrap_or_default();
+                if provided == expected {
+                    return Ok(());
+                }
+                warn!(
+                    "P0-11(b) 认证拒绝（SSE query token）：token 不匹配，path={}",
+                    path
+                );
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        }
+    }
+
+    debug!(
+        "P0-11(b) 认证拒绝：缺少或格式错误的 Authorization header，path={}",
+        path
+    );
+    Err(StatusCode::UNAUTHORIZED)
 }
 
 /// axum 中间件：要求请求携带有效的 device auth_token。
@@ -116,13 +147,14 @@ pub async fn require_device_token(
     req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let path = req.uri().path();
+    let uri = req.uri().clone();
+    let path = uri.path().to_string();
     let headers = req.headers().clone();
     // 在 device_config 读锁存活期间完成 check_auth（token 引用从 guard 借出）
     let auth_result = {
         let guard = state.device_config.read().await;
         let expected_token = guard.as_ref().map(|c| c.auth_token.as_str());
-        check_auth(expected_token, &headers, path)
+        check_auth(expected_token, &headers, &path, &uri)
     };
     match auth_result {
         Ok(()) => Ok(next.run(req).await),
@@ -217,17 +249,22 @@ mod tests {
     #[test]
     fn test_check_auth_public_path_always_passes() {
         let headers = HeaderMap::new();
+        let uri = "/api/v1/health".parse::<axum::http::Uri>().unwrap();
         // 无 token，但公开路径 → 通过
-        assert_eq!(check_auth(None, &headers, "/api/v1/health"), Ok(()));
-        assert_eq!(check_auth(None, &headers, "/"), Ok(()));
+        assert_eq!(check_auth(None, &headers, "/api/v1/health", &uri), Ok(()));
+        let uri = "/".parse::<axum::http::Uri>().unwrap();
+        assert_eq!(check_auth(None, &headers, "/", &uri), Ok(()));
     }
 
     #[test]
     fn test_check_auth_rejects_when_device_not_configured() {
         let headers = HeaderMap::new();
+        let uri = "/api/v1/config/llm"
+            .parse::<axum::http::Uri>()
+            .unwrap();
         // 受保护路径 + device_config=None → 503 fail-closed
         assert_eq!(
-            check_auth(None, &headers, "/api/v1/config/llm"),
+            check_auth(None, &headers, "/api/v1/config/llm", &uri),
             Err(StatusCode::SERVICE_UNAVAILABLE)
         );
     }
@@ -235,8 +272,11 @@ mod tests {
     #[test]
     fn test_check_auth_rejects_missing_header() {
         let headers = HeaderMap::new();
+        let uri = "/api/v1/config/llm"
+            .parse::<axum::http::Uri>()
+            .unwrap();
         assert_eq!(
-            check_auth(Some("secret"), &headers, "/api/v1/config/llm"),
+            check_auth(Some("secret"), &headers, "/api/v1/config/llm", &uri),
             Err(StatusCode::UNAUTHORIZED)
         );
     }
@@ -248,8 +288,11 @@ mod tests {
             "authorization",
             HeaderValue::from_static("Bearer wrong-token"),
         );
+        let uri = "/api/v1/config/llm"
+            .parse::<axum::http::Uri>()
+            .unwrap();
         assert_eq!(
-            check_auth(Some("correct-token"), &headers, "/api/v1/config/llm"),
+            check_auth(Some("correct-token"), &headers, "/api/v1/config/llm", &uri),
             Err(StatusCode::UNAUTHORIZED)
         );
     }
@@ -261,8 +304,11 @@ mod tests {
             "authorization",
             HeaderValue::from_static("Bearer correct-token"),
         );
+        let uri = "/api/v1/config/llm"
+            .parse::<axum::http::Uri>()
+            .unwrap();
         assert_eq!(
-            check_auth(Some("correct-token"), &headers, "/api/v1/config/llm"),
+            check_auth(Some("correct-token"), &headers, "/api/v1/config/llm", &uri),
             Ok(())
         );
     }
@@ -275,9 +321,81 @@ mod tests {
             "authorization",
             HeaderValue::from_static("Basic correct-token"),
         );
+        let uri = "/api/v1/config/llm"
+            .parse::<axum::http::Uri>()
+            .unwrap();
         assert_eq!(
-            check_auth(Some("correct-token"), &headers, "/api/v1/config/llm"),
+            check_auth(Some("correct-token"), &headers, "/api/v1/config/llm", &uri),
             Err(StatusCode::UNAUTHORIZED)
+        );
+    }
+
+    // =========================================================================
+    // SSE query token（/api/v1/events 专用）
+    // =========================================================================
+
+    #[test]
+    fn test_check_auth_sse_accepts_correct_query_token() {
+        // 无 header，但 SSE 端点通过 query token 通过
+        let headers = HeaderMap::new();
+        let uri = "/api/v1/events?token=my-secret"
+            .parse::<axum::http::Uri>()
+            .unwrap();
+        assert_eq!(
+            check_auth(Some("my-secret"), &headers, "/api/v1/events", &uri),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn test_check_auth_sse_rejects_wrong_query_token() {
+        let headers = HeaderMap::new();
+        let uri = "/api/v1/events?token=wrong"
+            .parse::<axum::http::Uri>()
+            .unwrap();
+        assert_eq!(
+            check_auth(Some("correct"), &headers, "/api/v1/events", &uri),
+            Err(StatusCode::UNAUTHORIZED)
+        );
+    }
+
+    #[test]
+    fn test_check_auth_sse_rejects_missing_query_token_when_no_header() {
+        // SSE 端点既无 header 也无 query token → 401
+        let headers = HeaderMap::new();
+        let uri = "/api/v1/events".parse::<axum::http::Uri>().unwrap();
+        assert_eq!(
+            check_auth(Some("correct"), &headers, "/api/v1/events", &uri),
+            Err(StatusCode::UNAUTHORIZED)
+        );
+    }
+
+    #[test]
+    fn test_check_auth_query_token_only_accepted_on_sse_endpoint() {
+        // 非 SSE 端点带 query token（无 header）→ 仍应 401（query 通道仅对 SSE 开放）
+        let headers = HeaderMap::new();
+        let uri = "/api/v1/config/llm?token=correct"
+            .parse::<axum::http::Uri>()
+            .unwrap();
+        assert_eq!(
+            check_auth(Some("correct"), &headers, "/api/v1/config/llm", &uri),
+            Err(StatusCode::UNAUTHORIZED)
+        );
+    }
+
+    #[test]
+    fn test_check_auth_sse_decodes_percent_encoded_query_token() {
+        // 前端用 encodeURIComponent(token) 编码；含保留字符（+ / = 等，如 base64 token）的
+        // token 经 percent-encoding 后，后端必须解码才能匹配，否则 SSE 永久 401。
+        // 这里模拟一个含 + / = 的 base64 风格 token：
+        //   明文 "ab+/cd==" → encodeURIComponent → "ab%2B%2Fcd%3D%3D"
+        let headers = HeaderMap::new();
+        let uri = "/api/v1/events?token=ab%2B%2Fcd%3D%3D"
+            .parse::<axum::http::Uri>()
+            .unwrap();
+        assert_eq!(
+            check_auth(Some("ab+/cd=="), &headers, "/api/v1/events", &uri),
+            Ok(())
         );
     }
 }

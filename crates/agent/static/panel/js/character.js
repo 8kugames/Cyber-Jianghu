@@ -17,7 +17,7 @@ export const characterPage = {
         loadCharacterList();
         loadCharacterData();
         unsubscribe = onEvent((event) => {
-            if (event.type === 'death' || event.type === 'agent_died') handleDeath(event);
+            if (event.type === 'agent_died') handleDeath(event);
         });
     },
     unmount() {
@@ -301,10 +301,13 @@ function showManualForm() {
 // ============================================================================
 
 function handleDeath(event) {
+    // 后端 AgentDied schema：agent_id / cause / description / location / died_at 等
+    // description 是叙事化死亡文案，适合弹窗展示；fallback 到 agent_id
+    const who = event.description || event.agent_id || '';
     showModal(`
         <div style="text-align:center;padding:24px">
             <h2 style="color:var(--danger);margin-bottom:12px">角色已死亡</h2>
-            <p style="color:var(--text-secondary);margin-bottom:20px">${escapeHtml(event.name || event.agent_id || '')} 已离开这个世界</p>
+            <p style="color:var(--text-secondary);margin-bottom:20px">${escapeHtml(who)}</p>
             <button class="btn btn-primary" id="rebirth-btn">转世重生</button>
             <button class="btn" id="close-death-btn" style="margin-left:8px">关闭</button>
         </div>

@@ -181,6 +181,27 @@ pub struct LlmConfigUpdateResponse {
     pub config: Option<dto::LlmConfigResponse>,
 }
 
+/// 解析有效 API Key。
+///
+/// 前端 GET /api/v1/config/llm 出于安全只返回 `has_api_key: bool`，
+/// 故密钥输入框默认为空。当用户未重新输入（空串）时，应复用已保存密钥，
+/// 而非当作"清空密钥"——对齐 Server 端 config_llm.rs:173-177 的兜底语义。
+///
+/// - `req_key` trim 后非空 → 使用新值
+/// - `req_key` 为空 → 回退到 `saved`（trim 后非空才用）
+/// - 两者皆空 → 返回空串（下游既有"空串→None"语义保持不变）
+fn resolve_api_key(req_key: &str, saved: Option<&str>) -> String {
+    let req_trimmed = req_key.trim();
+    if !req_trimmed.is_empty() {
+        return req_trimmed.to_string();
+    }
+    saved
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_default()
+}
+
 /// 验证 LLM 配置并创建测试客户端
 fn validate_llm_config(
     provider: &str,
@@ -219,9 +240,27 @@ fn validate_llm_config(
 /// 验证配置、测试 LLM 连接、保存配置文件
 pub(crate) async fn update_llm_config_handler(
     State(state): State<HttpApiState>,
-    Json(req): Json<dto::LlmConfigUpdate>,
+    Json(mut req): Json<dto::LlmConfigUpdate>,
 ) -> impl IntoResponse {
     use crate::component::llm::{DirectLlmClient, DirectLlmClientConfig, LlmClient, LlmProvider};
+
+    // 0. 归一化 api_key：前端 GET 不回显密钥（仅 has_api_key: bool），
+    //    故空串表示"用户未修改"，需回退到已保存值。
+    //    不做此步则连接测试与持久化都会把密钥当空处理（401 missing_api_key 的根因）。
+    let saved_config = crate::config::Config::from_file(&state.config_path).ok();
+    req.actor.api_key = resolve_api_key(
+        &req.actor.api_key,
+        saved_config.as_ref().and_then(|c| c.llm.api_key.as_deref()),
+    );
+    if let Some(ref mut reflector) = req.reflector {
+        reflector.api_key = resolve_api_key(
+            &reflector.api_key,
+            saved_config
+                .as_ref()
+                .and_then(|c| c.llm_reflector.as_ref())
+                .and_then(|r| r.api_key.as_deref()),
+        );
+    }
 
     // 1. 验证 actor 配置
     if let Err(e) = validate_llm_config(
@@ -661,6 +700,7 @@ pub async fn get_metrics_handler(Query(q): Query<MetricsQuery>) -> Json<serde_js
 
 #[cfg(test)]
 mod tests {
+    use super::resolve_api_key;
     use crate::component::llm::LlmProvider;
     use crate::component::llm::token_tracking::ModelTokenStats;
     use std::collections::HashMap;
@@ -707,6 +747,54 @@ mod tests {
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&bytes);
         assert_eq!(arr, [1u8; 32]);
+    }
+
+    #[test]
+    fn resolve_api_key_uses_request_when_non_empty() {
+        // 用户重新输入密钥 → 用新值
+        assert_eq!(resolve_api_key("sk-new", Some("sk-old")), "sk-new");
+    }
+
+    #[test]
+    fn resolve_api_key_trims_request_value() {
+        // 前端 trim 后发送，后端再次 trim 保持幂等
+        assert_eq!(resolve_api_key("  sk-new  ", Some("sk-old")), "sk-new");
+    }
+
+    #[test]
+    fn resolve_api_key_falls_back_to_saved_when_request_empty() {
+        // 用户未修改密钥（空串）→ 复用已保存值（401 missing_api_key 根因修复）
+        assert_eq!(resolve_api_key("", Some("sk-saved")), "sk-saved");
+    }
+
+    #[test]
+    fn resolve_api_key_falls_back_to_saved_when_request_blank() {
+        // 纯空白也视为"未修改"
+        assert_eq!(resolve_api_key("   ", Some("sk-saved")), "sk-saved");
+    }
+
+    #[test]
+    fn resolve_api_key_trims_saved_value() {
+        assert_eq!(resolve_api_key("", Some("  sk-saved  ")), "sk-saved");
+    }
+
+    #[test]
+    fn resolve_api_key_returns_empty_when_both_empty() {
+        // 两者皆空 → 空串（下游既有"空串→None"语义保持不变）
+        assert_eq!(resolve_api_key("", None), "");
+    }
+
+    #[test]
+    fn resolve_api_key_returns_empty_when_saved_is_blank() {
+        // 已保存值为空串/纯空白 → 视为无密钥
+        assert_eq!(resolve_api_key("", Some("")), "");
+        assert_eq!(resolve_api_key("", Some("   ")), "");
+    }
+
+    #[test]
+    fn resolve_api_key_request_takes_precedence_over_blank_saved() {
+        // 即使 saved 为空，req 非空仍用 req
+        assert_eq!(resolve_api_key("sk-new", Some("")), "sk-new");
     }
 }
 

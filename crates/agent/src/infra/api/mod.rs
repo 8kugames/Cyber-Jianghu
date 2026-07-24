@@ -830,9 +830,13 @@ pub fn create_http_state(
     }
     let data_dir_clone = data_dir.clone();
 
-    let auto_rebirth_init = crate::config::Config::from_file(&config_path)
-        .map(|c| c.runtime.auto_rebirth)
-        .unwrap_or(true);
+    let (auto_rebirth_init, llm_disabled_init) =
+        crate::config::Config::from_file(&config_path)
+            .map(|c| (c.runtime.auto_rebirth, c.runtime.llm_disabled))
+            .unwrap_or((true, false));
+
+    // 将持久化的 llm_disabled 同步到运行时全局标志，保持与 auto_rebirth 的读写对称
+    crate::component::llm::direct_client::set_llm_disabled(llm_disabled_init);
 
     let api_state = HttpApiState {
         current_state: Arc::new(RwLock::new(None)),

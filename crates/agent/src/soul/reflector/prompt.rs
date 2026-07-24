@@ -23,6 +23,7 @@ const REFLECTOR_SYSTEM_PROMPT: &str = r#"你是武侠世界的守护者（观察
 - 世界状态中的物品数量（如"银子x740"）是正常环境描述，不属于时代违规
 - 动作参数中的 item_id、target_location 等 ID 字段是系统生成数据，玩家不直接使用
 - 语义去重：如果玩家反复用不同措辞表达相同的意图内容，请标记为 semantic_repeat 拒绝
+- 元游戏术语审查：玩家说话内容或思考日志中出现 HP、SAN、MP、血量、数值、属性、属性栏、状态栏、玩家、NPC、登录、存档、复活、掉落、经验值等元游戏/技术术语时，必须以 out_of_character 拒绝。武侠角色是一个活生生的江湖人，应说"身受重伤，剧痛难忍"而非"HP 只剩 4 点"，说"神思恍惚"而非"SAN 值低了"。世界状态中的属性名（系统生成）不算违规，仅玩家直接说出的元游戏术语算违规
 
 ## 生存凌驾原则
 - 生存本能是人类最底层的驱动力，优先级高于任何人设限制
@@ -162,6 +163,17 @@ mod tests {
     fn test_reflector_prompt_default() {
         let prompt = ReflectorPrompt::new();
         assert!(prompt.system_prompt().contains("武侠世界"));
+    }
+
+    #[test]
+    fn test_reflector_system_prompt_contains_ooc_terms() {
+        // 回归：天魂必须显式声明对 HP/SAN/血量/玩家等元游戏术语的 out_of_character 审查。
+        // 触发场景：柳青絮"HP 只剩 4 点"未被拦截 → system prompt 缺元游戏术语条款 → 修复后必须存在。
+        let prompt = ReflectorPrompt::new();
+        let sys = prompt.system_prompt();
+        assert!(sys.contains("元游戏术语"), "system prompt 应含元游戏术语审查段");
+        assert!(sys.contains("HP"), "system prompt 应明确列出 HP 为元游戏术语");
+        assert!(sys.contains("out_of_character"), "元游戏术语违规应映射到 out_of_character");
     }
 
     #[test]

@@ -264,19 +264,21 @@ function loadDisplayMap() {
 
 // 解析 target_agent_id → 角色名称（history.html + agents.js 共用）
 // 优先查 displayMapCache.agents（权威映射），其次 allAgentsMap，兜底短 ID。
+// 统一输出格式：name(uuid[:8])（半角括号）。
 function resolveTargetName(targetId) {
     if (!targetId) return "某人";
+    var shortId = targetId.substring(0, 8);
     // 权威映射优先（覆盖已死亡/离线角色）
     if (displayMapCache.agents[targetId]) {
-        return displayMapCache.agents[targetId] + "（" + targetId.substring(0, 8) + "）";
+        return displayMapCache.agents[targetId] + "(" + shortId + ")";
     }
     if (typeof allAgentsMap !== "undefined" && allAgentsMap && allAgentsMap[targetId]) {
         var agent = allAgentsMap[targetId];
         var name = agent.name || targetId;
-        var shortId = targetId.substring(0, 8);
-        return name + "（" + shortId + "）";
+        return name + "(" + shortId + ")";
     }
-    return targetId.substring(0, 8) + "...";
+    // 兜底：仍未命中映射，给出中文化提示而非裸 UUID，便于排障
+    return "未知角色(" + shortId + ")";
 }
 
 // 来源类型中文化（UI 标签，非业务数据）
