@@ -55,7 +55,7 @@
 |---|---|---|---|---|
 | 4 | `connection_manager` / `agent_to_device_map` | tokio RwLock | `websocket/connection.rs:24,94` | 导出数据源是 trace 文件 + DB，不遍历 WS 连接，完全规避。 |
 | 5 | `GameDataCache.data` | `Arc<std::sync::RwLock>` | `game_data/cache.rs:19` | trace 已含 persona_name/persona_description，不查 game_data，规避。 |
-| 6 | DB pool | PgPool (max=20, acquire_timeout=5s) | `config.rs:117-127` | 专用低频查询：单次 run ≤5 次 DB 查询，`ANY(复合类型数组)` 批量化，`statement_timeout=30s` session 级，拿不到连接立即放弃本次 run。 |
+| 6 | DB pool | PgPool (max=20, acquire_timeout=5s) | `config.rs:117-127` | 专用低频查询：单次 run ≤5 次 DB 查询，`DISTINCT ON + IN` 批量化（与 Python `:84-92` 同形式）。**statement_timeout 用 `SET LOCAL` 在只读事务内设置，绝不用 `SET SESSION`**（PgPool 连接复用，session 级 GUC 会泄漏到热路径连接，见 §5.3 sqlx 骨架）。拿不到连接立即放弃本次 run。 |
 
 #### 🟢 低风险——正常使用
 
@@ -84,7 +84,7 @@
 
 | 路径 | 描述 | 结论 |
 |---|---|---|
-| **A（采用）** | 纯 Rust 内化，server 内 spawn 后台任务 | 零新依赖（已有 axum+sqlx+tokio+serde_json），单一二进制部署不变，与 `init_governance` 模式一致 |
+| **A（采用）** | 纯 Rust 内化，server 内 spawn 后台任务 | **最小新依赖**：新增 `ulid`（run_id 时序有序）+ `tokio-util`（流式下载的 `ReaderStream`，features=["io"]），无重型框架。与路径 B（需 Python 运行时）对比仍显著更轻。单一二进制部署不变，与 `init_governance` 模式一致。 |
 | B | server 内 spawn 子进程调 Python 脚本 | 部署机必须装 Python3+依赖，跨语言错误处理脆弱，与"纯 Rust 二进制"哲学不符 |
 | C | 独立 sidecar + cron + Python | 不算"server 端任务"，违背用户原意；cron 跨 OS 差异大 |
 
@@ -131,62 +131,95 @@ Step 1: 解析 TraceEntry
    │  字段: agent_id, tick_id, attempt, persona_name, persona_description,
    │        user_prompt, response, ok
    ▼
-Step 2: 批量查 DB —— 拿天魂审查结果
-   │  SELECT agent_id, tick_id, soul_cycle_metadata
+Step 2: 批量查 DB —— 拿每个 (agent_id, tick_id) 的完整 soul_cycle_metadata
+   │  SELECT DISTINCT ON (agent_id, tick_id)
+   │         agent_id, tick_id, pipe_seq, soul_cycle_metadata
    │  FROM agent_action_logs
-   │  WHERE ((agent_id, tick_id) = ANY($1::复合类型数组))
-   │    AND soul_cycle_metadata IS NOT NULL
-   │  走部分索引 idx_agent_action_logs_soul_cycle (005_tick_system.sql:52)
-   │  注: sqlx 复合类型映射的具体实现见 §10 待决问题 #2
-   │  → 内存 HashMap<(agent_id, tick_id), Vec<CycleResult>>
+   │  WHERE soul_cycle_metadata IS NOT NULL
+   │    AND (agent_id, tick_id) IN ($1)   -- $1: 本次扫描到的 (agent_id, tick_id) 对列表
+   │  ORDER BY agent_id, tick_id, pipe_seq DESC
+   │
+   │  索引: 走 idx_agent_action_logs_soul_cycle 部分索引
+   │        (005_tick_system.sql:52, WHERE soul_cycle_metadata IS NOT NULL)
+   │  索引命中性: 须在 staging 用 EXPLAIN (ANALYZE, BUFFERS) 验证 (见 §11 验收 #7)
+   │  SQL 形式与 scripts/build_sft_data.py:84-92 一致 (DISTINCT ON + pipe_seq DESC)
+   │
+   │  → 内存 HashMap<(agent_id, tick_id), SoulCycleMetadata>
+   │    (取最大 pipe_seq 的那条; metadata.cycles: Vec<SoulCycleAttempt>,
+   │     每个 cycle 含 attempt + tianhun.result)
    ▼
-Step 3: filter —— 只保留天魂 approved 的 attempt
+Step 3: filter —— 按 attempt 精确匹配天魂 approved
    │  对每个 TraceEntry:
-   │    lookup (agent_id, tick_id)
-   │    找 cycles[last].attempt == trace.attempt
-   │    且 cycles[last].tianhun.result == "approved"
+   │    1. 先按 Python 规则过滤 ok=false (见 §4.3): trace.ok == false → 跳过
+   │    2. lookup (agent_id, tick_id) → 拿到 SoulCycleMetadata
+   │    3. 在 metadata.cycles 里找 cycle.attempt == trace.attempt 的那条
+   │       (不是 cycles[last]; 是 attempt 精确匹配的那条)
+   │    4. 该条 cycle.tianhun.result == "approved" → 保留
    │  → 命中则保留
    ▼
-Step 4: transform —— 转成 SFT 样本 (1:1, 命中一条产一条)
-   │  SftSample { messages: [system, user, assistant], metadata: {...} }
+Step 4: transform —— 转成 SFT 样本 (命中一条产一条)
+   │  SftSample { messages: [system?, user, assistant], metadata: {...} }
+   │  (system 条件 append, 见 §4.2; persona_name 空时 messages 只含 user+assistant)
    ▼
 Step 5: 写产物
    training_exports/sft/run=<ULID>.jsonl       (每行一个 SftSample)
    training_exports/sft/run=<ULID>.meta.json   (元数据)
 ```
 
-### 4.2 persona 拼装规则（与 Python 脚本对齐）
+### 4.2 persona 拼装规则（与 Python 脚本 `build_sft_data.py:172-183` 对齐）
 
-| persona_name | persona_description | 拼出的 system content |
-|---|---|---|
-| 有 | 有 | `你是 {name}。{description}` |
-| 有 | 空 | `你是 {name}。` |
-| 空 | 有 | `{description}` |
-| 空 | 空 | **跳过该样本**（system 内容为空无法训练） |
+system message 是**条件 append**（不是强制三消息）。messages 数组始终含 user + assistant，system 仅当 persona_name 非空时 append：
 
-### 4.3 边界行为（与 Python 脚本 1:1 对齐）
-
-| 边界 | 行为 | 理由 |
-|---|---|---|
-| `trace.ok=false` | **不过滤，保留** | 与 Python 脚本一致；靠天魂 approved 过滤，不二次过滤 ok |
-| DB 查不到 `soul_cycle_metadata` | **跳过该 trace，不报错** | tick 还没跑完写入；下次增量重试（文件 mtime 会变，触发重扫） |
-| persona 双空 | **跳过该样本** | system 内容为空无法训练 |
-| attempt 不匹配 cycles[last] | **跳过该 trace** | 非 last attempt 不算审查结论 |
-
-### 4.4 与 Python 脚本的契约对照
-
-| 字段/规则 | Python (`build_sft_data.py`) | Rust 版本 | 一致性 |
+| persona_name | persona_description | messages 构成 | system content（若有） |
 |---|---|---|---|
-| 输入 | 读 traces 目录 + 连 DB | 同 | ✓ |
-| join key | `(agent_id, tick_id)` | 同 | ✓ |
-| 审查字段路径 | `soul_cycle_metadata.cycles[last].tianhun.result` | 同 | ✓ |
-| approved 过滤 | `== "approved"` | 同 | ✓ |
-| ok 过滤 | 不过滤 | 不过滤 | ✓ |
-| system 拼装 | `你是 {name}。{description}` | 同（空字段降级） | ✓ |
-| 输出 | `{"messages":[{role,content}], "metadata":{...}}` | 同 | ✓ |
-| 输出文件 | 单一 jsonl（全量） | 按 run 分文件（增量） | ⚠️ 不同（增量必然） |
+| 有 | 有 | system + user + assistant | `你是 {name}。\n{description}` |
+| 有 | 空 | system + user + assistant | `你是 {name}。` |
+| 空 | 有 | user + assistant（无 system） | — |
+| 空 | 空 | user + assistant（无 system） | — |
 
-**双源真相同步机制**：`sft_transform.rs` 单元测试用 `scripts/build_sft_data.py` 产出的黄金集（commit 进 `crates/server/tests/sft_golden/`），任何规则改动必须先改 Python 产出新黄金集，再改 Rust 通过测试。
+**不跳过样本**。persona 双空时仍导出（messages 只含 user+assistant），与 Python `:176-183` 的 `if persona_name:` 条件 append 一致。实测人魂 trace 的 persona_name 来自 `engine.rs:1358 persona.name.clone()`，几乎不会为空；空是边界，对齐 Python 即可，不臆造"跳过"规则。
+
+### 4.3 边界行为
+
+| 边界 | 行为 | 理由（事实依据） |
+|---|---|---|
+| `trace.ok=false` 或 `response` 为空 | **过滤，跳过该 trace** | 与 Python `build_sft_data.py:163-165` 一致。ok=false 意味着 LLM 调用失败（解析错误/网络错误/空响应），response 是垃圾数据，作为训练数据有害。 |
+| DB 查不到 `soul_cycle_metadata` | **跳过该 trace，不报错** | tick 还没跑完写入 `agent_action_logs`；下次增量重试（文件 mtime 会变，触发重扫）。 |
+| `metadata.cycles` 为空 | **跳过该 trace** | 无审查记录可关联。 |
+| `trace.attempt` 在 `cycles` 中无对应条目 | **跳过该 trace** | 该 attempt 未被审查（数据不一致），不能臆造审查结论。 |
+| persona 双空 | **仍导出**（messages 只含 user+assistant） | 与 Python `:176-183` 一致；无 system 的 messages 对训练框架合法，不跳过样本。 |
+| `cycles` 中找到 `attempt == trace.attempt` 但 `tianhun.result != "approved"` | **跳过该 trace** | 该 attempt 被天魂驳回，其人魂输出不应作为正向训练样本（否则在教模型生成被驳回的输出）。**这是对 Python 的有意偏离，见 §4.4。** |
+
+### 4.4 与 Python 脚本的契约对照（如实声明对齐与有意偏离）
+
+| 字段/规则 | Python (`build_sft_data.py`) | Rust 版本 | 关系 | 依据 |
+|---|---|---|---|---|
+| 输入源 | 读 traces 目录 + 连 DB | 同 | ✓ 对齐 | — |
+| join key | `(agent_id, tick_id)` | 同 | ✓ 对齐 | — |
+| DB 查询 SQL | `DISTINCT ON (agent_id, tick_id) ... ORDER BY pipe_seq DESC` (`:84-92`) | 同 | ✓ 对齐 | 取最大 pipe_seq 的 soul_cycle_metadata |
+| ok 过滤 | 过滤 ok=false (`:163-165`) | 过滤 ok=false | ✓ 对齐 | ok=false 是 LLM 失败，response 是垃圾 |
+| response 空过滤 | 过滤 (`:163`) | 过滤 | ✓ 对齐 | — |
+| persona 拼装 | 条件 append system (`:176-183`) | 条件 append system | ✓ 对齐 | persona_name 空时 messages 无 system role |
+| 输出格式 | `{"messages":[...], "metadata":{...}}` | 同 | ✓ 对齐 | vLLM/Axolotl 兼容 |
+| **天魂结果 lookup** | `cycles[-1].tianhun.result` (`:107`)，**不区分 trace 属于哪个 attempt** | `cycles.find(attempt == trace.attempt).tianhun.result` | ⚠️ **有意偏离** | 见下方"有意偏离说明" |
+| 输出文件组织 | 单一 jsonl（全量） | 按 run 分文件（增量） | ⚠️ 不同 | 增量导出必然 |
+
+**有意偏离说明（天魂结果 lookup）**：
+
+Python `:100-111` 对一个 `(agent_id, tick_id)` 只取 `cycles[-1]`（最后一个 cycle）的 `tianhun.result`，然后**把这个 tick 的所有人魂 trace 都按这个结果筛选**。这意味着：若 attempt 0 被天魂 `rejected`、attempt 1 重写后 `approved`，Python 会把这个 tick 的**两条人魂 trace 都导出**——包括被 `rejected` 的 attempt 0 那条。
+
+Rust 版本改为**按 attempt 精确匹配**：每条人魂 trace（带 `attempt` 字段，`engine.rs:1355` 与 `SoulCycleAttempt.attempt` 同源）只关联 `cycles` 中 `attempt == trace.attempt` 的那条 cycle 的审查结果。只有该 attempt 被 `approved` 才导出。
+
+**偏离的事实依据**（非臆测）：`SoulCycleMetadata.cycles: Vec<SoulCycleAttempt>`（`messages.rs:458`），每个 cycle 独立携带 `tianhun.result`。把被驳回的 attempt 作为正向 SFT 样本，等于教模型生成天魂不认可的输出——这是训练数据污染。Python 的处理是该污染源；Rust 版本修正它。
+
+**双源真相同步机制（修订）**：
+
+由于 Rust 版本对天魂 lookup 有意偏离 Python，黄金对照测试**不能**用 Python 现状产出黄金集（会包含被污染的样本）。机制改为：
+
+1. **基准集**：用 Python `--no-db-filter` 模式（跳过天魂筛选，`:251-253`）产出"所有人魂 trace 转 SFT 样本"的基准集。此模式下 Python 不做天魂 lookup，与 Rust 的天魂偏离无关，可作为 transform 纯函数（persona 拼装 + ok 过滤 + response 空过滤）的对照基准。
+2. **天魂筛选的独立测试**：Rust 的 attempt 精确匹配逻辑用**构造的 fixture**（手写 cycles 数组含多 attempt 的 approved/rejected 混合）验证，不走 Python 对照。fixture 覆盖：单 attempt approved、单 attempt rejected、多 attempt 混合、attempt 缺失。
+3. **任何 transform 规则改动**（persona/ok/response）必须先改 Python 产出新基准集，再改 Rust 通过测试。
+4. **任何天魂 lookup 改动**只改 Rust fixture，不动 Python（Python 的天魂逻辑是已知 bug，不作为黄金标准）。
 
 ---
 
@@ -212,12 +245,12 @@ Step 5: 写产物
 |---|---|---|---|---|
 | 定时间隔 | **6h** | 60s (1 tick) | 360× | 1h-24h；信息论视角：样本价值不随时间衰减，新鲜度非核心价值。系统论视角：单位数据干扰成本 ∝ √频率，最小化频率但受 LRU 约束。6h 是干扰/新鲜度最优点。 |
 | 单次 run trace 上限 | **50,000 条** | ~1M（内存 18GB / 3.6KB） | 20× | 10k-100k；实测 6h 累积最多 18k 条，50k 是 2.7× 裕量，覆盖间隔调长到 12h 或 agent 规模峰值到 200。 |
-| run 超时 | **10 min** | ~35s（最坏推导） | 17× | 2-10 min；50k 条纯 CPU ~0.5s，yield 让出最坏 +10s，DB 查询最坏 +25s，总 ~35s。10 min 是 17× 裕量，覆盖 IO 抖动 + 调度延迟。 |
-| DB 批大小 | **10,000 对** | 32,767（PG 参数数组 INT16） | 3.3× | 1k-10k 几乎等价（索引高效区）；选 10k 减少 DB 往返次数。 |
+| run 超时 | **10 min** | 最坏 ~153s（实测推导） | ~3.9× | 推导：50k 条纯 CPU ~0.5s + yield 让出最坏 +10s + DB 查询最坏 5批×30s=150s + 文件 IO ~2s ≈ 153s。10 min 是 ~3.9× 裕量，覆盖 IO 抖动 + 调度延迟。（修正前误算 DB 为 25s，实际 SET LOCAL 30s/批 × 5 批 = 150s。） |
+| DB 批大小 | **10,000 对** | 65,535（PG 绑定参数 UINT16 上限，[PG 官方 limits](https://www.postgresql.org/docs/current/limits.html)） | 6.5× | 1k-10k 几乎等价（索引高效区）；选 10k 减少 DB 往返次数。注：本设计用 `UNNEST($1::uuid[], $2::bigint[])` 只绑 2 个数组参数，不受 65535 约束，但批大小仍控在 10k 以控内存 + 索引扫描成本。 |
 | DB 连接占用 | **1** | 11（pool 余量 20×0.9-7） | 11× | 1-3；串行 task 物理上只需 1 连接，是严格最优解，占用 pool 5%。 |
 | 产物大小上限 | **50 GB** | 525 GB（磁盘） | 10× | 25-100 GB；产物 ≈ trace × 0.5（approved 率）≈ 0.85 GB/天，50GB 覆盖 ~59 天训练迭代周期。 |
 | 让出频率 | **每 500 条** | 内存局部性 | — | 100-1000 几乎等价（让出开销 ≤1%）；500 是中间值，50k 条 run 总让出开销 ~1ms。 |
-| checkpoint 粒度 | **文件级 (size, mtime)** | 行级偏移 | — | 文件级 YAGNI 最优；trace 文件每天滚动，最大单文件 6.8MB，无需行级偏移。 |
+| checkpoint 粒度 | **trace_id 集合**（幂等去重） | 行级偏移 | — | 第一性分析三选项：(a) 行级偏移——崩溃恢复复杂、易空洞；(b) 下游去重——产物 4× 膨胀；(c) **trace_id 集合（采用）**——trace_id 全局唯一（UUID），checkpoint 记录已处理的 trace_id，下次读整个文件但跳过已处理。幂等、崩溃安全（没写产物就不更新集合）、无空洞。内存：50k 条 × 36B UUID = 1.8MB 可接受。修订前误用文件级 (size,mtime)，在 append-only 当日文件上会跨 run 重复发出同一 SftSample。 |
 
 **所有参数都有物理极限推导 + 实测约束 + 明确权衡空间标注。没有任何参数是拍脑袋取值。**
 
@@ -227,12 +260,55 @@ Step 5: 写产物
 |---|---|---|
 | 单次 run trace 文件数 | ≤ 500 | 按 mtime 排序处理最老的 500 个，其余下次处理 |
 | 单次 run trace 总条数 | ≤ 50,000 | 停止本次 run，下次增量继续 |
-| 单次 run DB 查询次数 | ≤ 5 | 用 `ANY(复合类型数组)` 批量化 |
+| 单次 run DB 查询次数 | ≤ 5 | 用 `DISTINCT ON + IN` 批量化（与 Python `:84-92` 同形式） |
 | 单次 run 时长 | ≤ 10 分钟 | `tokio::time::timeout` 强制中止 |
-| 单次 DB 查询时长 | ≤ 30s | `statement_timeout` session 级 |
+| 单次 DB 查询时长 | ≤ 30s | **`SET LOCAL statement_timeout` 在只读事务内**（绝不用 SET SESSION，防 GUC 泄漏到热路径连接）。sqlx 骨架见 §5.3.1。 |
 | DB 连接占用 | ≤ 1 | 同时只拿 1 个连接，用完即释放 |
 | 产物目录总大小 | ≤ 50 GB | 停止新 run，发 warning，等手动清理 |
 | 并发 run | ≤ 1 | `AtomicBool` 互斥，上次还在跑则跳过本次触发 |
+
+### 5.3.1 DB 查询的事务包裹（防 GUC 泄漏）
+
+**问题**（Integration Auditor IA-02）：`crates/server/src/db/common.rs:98-108` 的 PgPool `test_before_acquire(true)` 意味着连接在多次 acquire 间复用。若用 `SET SESSION statement_timeout = '30s'`，这个 GUC 会残留在连接上，下一个 acquire 该连接的热路径 SQL（intent INSERT、tick_logs INSERT）一旦超过 30s 就被 PostgreSQL 主动 abort。这是热路径污染。
+
+**解决**：用只读事务 + `SET LOCAL`。`SET LOCAL` 的 GUC 生命周期仅限当前事务，`COMMIT`/`ROLLBACK` 后自动恢复。sqlx 骨架：
+
+```rust
+// runner.rs —— 单次 DB 查询的包裹模式
+async fn fetch_soul_cycle_metadata(
+    pool: &PgPool,
+    keys: &[(Uuid, i64)],  // (agent_id, tick_id) 对列表
+) -> Result<HashMap<(Uuid, i64), SoulCycleMetadata>, ExportError> {
+    // 关键：开只读事务，SET LOCAL 在事务内，commit 后 GUC 自动清除
+    let mut tx = pool.begin().await?;
+    sqlx::query("SET LOCAL statement_timeout = '30s'")
+        .execute(&mut *tx).await?;
+    sqlx::query("SET LOCAL default_transaction_read_only = 'on'")
+        .execute(&mut *tx).await?;
+
+    // 与 build_sft_data.py:84-92 同形式
+    let rows = sqlx::query_as::<_, SoulCycleRow>(
+        r#"
+        SELECT DISTINCT ON (agent_id, tick_id)
+               agent_id, tick_id, soul_cycle_metadata
+        FROM agent_action_logs
+        WHERE soul_cycle_metadata IS NOT NULL
+          AND (agent_id, tick_id) IN (SELECT * FROM UNNEST($1::uuid[], $2::bigint[]))
+        ORDER BY agent_id, tick_id, pipe_seq DESC
+        "#,
+    )
+    .bind(&keys.iter().map(|(a, _)| *a).collect::<Vec<_>>())  // $1: uuid[]
+    .bind(&keys.iter().map(|(_, t)| *t).collect::<Vec<_>>())  // $2: bigint[]
+    .fetch_all(&mut *tx).await?;
+
+    tx.commit().await?;  // SET LOCAL 在此自动失效，连接归还 pool 时 GUC 已清除
+    Ok(rows.into_iter().map(|r| ((r.agent_id, r.tick_id), r.metadata)).collect())
+}
+```
+
+**IN 子句用 `UNNEST($1::uuid[], $2::bigint[])` 而非复合类型**：避免复合类型 `(uuid, bigint)` 在 sqlx 的 Type derive 复杂性，且 PostgreSQL 对 `UNNEST` 配对的等值谓词能正常下推到 B-tree 索引（不像复合类型 ANY 可能退化为 seq scan）。这是对 IA-01 的预防性规避。
+
+**验收**（§11 增 #8）：在 staging 连续跑导出查询后，立即查 `SHOW statement_timeout;`（在新 acquire 的连接上），确认返回 `0`（reset），证明 GUC 未泄漏。
 
 ---
 
@@ -336,16 +412,18 @@ paths:
 
 ### 7.2 环境变量覆盖（运行时调参）
 
-加载优先级：**env > config.yaml > default**（对齐 `config.rs:184-210`）。
+**加载模式**：复刻 `main.rs:258-268` 的 action_evolution.yaml 内嵌加载模式（`std::fs::read_to_string` + `serde_yaml::from_str` + env 覆盖），**不走** `Config` struct（`config.rs` 的 `Config` 只含 server/database 两段，无 yaml 加载层；DB 配置走 `config.rs:184-210` 的纯 `std::env::var` 逐字段读取）。加载优先级：**env > training_export.yaml > 代码内 default**。
+
+**环境变量命名**：对齐项目现有扁平命名规范（`SERVER_HOST` / `DB_MAX_CONNECTIONS` / `ADMIN_WRITE_TOKEN`，见 `config.rs:166-219`；只有路径类用 `CYBER_JIANGHU_` 前缀，见 `paths.rs`）。因此用扁平 `TRAINING_EXPORT_*`，**不**引入 `CYBER_JIANGHU_TRAINING_EXPORT_*` 新前缀层级：
 
 | 环境变量 | 默认 |
 |---|---|
-| `CYBER_JIANGHU_TRAINING_EXPORT_ENABLED` | `false` |
-| `CYBER_JIANGHU_TRAINING_EXPORT_INTERVAL_SECS` | `21600` |
-| `CYBER_JIANGHU_TRAINING_EXPORT_RUN_TIMEOUT_SECS` | `600` |
-| `CYBER_JIANGHU_TRAINING_EXPORT_MAX_TRACES` | `50000` |
-| `CYBER_JIANGHU_TRAINING_EXPORT_MAX_SIZE_GB` | `50` |
-| `CYBER_JIANGHU_TRAINING_EXPORT_DB_BATCH` | `10000` |
+| `TRAINING_EXPORT_ENABLED` | `false` |
+| `TRAINING_EXPORT_INTERVAL_SECS` | `21600` |
+| `TRAINING_EXPORT_RUN_TIMEOUT_SECS` | `600` |
+| `TRAINING_EXPORT_MAX_TRACES` | `50000` |
+| `TRAINING_EXPORT_MAX_SIZE_GB` | `50` |
+| `TRAINING_EXPORT_DB_BATCH` | `10000` |
 
 ### 7.3 加载时机
 
@@ -363,6 +441,36 @@ paths:
 3. 不产生半成品产物文件（避免下次启动读到损坏 JSONL）
 
 ### 8.2 实现（复刻 `init_governance` 模式）
+
+**复刻要点**（对齐 `main.rs:289-330` 的 init_governance 真实实现）：init_governance 不是只用外层 5s join——它在**每个 interval tick body 内**用 `tokio::time::timeout(review_timeout, ...)` 包裹单次轮询（`main.rs:310, 322`），这样 shutdown 信号到来时，正在进行的单次操作能在 `review_timeout` 内结束（而非等到下次 tick）。training_exporter 必须复刻这个**双层 timeout**：
+- 外层：`tokio::time::timeout(5s, handle)` join（main 关闭序列，`main.rs:1310-1316` 模式）
+- 内层：`tokio::time::timeout(run_timeout, run_once(...))` 包裹单次 run（scheduler task 内，每个 tick body）
+
+scheduler task 内部循环结构：
+```rust
+loop {
+    tokio::select! {
+        _ = shutdown_rx.changed() => {
+            if *shutdown_rx.borrow() { break; }
+        }
+        _ = interval.tick() => {
+            if is_running.swap(true, SeqCst) { warn!("上次 run 仍在进行, 跳过"); continue; }
+            // 内层 timeout: 单次 run 受 run_timeout (默认 600s) 约束
+            // shutdown 信号到来时, 这里最多等 run_timeout 而非无限等
+            let run_result = tokio::time::timeout(
+                Duration::from_secs(config.run_timeout_secs),
+                run_once(&config, &db_pool, &checkpoint, TriggerSource::Scheduled),
+            ).await;
+            is_running.store(false, SeqCst);
+            match run_result {
+                Ok(Ok(meta)) => info!(run_id=%meta.run_id, "run 完成"),
+                Ok(Err(e)) => warn!(?e, "run 失败"),
+                Err(_elapsed) => warn!("run 超时 (>{:?}), 本次中止", config.run_timeout_secs),
+            }
+        }
+    }
+}
+```
 
 ```rust
 // main.rs 启动序列
@@ -403,10 +511,10 @@ if let Some(handle) = exporter_handle {
 crates/server/src/training_export/
 ├── mod.rs                 # 公共类型 (RunMetadata, RunStatus, TriggerSource)
 ├── config.rs              # TrainingExportConfig 加载 (env > yaml > default)
-├── checkpoint.rs          # Checkpoint 读写 (文件级 size+mtime)
+├── checkpoint.rs          # Checkpoint 读写 (trace_id 集合幂等去重, §5.2)
 ├── sft_transform.rs       # 纯函数: transform(entries, audit_map) -> Vec<SftSample>
 ├── runner.rs              # 单次 run 编排 (扫文件 → DB 查询 → transform → 写产物)
-├── scheduler.rs           # 后台 task (interval + shutdown + 手动触发 mpsc)
+├── scheduler.rs           # 后台 task: 启动时 sweep *.tmp 残留 (§8.3) + interval + 双层 timeout + shutdown + 手动触发 mpsc
 └── handlers.rs            # HTTP handlers 内部逻辑
 
 crates/server/src/handlers/
@@ -479,7 +587,7 @@ pub struct SftSampleMetadata {
 | # | 问题 | 候选 | 推荐 |
 |---|---|---|---|
 | 1 | 手动触发时定时 run 正在跑 | (a) 排队等待 (b) 返回 409 Conflict (c) 排队但有超时 | (c) 排队 + 30s 超时返回 408 |
-| 2 | 复合类型数组 `(agent_id, tick_id) = ANY($1)` 在 sqlx 的类型映射 | (a) 自定义 PgComposite + Type derive (b) 拆两条 ANY 用笛卡尔 + 内存精确 match | (a) 复合类型，更准 |
+| ~~2~~ | ~~复合类型数组 sqlx 映射~~ | **已解决**（§5.3.1 改用 `UNNEST($1::uuid[], $2::bigint[])`，避免复合类型，索引命中性见 §11 验收 #7） | — |
 | 3 | 流式下载是否支持 Range 请求（断点续传） | (a) 不支持，整体下载 (b) 支持 Range | (a) YAGNI，产物单文件最大 ~180MB |
 | 4 | 是否提供"按 agent_id 筛选下载" | (a) 不提供，下载整个 run (b) 提供 per-agent 文件 | (a) YAGNI，run 已含 metadata.agent_id，下游可自行筛 |
 
@@ -487,12 +595,14 @@ pub struct SftSampleMetadata {
 
 ## 11. 验收标准
 
-1. **功能正确性**：`sft_transform.rs` 黄金对照测试通过（与 `scripts/build_sft_data.py` 在相同输入下产出相同 SftSample 集合）
+1. **transform 纯函数正确性**：`sft_transform.rs` 用 Python `--no-db-filter` 模式产出的基准集（`crates/server/tests/sft_golden/`）做黄金对照，persona 拼装 + ok 过滤 + response 空过滤三规则与 Python `build_sft_data.py:163-183` 一致。天魂筛选逻辑用独立 fixture 验证（因有意偏离 Python，见 §4.4）。
 2. **零热路径影响**：导出运行期间，tick 引擎延迟不增加（benchmark：导出 run 中 tick 延迟 vs 空闲 tick 延迟，差值 < 5%）
-3. **优雅关闭**：SIGINT 后 5s 内 exporter task 退出，无 `.tmp` 残留（或残留被下次启动 sweep）
+3. **优雅关闭**：SIGINT 后 5s 内 exporter task 退出（双层 timeout：外层 5s join + 内层 run_timeout），无 `.tmp` 残留（或残留被下次启动 sweep）
 4. **错误隔离**：构造 DB 连接耗尽场景，导出 run 跳过，server 主流程不受影响
-5. **增量正确性**：连续两次定时 run，第二次不重复处理第一次已处理的文件（checkpoint 验证）
+5. **增量正确性（trace_id 幂等）**：连续两次定时 run 处理同一 append-only 当日文件，第二次不重复发出第一次已处理的 SftSample（按 trace_id 去重，见 §5.2）
 6. **配置开关**：`enabled: false` 时零 spawn、零开销（启动日志确认）
+7. **DB 索引命中性**（staging 验证）：对 §5.3.1 的 SQL 跑 `EXPLAIN (ANALYZE, BUFFERS)`，确认走 `idx_agent_action_logs_soul_cycle` 部分索引（Index Scan / Bitmap Index Scan），而非 Seq Scan。若 Seq Scan 则触发 §5.3.1 备选方案评估。
+8. **GUC 未泄漏**（staging 验证）：连续跑导出查询后，在新 acquire 的 PgPool 连接上执行 `SHOW statement_timeout;`，确认返回 `0`（reset），证明 `SET LOCAL` 未泄漏到热路径连接。
 
 ---
 
@@ -501,7 +611,7 @@ pub struct SftSampleMetadata {
 | 风险 | 概率 | 影响 | 缓解 |
 |---|---|---|---|
 | 双源真相（Python vs Rust）漂移 | 中 | 训练数据质量 | 黄金对照测试 + CI 强制 |
-| 复合类型 sqlx 映射不熟 | 中 | 实现延期 | 待决问题 #2 有备选方案（笛卡尔+内存 match） |
+| 复合类型 sqlx 映射不熟 | — | — | **已消除**（§5.3.1 改用 `UNNEST($1::uuid[], $2::bigint[])`，只绑 2 个数组参数，无需自定义 PgComposite） |
 | server 侧 trace 无限增长 | 已知 | 磁盘满 | 本功能不动，独立议题；配置 `max_total_export_size_gb` 限制产物侧 |
 | ULID 时钟回拨 | 极低 | run_id 乱序 | ULID 库内置单调保护；乱序只影响列表顺序，不影响正确性 |
 | 手动触发与定时竞争 | 低 | run 重复 | `AtomicBool` 互斥 + mpsc 统一调度 |
@@ -512,7 +622,7 @@ pub struct SftSampleMetadata {
 
 1. 新增 `training_export/` 模块骨架 + 公共类型
 2. `sft_transform.rs` 纯函数 + 黄金对照测试（TDD）
-3. `checkpoint.rs` 文件级增量
+3. `checkpoint.rs` trace_id 集合增量（幂等去重）
 4. `runner.rs` 单次 run 编排（扫文件 + DB 查询 + transform + 写产物）
 5. `scheduler.rs` 后台 task（interval + shutdown + mpsc）
 6. `config.rs` 加载（env > yaml > default）
