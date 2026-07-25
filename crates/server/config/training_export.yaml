@@ -1,0 +1,25 @@
+version: 1
+description: "训练数据自动导出配置 (spec 2026-07-25)"
+data:
+  # 总开关, 默认关闭. 显式开启: TRAINING_EXPORT_ENABLED=true
+  enabled: false
+
+  scheduler:
+    interval_secs: 21600       # 6h (spec §5.2 参数1)
+    run_timeout_secs: 600       # 10min (spec §5.2 参数3, 双层 timeout 内层)
+    max_concurrent_runs: 1      # 严格 1, 串行
+
+  limits:
+    max_traces_per_run: 50000   # spec §5.2 参数2
+    max_total_export_size_gb: 50  # spec §5.2 参数6
+    db_batch_size: 10000         # spec §5.2 参数4
+    db_statement_timeout_secs: 30  # spec §5.3 SET LOCAL
+    yield_every_n: 500           # spec §5.2 参数7
+
+  checkpoint:
+    retain_days: 7               # spec §5.2.1 桶退役
+
+  paths:
+    traces_input_subdir: "traces/soul=renhun"
+    output_subdir: "training_exports/sft"
+    checkpoint_filename: "training_exports/sft_checkpoint.json"
