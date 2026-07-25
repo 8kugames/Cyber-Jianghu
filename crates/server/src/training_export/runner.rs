@@ -81,3 +81,206 @@ struct SoulCycleRow {
 }
 
 use anyhow::Context as _;
+
+use crate::training_export::checkpoint::Checkpoint;
+use crate::training_export::config::TrainingExportConfig;
+use crate::training_export::sft_transform::{transform_entry, SftSample, TransformInput};
+use crate::training_export::{RunMetadata, RunStatus, TriggerSource};
+
+/// 单次 run 的结果
+pub struct RunResult {
+    pub metadata: RunMetadata,
+    pub samples: Vec<SftSample>,
+}
+
+/// 执行一次完整 run (spec §4.1 五步).
+pub async fn run_once(
+    config: &TrainingExportConfig,
+    pool: &PgPool,
+    checkpoint: &mut Checkpoint,
+    triggered_by: TriggerSource,
+    run_id: String,
+) -> anyhow::Result<RunResult> {
+    let data_dir = crate::paths::get_data_dir();
+    let traces_dir = data_dir.join(&config.paths.traces_input_subdir);
+    let output_dir = data_dir.join(&config.paths.output_subdir);
+
+    let mut metadata = RunMetadata::new_pending(run_id.clone(), triggered_by);
+    metadata.status = RunStatus::Running;
+
+    // Step 1: 扫描 trace 文件
+    let (entries, keys, trace_dates) =
+        scan_trace_files(&traces_dir, config.limits.max_traces_per_run).await?;
+    metadata.trace_count = entries.len();
+
+    if entries.is_empty() {
+        metadata.status = RunStatus::Completed;
+        metadata.completed_at = Some(chrono::Utc::now().timestamp_millis());
+        return Ok(RunResult {
+            metadata,
+            samples: vec![],
+        });
+    }
+
+    // Step 2: 批量查 DB
+    let audit_map = fetch_audit_map_batched(
+        pool,
+        &keys,
+        config.limits.db_batch_size,
+        config.limits.db_statement_timeout_secs,
+    )
+    .await?;
+
+    // Step 3 + 4: filter (ok + attempt 匹配 approved) + transform
+    let mut samples: Vec<SftSample> = Vec::new();
+    let yield_every = config.limits.yield_every_n.max(1);
+    for (i, (entry, date)) in entries.iter().zip(trace_dates.iter()).enumerate() {
+        if checkpoint.is_processed(date, &entry.trace_id) {
+            continue;
+        }
+        let tianhun_result = lookup_attemp_match(entry, &audit_map);
+        let should_export = matches!(tianhun_result.as_deref(), Some("approved"));
+        if should_export {
+            if let Some(sample) = transform_entry(TransformInput {
+                entry,
+                tianhun_result: tianhun_result.clone(),
+            }) {
+                samples.push(sample);
+                checkpoint.mark_processed(date, entry.trace_id.clone());
+            }
+        }
+        if i % yield_every == 0 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    metadata.sample_count = samples.len();
+
+    // Step 5: 写产物 (.tmp + rename + fsync, spec §8.3)
+    tokio::fs::create_dir_all(&output_dir).await?;
+    let output_path = output_dir.join(format!("run={}.jsonl", run_id));
+    let tmp_path = output_path.with_extension("jsonl.tmp");
+    let mut content = String::new();
+    for s in &samples {
+        content.push_str(&serde_json::to_string(s)?);
+        content.push('\n');
+    }
+    tokio::fs::write(&tmp_path, &content).await?;
+    {
+        let f = tokio::fs::OpenOptions::new()
+            .write(true)
+            .open(&tmp_path)
+            .await?;
+        f.sync_all().await?;
+    }
+    tokio::fs::rename(&tmp_path, &output_path).await?;
+
+    // 写 .meta.json
+    metadata.output_path = output_path
+        .strip_prefix(&data_dir)
+        .unwrap_or(&output_path)
+        .to_string_lossy()
+        .to_string();
+    metadata.output_size_bytes = content.len() as u64;
+    metadata.status = RunStatus::Completed;
+    metadata.completed_at = Some(chrono::Utc::now().timestamp_millis());
+
+    let meta_path = output_dir.join(format!("run={}.meta.json", run_id));
+    let meta_tmp = meta_path.with_extension("json.tmp");
+    tokio::fs::write(&meta_tmp, serde_json::to_string_pretty(&metadata)?).await?;
+    tokio::fs::rename(&meta_tmp, &meta_path).await?;
+
+    Ok(RunResult { metadata, samples })
+}
+
+async fn scan_trace_files(
+    traces_dir: &std::path::Path,
+    max_traces: usize,
+) -> anyhow::Result<(
+    Vec<cyber_jianghu_protocol::TraceEntry>,
+    Vec<(Uuid, i64)>,
+    Vec<String>,
+)> {
+    let mut entries = Vec::new();
+    let mut keys = std::collections::HashSet::new();
+    let mut dates = Vec::new();
+
+    if !traces_dir.exists() {
+        return Ok((entries, keys.into_iter().collect(), dates));
+    }
+
+    let mut agent_dirs = tokio::fs::read_dir(traces_dir).await?;
+    while let Ok(Some(agent_entry)) = agent_dirs.next_entry().await {
+        if !agent_entry
+            .file_type()
+            .await
+            .map(|t| t.is_dir())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let mut date_files = tokio::fs::read_dir(agent_entry.path()).await?;
+        while let Ok(Some(date_entry)) = date_files.next_entry().await {
+            let path = date_entry.path();
+            if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
+                let date_str = path
+                    .file_stem()
+                    .and_then(|n| n.to_str())
+                    .and_then(|s| s.strip_prefix("date="))
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                let content = tokio::fs::read_to_string(&path).await?;
+                for line in content.lines() {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    if entries.len() >= max_traces {
+                        break;
+                    }
+                    match serde_json::from_str::<cyber_jianghu_protocol::TraceEntry>(line) {
+                        Ok(entry) => {
+                            keys.insert((entry.agent_id, entry.tick_id));
+                            entries.push(entry);
+                            dates.push(date_str.clone());
+                        }
+                        Err(e) => {
+                            tracing::warn!("解析 trace 行失败 {:?}: {}", path, e);
+                        }
+                    }
+                }
+                if entries.len() >= max_traces {
+                    break;
+                }
+            }
+        }
+        if entries.len() >= max_traces {
+            break;
+        }
+    }
+
+    Ok((entries, keys.into_iter().collect(), dates))
+}
+
+async fn fetch_audit_map_batched(
+    pool: &PgPool,
+    keys: &[(Uuid, i64)],
+    batch_size: usize,
+    statement_timeout_secs: u64,
+) -> anyhow::Result<HashMap<(Uuid, i64), SoulCycleMetadata>> {
+    let mut total = HashMap::new();
+    for chunk in keys.chunks(batch_size.max(1)) {
+        let part = fetch_soul_cycle_metadata(pool, chunk, statement_timeout_secs).await?;
+        total.extend(part);
+    }
+    Ok(total)
+}
+
+fn lookup_attemp_match(
+    entry: &cyber_jianghu_protocol::TraceEntry,
+    audit_map: &HashMap<(Uuid, i64), SoulCycleMetadata>,
+) -> Option<String> {
+    let metadata = audit_map.get(&(entry.agent_id, entry.tick_id))?;
+    let cycle = metadata.cycles.iter().find(|c| c.attempt == entry.attempt)?;
+    cycle.tianhun.result.clone()
+}
