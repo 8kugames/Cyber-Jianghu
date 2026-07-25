@@ -32,6 +32,18 @@ services:
       - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
       - ../crates/agent/static/panel:/app/static/panel:ro
 
+  agent-2:
+    <<: *agent-common
+    container_name: agent-2-minimaxi
+    environment:
+      <<: *agent-env-common
+    ports:
+      - "23342:23340"
+    volumes:
+      - ./agent-2/config:/app/config
+      - ./agent-2/data:/app/data
+      - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
+      - ../crates/agent/static/panel:/app/static/panel:ro
 
   agent-3:
     <<: *agent-common
@@ -59,6 +71,31 @@ services:
       - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
       - ../crates/agent/static/panel:/app/static/panel:ro
 
+  agent-5:
+    <<: *agent-common
+    container_name: agent-5-longcat
+    environment:
+      <<: *agent-env-common
+    ports:
+      - "23345:23340"
+    volumes:
+      - ./agent-5/config:/app/config
+      - ./agent-5/data:/app/data
+      - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
+      - ../crates/agent/static/panel:/app/static/panel:ro
+
+  agent-ollama:
+    <<: *agent-common
+    container_name: agent-ollama
+    environment:
+      <<: *agent-env-common
+    ports:
+      - "23349:23340"
+    volumes:
+      - ./agent-ollama/config:/app/config
+      - ./agent-ollama/data:/app/data
+      - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
+      - ../crates/agent/static/panel:/app/static/panel:ro
 
 networks:
   cyber-jianghu-network:
