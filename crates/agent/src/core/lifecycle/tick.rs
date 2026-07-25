@@ -33,6 +33,14 @@ impl super::super::Agent {
             );
             handler.set_game_day(game_day).await;
 
+            // WI-002 诊断: 输出 game_day 计算值 + handler.current_game_day() 共享值
+            tracing::debug!(
+                "[WI-002-diagnose] main-loop tick={} game_day={} handler_current_game_day={}",
+                world_state.tick_id,
+                game_day,
+                *handler.current_game_day().read().await
+            );
+
             let need_spawn = match self.session_triage_handle {
                 None => true,
                 Some(ref handle) => handle.is_finished(),
@@ -40,6 +48,15 @@ impl super::super::Agent {
             if need_spawn {
                 let prev_game_day = self.session_triage_game_day.take();
                 self.session_triage_game_day = Some(game_day);
+
+                // WI-002 诊断: 输出 prev_game_day vs game_day 对比 + need_spawn 决策
+                tracing::debug!(
+                    "[WI-002-diagnose] session_triage spawn prev_game_day={:?} new_game_day={} will_cross={}",
+                    prev_game_day,
+                    game_day,
+                    prev_game_day.is_some_and(|p| p != game_day)
+                );
+
                 if let Some(old_handle) = self.session_triage_handle.take() {
                     match old_handle.await {
                         Ok(summary_opt) => {
