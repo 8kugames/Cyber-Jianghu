@@ -55,7 +55,7 @@
 |---|---|---|---|---|
 | 4 | `connection_manager` / `agent_to_device_map` | tokio RwLock | `websocket/connection.rs:24,94` | 导出数据源是 trace 文件 + DB，不遍历 WS 连接，完全规避。 |
 | 5 | `GameDataCache.data` | `Arc<std::sync::RwLock>` | `game_data/cache.rs:19` | trace 已含 persona_name/persona_description，不查 game_data，规避。 |
-| 6 | DB pool | PgPool (max=20, acquire_timeout=5s) | `config.rs:117-127` | 专用低频查询：单次 run ≤5 次 DB 查询，`DISTINCT ON + IN` 批量化（与 Python `:84-92` 同形式）。**statement_timeout 用 `SET LOCAL` 在只读事务内设置，绝不用 `SET SESSION`**（PgPool 连接复用，session 级 GUC 会泄漏到热路径连接，见 §5.3 sqlx 骨架）。拿不到连接立即放弃本次 run。 |
+| 6 | DB pool | PgPool (max=20, acquire_timeout=5s) | `config.rs:117-127` | 专用低频查询：单次 run ≤5 次 DB 查询，`DISTINCT ON + IN` 批量化（与 Python `:84-92` 同形式）。**statement_timeout 用 `SET LOCAL` 在短事务内设置，绝不用 `SET SESSION`**（PgPool 连接复用，session 级 GUC 会泄漏到热路径连接，见 §5.3.1 sqlx 骨架）。拿不到连接立即放弃本次 run。 |
 
 #### 🟢 低风险——正常使用
 
@@ -245,7 +245,7 @@ Rust 版本改为**按 attempt 精确匹配**：每条人魂 trace（带 `attemp
 |---|---|---|---|---|
 | 定时间隔 | **6h** | 60s (1 tick) | 360× | 1h-24h；信息论视角：样本价值不随时间衰减，新鲜度非核心价值。系统论视角：单位数据干扰成本 ∝ √频率，最小化频率但受 LRU 约束。6h 是干扰/新鲜度最优点。 |
 | 单次 run trace 上限 | **50,000 条** | ~1M（内存 18GB / 3.6KB） | 20× | 10k-100k；实测 6h 累积最多 18k 条，50k 是 2.7× 裕量，覆盖间隔调长到 12h 或 agent 规模峰值到 200。 |
-| run 超时 | **10 min** | 最坏 ~153s（实测推导） | ~3.9× | 推导：50k 条纯 CPU ~0.5s + yield 让出最坏 +10s + DB 查询最坏 5批×30s=150s + 文件 IO ~2s ≈ 153s。10 min 是 ~3.9× 裕量，覆盖 IO 抖动 + 调度延迟。（修正前误算 DB 为 25s，实际 SET LOCAL 30s/批 × 5 批 = 150s。） |
+| run 超时 | **10 min** | 最坏 ~162s（推导） | ~3.7× | 推导：50k 条纯 CPU ~0.5s + yield 让出最坏 +10s + DB 查询最坏 5批×30s=150s + 文件 IO ~2s = **162.5s**。10 min (600s) / 162.5s ≈ **3.7×** 裕量。覆盖 IO 抖动 + 调度延迟。（v1 误算为 35s/17×，v2 修订误算为 153s/3.9×——两次都加错：0.5+10+150+2=162.5。） |
 | DB 批大小 | **10,000 对** | 65,535（PG 绑定参数 UINT16 上限，[PG 官方 limits](https://www.postgresql.org/docs/current/limits.html)） | 6.5× | 1k-10k 几乎等价（索引高效区）；选 10k 减少 DB 往返次数。注：本设计用 `UNNEST($1::uuid[], $2::bigint[])` 只绑 2 个数组参数，不受 65535 约束，但批大小仍控在 10k 以控内存 + 索引扫描成本。 |
 | DB 连接占用 | **1** | 11（pool 余量 20×0.9-7） | 11× | 1-3；串行 task 物理上只需 1 连接，是严格最优解，占用 pool 5%。 |
 | 产物大小上限 | **50 GB** | 525 GB（磁盘） | 10× | 25-100 GB；产物 ≈ trace × 0.5（approved 率）≈ 0.85 GB/天，50GB 覆盖 ~59 天训练迭代周期。 |
@@ -253,6 +253,16 @@ Rust 版本改为**按 attempt 精确匹配**：每条人魂 trace（带 `attemp
 | checkpoint 粒度 | **trace_id 集合**（幂等去重） | 行级偏移 | — | 第一性分析三选项：(a) 行级偏移——崩溃恢复复杂、易空洞；(b) 下游去重——产物 4× 膨胀；(c) **trace_id 集合（采用）**——trace_id 全局唯一（UUID），checkpoint 记录已处理的 trace_id，下次读整个文件但跳过已处理。幂等、崩溃安全（没写产物就不更新集合）、无空洞。内存：50k 条 × 36B UUID = 1.8MB 可接受。修订前误用文件级 (size,mtime)，在 append-only 当日文件上会跨 run 重复发出同一 SftSample。 |
 
 **所有参数都有物理极限推导 + 实测约束 + 明确权衡空间标注。没有任何参数是拍脑袋取值。**
+
+### 5.2.1 checkpoint 退役策略（防无限膨胀）
+
+trace_id 集合会随历史累积膨胀（Architecture Auditor A-05：跨 30 天可达 216MB）。退役依据：trace 文件按日期分区（`date=YYYY-MM-DD.jsonl`），老日期文件不再增长，其 trace_id 永远不会被再次遇到，是死重量。
+
+**退役机制**：checkpoint 按**日期分桶**记录，key 为 `date=YYYY-MM-DD`，value 为该日期所有 trace_id 的集合。每次 run 结束后，扫描 checkpoint 中**超过 N 天**（默认 N=7，对齐 trace 文件保留周期）的日期桶，整桶删除。
+
+- 单桶上限：50k 条 × 36B = 1.8MB（单次 run）
+- 保留 N=7 天：7 桶 × 1.8MB = 12.6MB（有界，不再无限膨胀）
+- 安全性：被删桶的 trace_id 对应的 trace 文件也已老化（同一周期），即便重扫也不会遇到（文件已被 agent 端 LRU 或未来 server 端清理移除）。若 trace 文件仍在但 checkpoint 桶被删，最坏情况是该日期文件被重新处理——产物写到新 run 文件，下游按 trace_id 去重，幂等无空洞。
 
 ### 5.3 资源用量硬上限（超限即停止本次 run）
 
@@ -262,7 +272,7 @@ Rust 版本改为**按 attempt 精确匹配**：每条人魂 trace（带 `attemp
 | 单次 run trace 总条数 | ≤ 50,000 | 停止本次 run，下次增量继续 |
 | 单次 run DB 查询次数 | ≤ 5 | 用 `DISTINCT ON + IN` 批量化（与 Python `:84-92` 同形式） |
 | 单次 run 时长 | ≤ 10 分钟 | `tokio::time::timeout` 强制中止 |
-| 单次 DB 查询时长 | ≤ 30s | **`SET LOCAL statement_timeout` 在只读事务内**（绝不用 SET SESSION，防 GUC 泄漏到热路径连接）。sqlx 骨架见 §5.3.1。 |
+| 单次 DB 查询时长 | ≤ 30s | **`SET LOCAL statement_timeout` 在短事务内**（绝不用 SET SESSION，防 GUC 泄漏到热路径连接）。sqlx 骨架见 §5.3.1。 |
 | DB 连接占用 | ≤ 1 | 同时只拿 1 个连接，用完即释放 |
 | 产物目录总大小 | ≤ 50 GB | 停止新 run，发 warning，等手动清理 |
 | 并发 run | ≤ 1 | `AtomicBool` 互斥，上次还在跑则跳过本次触发 |
@@ -271,7 +281,7 @@ Rust 版本改为**按 attempt 精确匹配**：每条人魂 trace（带 `attemp
 
 **问题**（Integration Auditor IA-02）：`crates/server/src/db/common.rs:98-108` 的 PgPool `test_before_acquire(true)` 意味着连接在多次 acquire 间复用。若用 `SET SESSION statement_timeout = '30s'`，这个 GUC 会残留在连接上，下一个 acquire 该连接的热路径 SQL（intent INSERT、tick_logs INSERT）一旦超过 30s 就被 PostgreSQL 主动 abort。这是热路径污染。
 
-**解决**：用只读事务 + `SET LOCAL`。`SET LOCAL` 的 GUC 生命周期仅限当前事务，`COMMIT`/`ROLLBACK` 后自动恢复。sqlx 骨架：
+**解决**：用短事务 + `SET LOCAL`。`SET LOCAL` 的 GUC 生命周期仅限当前事务，`COMMIT`/`ROLLBACK` 后自动恢复（PG 服务端行为，与 `test_before_acquire` 无关）。sqlx 骨架：
 
 ```rust
 // runner.rs —— 单次 DB 查询的包裹模式
@@ -279,11 +289,11 @@ async fn fetch_soul_cycle_metadata(
     pool: &PgPool,
     keys: &[(Uuid, i64)],  // (agent_id, tick_id) 对列表
 ) -> Result<HashMap<(Uuid, i64), SoulCycleMetadata>, ExportError> {
-    // 关键：开只读事务，SET LOCAL 在事务内，commit 后 GUC 自动清除
+    // 关键：开短事务（纯 SELECT，不写表），SET LOCAL 在事务内，commit 后 GUC 自动清除。
+    // 注意：不用 SET LOCAL default_transaction_read_only —— 该 GUC 只影响"未来"事务的默认值，
+    // 对已 BEGIN 的当前事务语义为空（Integration Auditor IA-V02-N1）。本查询只 SELECT，无需强制只读。
     let mut tx = pool.begin().await?;
     sqlx::query("SET LOCAL statement_timeout = '30s'")
-        .execute(&mut *tx).await?;
-    sqlx::query("SET LOCAL default_transaction_read_only = 'on'")
         .execute(&mut *tx).await?;
 
     // 与 build_sft_data.py:84-92 同形式
