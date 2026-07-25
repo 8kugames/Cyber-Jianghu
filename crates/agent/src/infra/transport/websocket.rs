@@ -75,6 +75,38 @@ async fn recv_with_timeout<T>(
     }
 }
 
+/// 处理 worldstate_tx.send 失败——receiver drop 时清理 sender，抑制噪音日志
+///
+/// 当 SSE consumer（SSE dashboard / panel）断开时，watch::Sender 的 receiver 计数归零，
+/// 后续 send 返回 SendError。如果不清理 sender，每次 send 都 warn 一条，导致 24h 累计
+/// 1300+ 条噪音日志（联调报告 §9.7 P1-2 观察）。
+///
+/// 修法：失败时用 watch::Sender::is_closed() 检测 receiver 是否 drop（true），是则
+/// debug 一条 + 清掉 `worldstate_field`；非典型失败（receiver 仍存在但 send 失败）
+/// 才 warn 一条（罕见）。
+fn handle_worldstate_send_failure<T>(
+    tx: &tokio::sync::watch::Sender<T>,
+    worldstate_field: &mut Option<tokio::sync::watch::Sender<T>>,
+    context: &str,
+    err: tokio::sync::watch::error::SendError<T>,
+) {
+    if tx.is_closed() {
+        tracing::debug!(
+            "worldstate_tx.send 失败 [{}]：receiver 已 drop，清理 sender",
+            context
+        );
+        *worldstate_field = None;
+        // 抑制未使用变量警告
+        let _ = err;
+    } else {
+        tracing::warn!(
+            "worldstate_tx.send 失败 [{}]（receiver 仍在但 send 失败）：{:?}",
+            context,
+            err
+        );
+    }
+}
+
 /// 注册数据（后台任务收到 Registered 消息后存储）
 struct RegistrationData {
     agent_id: Uuid,
@@ -105,6 +137,7 @@ type NarrativeConfigCallback =
     Arc<dyn Fn(cyber_jianghu_protocol::NarrativeConfig, Option<String>) + Send + Sync>;
 
 /// 连接状态
+#[derive(Default)]
 struct ConnectionState {
     connected: bool,
     /// Agent ID（注册后设置，即角色ID）
@@ -776,7 +809,13 @@ async fn websocket_background_task(
                     guard.worldstate_tx.clone()
                 }
                     && let Err(e) = tx.send(None) {
-                        tracing::warn!("worldstate_tx.send(None) 失败（receiver 可能已 drop）：{e:?}");
+                        let mut guard = state.write().await;
+                        handle_worldstate_send_failure(
+                            tx,
+                            &mut guard.worldstate_tx,
+                            "read-timeout",
+                            e,
+                        );
                     }
                 break;
             }
@@ -828,7 +867,13 @@ async fn websocket_background_task(
                                 debug!("Background: WorldState tick={}", data.tick_id);
                                 if let Some(ref tx) = ws_tx
                                     && let Err(e) = tx.send(Some(data)) {
-                                        tracing::warn!("worldstate_tx.send(Some) 失败（receiver 可能已 drop）：{e:?}");
+                                        let mut guard = state.write().await;
+                                        handle_worldstate_send_failure(
+                                            tx,
+                                            &mut guard.worldstate_tx,
+                                            "world-state-msg",
+                                            e,
+                                        );
                                     }
                             }
                             Ok(msg @ ServerMessage::ConfigUpdate { .. }) => {
@@ -1447,6 +1492,33 @@ mod tests {
             result.unwrap(),
             Some(42),
             "P0-AUDIT：收到消息必须返回 Ok(Some(42))"
+        );
+    }
+
+    /// WI-001：receiver drop 后 send 失败时，handle_worldstate_send_failure
+    /// 必须清掉 worldstate_field（置 None）而不是每次都 warn 噪音
+    #[tokio::test]
+    async fn test_handle_worldstate_send_failure_clears_on_receiver_drop() {
+        let (tx, rx) = tokio::sync::watch::channel::<Option<u32>>(None);
+        let mut worldstate_field: Option<tokio::sync::watch::Sender<Option<u32>>> = Some(tx.clone());
+
+        // 模拟 receiver drop（rx drop）
+        drop(rx);
+        assert!(
+            tx.is_closed(),
+            "WI-001 前置：receiver drop 后 sender.is_closed() 必须为 true"
+        );
+
+        // send 必须失败（receiver 已 drop）
+        let send_err = tx
+            .send(Some(42))
+            .expect_err("receiver drop 后 send 必须失败");
+        // 调用 helper：应清 field
+        super::handle_worldstate_send_failure(&tx, &mut worldstate_field, "test-ctx", send_err);
+
+        assert!(
+            worldstate_field.is_none(),
+            "WI-001：receiver drop 后必须清掉 worldstate_field"
         );
     }
 }
