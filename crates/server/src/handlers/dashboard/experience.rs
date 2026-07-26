@@ -33,6 +33,12 @@ pub struct ExperienceEntry {
     /// 三魂循环元数据
     #[serde(skip_serializing_if = "Option::is_none")]
     pub soul_cycle_metadata: Option<serde_json::Value>,
+    /// 模型 ID 权威归一值（per-attempt first cycle model_id → agents.model_id 兜底），供前端直接渲染
+    /// 见 WI-006：原方案是 history.js 从 soul_cycle_metadata.cycles 数组扫首个非空，脆弱
+    /// 且 soul_cycle_metadata 为 null 时降级为 "-"。此处由 server SQL COALESCE 归一，
+    /// 前端不再做 JSONB 字符串提取。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
     /// 游戏日编号（从 soul_cycle_metadata.world_time 解析，无元数据时为 0）
     pub game_day: i64,
     /// 中文时间（由 `WorldTime::to_chinese()` 生成，无法解析时为 "-"），供前端直接渲染
@@ -136,12 +142,16 @@ pub async fn get_agent_experiences(
     }
 
     // 构建 IN 子句参数（sqlx 不支持变长 IN，用 = ANY 替代）
+    // WI-006: model_id 权威归一 — per-attempt first cycle model_id (JSONB chain) → agents.model_id 兜底。
+    // 历史数据 agents.model_id 为 NULL 时降级为 NULL (前端渲染 "-")，属可接受的早期数据局限。
     let rows = sqlx::query(
-        "SELECT tick_id, action_type, action_type_display, action_data, result, result_message,
-                thought_log, reflector_thought, narrative, soul_cycle_metadata, pipe_seq, created_at
-         FROM agent_action_logs
-         WHERE agent_id = $1 AND tick_id = ANY($2)
-         ORDER BY tick_id DESC, pipe_seq ASC",
+        "SELECT a.tick_id, a.action_type, a.action_type_display, a.action_data, a.result, a.result_message,
+                a.thought_log, a.reflector_thought, a.narrative, a.soul_cycle_metadata, a.pipe_seq, a.created_at,
+                COALESCE(a.soul_cycle_metadata->'cycles'->0->>'model_id', ag.model_id) AS model_id
+         FROM agent_action_logs a
+         JOIN agents ag ON a.agent_id = ag.agent_id
+         WHERE a.agent_id = $1 AND a.tick_id = ANY($2)
+         ORDER BY a.tick_id DESC, a.pipe_seq ASC",
     )
     .bind(agent_id)
     .bind(&tick_ids)
@@ -214,6 +224,7 @@ pub async fn get_agent_experiences(
                 reflector_thought: primary.get("reflector_thought"),
                 narrative: primary.get("narrative"),
                 soul_cycle_metadata: enriched_metadata,
+                model_id: primary.get("model_id"),
                 game_day: crate::time_utils::world_time_json_to_game_day(
                     world_time_json.as_deref(),
                 ),
@@ -280,6 +291,9 @@ pub struct StreamEntry {
     pub reflector_thought: Option<String>,
     pub narrative: Option<String>,
     pub soul_cycle_metadata: Option<serde_json::Value>,
+    /// 模型 ID 权威归一值（同 `ExperienceEntry.model_id`）。见 WI-006。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
     /// 游戏日编号（0 表示无元数据）
     pub game_day: i64,
     /// 中文时间（由 `WorldTime::to_chinese()` 生成，无法解析时为 "-"），供前端直接渲染
@@ -353,12 +367,14 @@ pub async fn get_experiences(
     .unwrap_or(0);
 
     // 查询条目：使用 LATERAL JOIN 获取动作发生时的位置
+    // WI-006: model_id 权威归一并入主查询,见 get_agent_experiences 同名注释。
     let rows = sqlx::query(
         r#"
         SELECT a.tick_id, a.agent_id, ag.device_id, ag.name as agent_name, loc.node_id as location,
                a.action_type, a.action_type_display, a.action_data,
                a.result, a.result_message, a.thought_log, a.reflector_thought,
-               a.narrative, a.soul_cycle_metadata, a.created_at
+               a.narrative, a.soul_cycle_metadata, a.created_at,
+               COALESCE(a.soul_cycle_metadata->'cycles'->0->>'model_id', ag.model_id) AS model_id
         FROM agent_action_logs a
         JOIN agents ag ON a.agent_id = ag.agent_id
         LEFT JOIN LATERAL (
@@ -419,6 +435,7 @@ pub async fn get_experiences(
                 reflector_thought: row.get("reflector_thought"),
                 narrative: row.get("narrative"),
                 soul_cycle_metadata: metadata,
+                model_id: row.get("model_id"),
                 game_day: crate::time_utils::world_time_json_to_game_day(
                     world_time_json.as_deref(),
                 ),
