@@ -436,10 +436,9 @@ function renderExpCards() {
             const renhunHtml = renderRenhunCell(cycles, e, executionResults);
             const dihunHtml = renderDihunCell(cycles);
             const tianhunHtml = renderTianhunCell(cycles, e);
-            // model_id：遍历 cycles 取首个非空（避免 subsequent 占位 cycles[0].model_id=null 误降级为 "-")
-            // subsequent-intent 占位（reporting.rs:175 / handler.rs:1415）显式置 model_id=None，
-            // 但 stream endpoint 每行/pipe_seq 都返回自己的 metadata，故以首个真实 cycle 为准。
-            const modelId = (cycles.find((c) => c && c.model_id) || {}).model_id || "-";
+            // model_id 权威归一值 (WI-006): server SQL 已 COALESCE(soul_cycle_metadata->'cycles'->0->>'model_id', agents.model_id)
+            // 直接读 e.model_id, 不再做 JSONB 字符串扫描。回退仅在前端层: 旧 agent 数据无 agents.model_id 时显示 "-"。
+            const modelId = e.model_id || "-";
 
             // 动作摘要行（首条 pipeline action 或主 intent）
             let actionSummary = "-";
