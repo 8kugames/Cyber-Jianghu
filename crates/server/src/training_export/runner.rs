@@ -205,15 +205,6 @@ pub async fn run_once(
     Ok(RunResult { metadata, samples })
 }
 
-/// 所有失败出口统一通过 runner 模块写 meta，scheduler 不直接写 artifact。
-pub async fn write_failed_metadata(
-    config: &TrainingExportConfig,
-    request: &ExportRunRequest,
-    error: impl Into<String>,
-) -> anyhow::Result<RunMetadata> {
-    write_failed_metadata_at(&crate::paths::get_data_dir(), config, request, error).await
-}
-
 /// 同上，但支持测试传入显式 data_root 避免与全局 env 竞争。
 pub async fn write_failed_metadata_at(
     data_root: &Path,

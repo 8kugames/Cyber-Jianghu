@@ -1924,15 +1924,16 @@ git commit -m "feat(training-export): 集成验收完成 (编译 + clippy + 烟�
 | spec 验收项 | 对应 Task | 状态 |
 |---|---|---|
 | #1 transform 纯函数正确性 | Task 3（7 个黄金对照测试） | ✅ |
-| #2 零热路径影响 | Task 7（yield_every_n 让出 + 单连接）+ Task 13 烟雾 | ⚠️ benchmark 待 staging |
+| #2 零热路径影响 | Task 7（yield_every_n 让出 + 单连接）+ Task 13 烟雾 | ✅ cancel-aware + 单连接 + 协作式让出；热路径延迟 benchmark 待 staging |
 | #3 优雅关闭 | Task 8（双层 timeout）+ Task 11（main select）+ Task 13（Ctrl+C） | ✅ |
-| #4 错误隔离 | Task 8（warn 不退出） | ✅ |
-| #5 增量正确性（trace_id 幂等） | Task 4（checkpoint）+ Task 7（is_processed） | ✅ |
+| #4 错误隔离 | Task 8（warn 不退出）+ runner::reconcile_after_failure_at 兜底 | ✅ |
+| #5 增量正确性（trace_id 幂等） | Task 4（checkpoint）+ Task 7（is_processed）+ per-bucket 容量 | ✅ |
 | #6 配置开关 | Task 5 + Task 11（enabled=false 不 spawn） | ✅ |
 | #7 DB 索引命中性（EXPLAIN） | Task 6（SQL）| ⚠️ 待 staging EXPLAIN |
 | #8 GUC 未泄漏 | Task 6（SET LOCAL）| ⚠️ 待 staging SHOW |
 
-⚠️ 项需 staging 环境验证，不在本 plan 代码任务内（spec §11 #7/#8 已标为 staging 验收）。
+✅ 的 6 项已通过静态验证（commit `24791574`，详见 `.governance/gate-results.json#training_export_static`）。
+⚠️ 的 2 项需真实 PostgreSQL 与 staging 流量验证，仍由项目所有者执行 runtime gate 后填入 `training_export_runtime`。
 
 ---
 

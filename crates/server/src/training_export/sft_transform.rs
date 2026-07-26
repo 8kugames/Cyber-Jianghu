@@ -26,7 +26,10 @@ pub struct SftSampleMetadata {
     pub attempt: i32,
     pub provider: String,
     pub model: String,
-    pub tianhun_result: String,
+    /// None = 未筛选 (对应 Python --no-db-filter 模式的 null);
+    /// Some("approved") = 天魂审查通过; Some("rejected") = 审查驳回 (当前不会导出).
+    /// 对齐 ADV-01: 用 Option<String> 与 Python 基线一致, 不用 "no_filter" sentinel.
+    pub tianhun_result: Option<String>,
     pub trace_id: String,
 }
 
@@ -74,9 +77,7 @@ pub fn transform_entry(input: TransformInput<'_>) -> Option<SftSample> {
             attempt: entry.attempt,
             provider: entry.provider.clone(),
             model: entry.model.clone(),
-            tianhun_result: input
-                .tianhun_result
-                .unwrap_or_else(|| "no_filter".to_string()),
+            tianhun_result: input.tianhun_result,
             trace_id: entry.trace_id.clone(),
         },
     })
