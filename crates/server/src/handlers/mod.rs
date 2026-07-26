@@ -13,5 +13,8 @@ pub mod dashboard;
 pub mod device;
 pub mod role;
 pub mod system;
+pub mod training_export_handler {
+    pub use crate::training_export::handlers::*;
+}
 pub mod validation;
 pub mod vendor;

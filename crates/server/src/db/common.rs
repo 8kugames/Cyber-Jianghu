@@ -6,8 +6,8 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+use sqlx::postgres::PgPoolOptions;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tracing::{error, info, warn};
@@ -204,7 +204,9 @@ pub fn start_db_health_probe(
             let error_message = probe_result.err().map(|e| e.to_string());
             let now = Utc::now();
 
-            let mut health = health_state.write().expect("db runtime health lock poisoned");
+            let mut health = health_state
+                .write()
+                .expect("db runtime health lock poisoned");
             let previous_ok = health.is_available;
             record_db_probe_result(&mut health, current_ok, now, error_message.clone());
 
