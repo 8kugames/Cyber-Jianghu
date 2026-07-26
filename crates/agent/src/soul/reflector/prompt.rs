@@ -24,11 +24,13 @@ const REFLECTOR_SYSTEM_PROMPT: &str = r#"你是武侠世界的守护者（观察
 - 动作参数中的 item_id、target_location 等 ID 字段是系统生成数据，玩家不直接使用
 - 语义去重：如果玩家反复用不同措辞表达相同的意图内容，请标记为 semantic_repeat 拒绝
 - 元游戏术语审查：玩家说话内容或思考日志中出现 HP、SAN、MP、血量、数值、属性、属性栏、状态栏、玩家、NPC、登录、存档、复活、掉落、经验值等元游戏/技术术语时，必须以 out_of_character 拒绝。武侠角色是一个活生生的江湖人，应说"身受重伤，剧痛难忍"而非"HP 只剩 4 点"，说"神思恍惚"而非"SAN 值低了"。世界状态中的属性名（系统生成）不算违规，仅玩家直接说出的元游戏术语算违规
+- **绝对禁止项**：上述 HP、SAN、MP、血量、数值、属性、属性栏、状态栏、玩家、NPC、登录、存档、复活、掉落、经验值、账号、充值、服务器、上线、掉线、版本、补丁 等元游戏/技术词汇属于**绝对禁止项**，无论角色处于何种状态（即使濒死、即使有生存压力）都**一律拒绝**，**不受生存凌驾豁免,也不受任何人设边界豁免**——濒死角色应说"重伤快死了"而不是"HP 只剩 4 点",叙事物理性优先于生存压力
 
-## 生存凌驾原则
-- 生存本能是人类最底层的驱动力，优先级高于任何人设限制
-- 当角色处于生存危机（饥饿/口渴/重伤）时，为生存而做出的突破性格的行为（夺取、抢夺、威胁、乞讨）应视为合理的人性表现，不构成 out_of_character
-- 具体标准：饱食度低于40或饱饮度低于40时，out_of_character 判定应极其谨慎——绝境中的人性突破不属于人设违规
+## 行为豁免原则（仅适用于行为类意图的人设边界，不豁免硬性 OOC 词）
+- 生存本能是人类最底层的驱动力，优先级高于人设限制
+- 豁免仅作用于**突破性行为意图的人设边界**：当角色处于生存危机（饥饿/口渴/重伤）时，为生存而做出的突破性格的行为（夺取、抢夺、威胁、乞讨、偷袭）应视为合理的人性表现，不构成 out_of_character
+- 具体标准：饱食度低于40或饱饮度低于40时，对上述**行为类**意图的判定应极其谨慎——绝境中的人性突破不属于人设违规
+- **豁免范围封顶**：本豁免不适用于上文的绝对禁止项——HP/数值/NPC/玩家/账号等硬性 OOC 词没有"濒死时可以说"的资格，行为豁免与绝对禁止是两条互不重叠的判断，不得混淆
 
 ## 输出格式
 你必须严格按以下 JSON 格式输出：
@@ -171,9 +173,61 @@ mod tests {
         // 触发场景：柳青絮"HP 只剩 4 点"未被拦截 → system prompt 缺元游戏术语条款 → 修复后必须存在。
         let prompt = ReflectorPrompt::new();
         let sys = prompt.system_prompt();
-        assert!(sys.contains("元游戏术语"), "system prompt 应含元游戏术语审查段");
-        assert!(sys.contains("HP"), "system prompt 应明确列出 HP 为元游戏术语");
-        assert!(sys.contains("out_of_character"), "元游戏术语违规应映射到 out_of_character");
+        assert!(
+            sys.contains("元游戏术语"),
+            "system prompt 应含元游戏术语审查段"
+        );
+        assert!(
+            sys.contains("HP"),
+            "system prompt 应明确列出 HP 为元游戏术语"
+        );
+        assert!(
+            sys.contains("out_of_character"),
+            "元游戏术语违规应映射到 out_of_character"
+        );
+    }
+
+    #[test]
+    fn test_reflector_system_prompt_absolute_ooc_prohibition() {
+        // 回归 WI-005: 硬性 OOC 词属于绝对禁止项，不得被生存凌驾豁免覆盖。
+        // 触发场景：饱食度<40 的角色喊"HP 只剩 4 点"曾被天魂误判通过——根因是旧版
+        // 生存凌驾条款无差别适用于"out_of_character 判定"，使绝对禁止项失守。
+        let prompt = ReflectorPrompt::new();
+        let sys = prompt.system_prompt();
+
+        // 绝对禁止项条款必须存在
+        assert!(
+            sys.contains("绝对禁止项"),
+            "应声明硬性 OOC 词属于绝对禁止项"
+        );
+
+        // 必须显式列出不受豁免
+        assert!(
+            sys.contains("不受生存凌驾豁免"),
+            "应声明硬性 OOC 词不受生存凌驾豁免"
+        );
+        assert!(
+            sys.contains("一律拒绝"),
+            "绝对禁止项必须一律拒绝（不得以任何理由放行）"
+        );
+
+        // 豁免条款必须明确封顶边界
+        let exemption_section = sys
+            .split("## 行为豁免原则")
+            .nth(1)
+            .expect("system prompt 应包含行为豁免原则段");
+        assert!(
+            exemption_section.contains("不豁免硬性 OOC 词"),
+            "豁免条款标题必须显式排除硬性 OOC 词"
+        );
+        assert!(
+            exemption_section.contains("仅适用于行为类意图"),
+            "豁免范围必须收窄为行为类意图"
+        );
+        assert!(
+            exemption_section.contains("不得混淆"),
+            "豁免条款必须强调与绝对禁止项互不重叠"
+        );
     }
 
     #[test]
