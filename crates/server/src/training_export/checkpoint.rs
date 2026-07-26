@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
 
 /// 单个日期桶: 该日期所有已处理 trace_id
@@ -143,9 +144,6 @@ pub async fn sweep_tmp_files(dir: &Path) -> anyhow::Result<usize> {
     }
     Ok(count)
 }
-
-// 供 anyhow context 用
-use anyhow::Context as _;
 
 /// checkpoint 文件路径 (相对 data_dir)
 pub fn checkpoint_path(data_dir: &Path) -> PathBuf {

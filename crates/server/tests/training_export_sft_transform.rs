@@ -113,6 +113,6 @@ fn test_metadata_fields_populated() {
     assert_eq!(meta.tick_id, 42);
     assert_eq!(meta.soul_stage, "Renhun");
     assert_eq!(meta.attempt, 0);
-    assert_eq!(meta.tianhun_result, "approved");
+    assert_eq!(meta.tianhun_result, Some("approved".to_string()));
     assert_eq!(meta.trace_id, "test-trace-001");
 }
