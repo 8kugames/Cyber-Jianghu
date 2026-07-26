@@ -34,13 +34,14 @@ pub async fn fetch_soul_cycle_metadata(
     let tick_ids: Vec<i64> = keys.iter().map(|(_, tick_id)| *tick_id).collect();
 
     let mut tx = pool.begin().await.context("开始训练导出查询事务失败")?;
-    sqlx::query(&format!(
-        "SET LOCAL statement_timeout = '{}s'",
-        statement_timeout_secs
-    ))
-    .execute(&mut *tx)
-    .await
-    .context("SET LOCAL statement_timeout 失败")?;
+    // 参数化绑定, 与下方 SELECT 的 $1/$2 风格一致 (避免 SQL 格式化字符串).
+    // statement_timeout_secs 是 u64, 且 config validate 强校验 > 0, 不可注入.
+    let timeout_value = format!("{}s", statement_timeout_secs);
+    sqlx::query("SET LOCAL statement_timeout = $1")
+        .bind(&timeout_value)
+        .execute(&mut *tx)
+        .await
+        .context("SET LOCAL statement_timeout 失败")?;
 
     let rows = sqlx::query_as::<_, SoulCycleRow>(
         r#"
@@ -652,8 +653,14 @@ fn lookup_attempt_match(
 
 #[cfg(test)]
 mod tests {
-    use super::trace_date_from_path;
+    use super::{lookup_attempt_match, trace_date_from_path};
+    use std::collections::HashMap;
     use std::path::Path;
+
+    use cyber_jianghu_protocol::{
+        RenhunReport, SoulCycleAttempt, SoulCycleMetadata, TianhunReport, TraceEntry,
+    };
+    use uuid::Uuid;
 
     #[test]
     fn trace_date_is_extracted_from_partition_file() {
@@ -670,5 +677,164 @@ mod tests {
             trace_date_from_path(Path::new("date=2026-99-99.jsonl")),
             None
         );
+    }
+
+    // ---- lookup_attempt_match fixture 测试 (spec §11 验收 #1) ----
+    // spec §4.4: attempt 精确匹配是有意偏离 Python 的核心逻辑, 必须独立 fixture 覆盖.
+
+    fn make_trace(agent: Uuid, tick: i64, attempt: i32) -> TraceEntry {
+        TraceEntry {
+            trace_id: format!("test-{}-{}-{}", agent, tick, attempt),
+            agent_id: agent,
+            character_name: "TestAgent".to_string(),
+            tick_id: tick,
+            soul_stage: "Renhun".to_string(),
+            attempt,
+            provider: "test".to_string(),
+            model: "test-model".to_string(),
+            persona_name: "测试".to_string(),
+            persona_description: "描述".to_string(),
+            user_prompt: "提示".to_string(),
+            response: "回复".to_string(),
+            prompt_tokens: None,
+            completion_tokens: None,
+            ok: true,
+            wall_clock: None,
+        }
+    }
+
+    fn cycle(attempt: i32, result: Option<&str>) -> SoulCycleAttempt {
+        SoulCycleAttempt {
+            attempt,
+            renhun: RenhunReport {
+                narrative: None,
+                thought_log: None,
+                earth_tool_calls: None,
+            },
+            tianhun: TianhunReport {
+                result: result.map(String::from),
+                layers: vec![],
+                reason: None,
+            },
+            final_intent: None,
+            model_id: None,
+        }
+    }
+
+    fn metadata(cycles: Vec<SoulCycleAttempt>) -> SoulCycleMetadata {
+        SoulCycleMetadata {
+            world_time: None,
+            cycles,
+            immediate_intents: vec![],
+        }
+    }
+
+    #[test]
+    fn single_attempt_approved_returns_approved() {
+        // 场景: trace 是 attempt=0, cycles 只有 attempt=0 且 approved
+        let agent = Uuid::nil();
+        let trace = make_trace(agent, 100, 0);
+        let mut map = HashMap::new();
+        map.insert((agent, 100), metadata(vec![cycle(0, Some("approved"))]));
+
+        assert_eq!(
+            lookup_attempt_match(&trace, &map),
+            Some("approved".to_string())
+        );
+    }
+
+    #[test]
+    fn single_attempt_rejected_returns_rejected() {
+        // 场景: trace 是 attempt=0, cycles 只有 attempt=0 且 rejected
+        // runner 层会据此跳过 (不导出), 但 lookup 本身返回原始结果
+        let agent = Uuid::nil();
+        let trace = make_trace(agent, 100, 0);
+        let mut map = HashMap::new();
+        map.insert((agent, 100), metadata(vec![cycle(0, Some("rejected"))]));
+
+        assert_eq!(
+            lookup_attempt_match(&trace, &map),
+            Some("rejected".to_string())
+        );
+    }
+
+    #[test]
+    fn multi_attempt_no_cross_contamination() {
+        // 场景: attempt=0 rejected, attempt=1 approved (Python 的 cycles[-1] 会污染)
+        // trace 是 attempt=0 → 应返回 rejected (不串扰 attempt=1 的 approved)
+        // trace 是 attempt=1 → 应返回 approved
+        let agent = Uuid::nil();
+        let trace_0 = make_trace(agent, 100, 0);
+        let trace_1 = make_trace(agent, 100, 1);
+        let mut map = HashMap::new();
+        map.insert(
+            (agent, 100),
+            metadata(vec![
+                cycle(0, Some("rejected")),
+                cycle(1, Some("approved")),
+            ]),
+        );
+
+        // 关键断言: 不取 cycles[-1] (Python 的 bug), 按 attempt 精确匹配
+        assert_eq!(
+            lookup_attempt_match(&trace_0, &map),
+            Some("rejected".to_string()),
+            "attempt=0 应返回自身的 rejected, 不串扰 attempt=1 的 approved"
+        );
+        assert_eq!(
+            lookup_attempt_match(&trace_1, &map),
+            Some("approved".to_string()),
+            "attempt=1 应返回自身的 approved"
+        );
+    }
+
+    #[test]
+    fn attempt_missing_in_cycles_returns_none() {
+        // 场景: trace 是 attempt=2, 但 cycles 只有 attempt=0 和 attempt=1
+        // 数据不一致 → 返回 None (runner 层会跳过)
+        let agent = Uuid::nil();
+        let trace = make_trace(agent, 100, 2);
+        let mut map = HashMap::new();
+        map.insert(
+            (agent, 100),
+            metadata(vec![
+                cycle(0, Some("approved")),
+                cycle(1, Some("approved")),
+            ]),
+        );
+
+        assert_eq!(lookup_attempt_match(&trace, &map), None);
+    }
+
+    #[test]
+    fn no_audit_record_returns_none() {
+        // 场景: trace 的 (agent, tick) 不在 audit_map (tick 还没写完)
+        let agent = Uuid::nil();
+        let trace = make_trace(agent, 999, 0);
+        let map: HashMap<(Uuid, i64), SoulCycleMetadata> = HashMap::new();
+
+        assert_eq!(lookup_attempt_match(&trace, &map), None);
+    }
+
+    #[test]
+    fn empty_cycles_returns_none() {
+        // 场景: metadata 存在但 cycles 为空 (数据不一致)
+        let agent = Uuid::nil();
+        let trace = make_trace(agent, 100, 0);
+        let mut map = HashMap::new();
+        map.insert((agent, 100), metadata(vec![]));
+
+        assert_eq!(lookup_attempt_match(&trace, &map), None);
+    }
+
+    #[test]
+    fn tianhun_result_none_returns_none() {
+        // 场景: cycle 存在且 attempt 匹配, 但 tianhun.result 是 None (审查未完成)
+        let agent = Uuid::nil();
+        let trace = make_trace(agent, 100, 0);
+        let mut map = HashMap::new();
+        map.insert((agent, 100), metadata(vec![cycle(0, None)]));
+
+        assert_eq!(lookup_attempt_match(&trace, &map), None);
     }
 }
