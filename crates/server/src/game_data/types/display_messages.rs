@@ -30,6 +30,32 @@ pub struct DisplayMessagesConfig {
     pub notifications: NotificationsConfig,
 }
 
+impl DisplayMessagesConfig {
+    /// 仅供 integration test 使用的零值占位。
+    #[allow(dead_code)]
+    pub fn empty() -> Self {
+        Self {
+            version: "test-stub".to_string(),
+            description: String::new(),
+            entity_states: EntityStatesConfig {
+                alive: "alive".to_string(),
+                dead: "dead".to_string(),
+            },
+            weather: WeatherConfig {
+                sunny: "sunny".to_string(),
+                cloudy: "cloudy".to_string(),
+                rainy: "rainy".to_string(),
+                stormy: "stormy".to_string(),
+            },
+            weather_events: std::collections::HashMap::new(),
+            notifications: NotificationsConfig {
+                death: "death".to_string(),
+                rebirth: "rebirth".to_string(),
+            },
+        }
+    }
+}
+
 /// 实体状态描述配置
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EntityStatesConfig {

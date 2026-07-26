@@ -39,9 +39,12 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
+use std::time::Duration;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
+
+const TRAINING_EXPORT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 // ============================================================================
 // Tick引擎启动
@@ -151,7 +154,13 @@ fn write_admin_token_file(
             .write(true)
             .mode(0o600)
             .open(path)
-            .with_context(|| format!("无法创建admin token文件 {}: {}", path.display(), "open failed"))?
+            .with_context(|| {
+                format!(
+                    "无法创建admin token文件 {}: {}",
+                    path.display(),
+                    "open failed"
+                )
+            })?
     };
 
     #[cfg(not(unix))]
@@ -418,13 +427,9 @@ async fn main() -> Result<()> {
     let _ = dotenv::dotenv();
 
     // 2. 初始化日志（P1-F2 修复：EnvFilter::try_from_default_env 消费 RUST_LOG，替代硬编码 Level::INFO）
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     // JSON 切换：CYBER_JIANGHU_LOG_JSON=1 → .json()；默认 .compact() 输出人可读
-    let log_json = std::env::var("CYBER_JIANGHU_LOG_JSON")
-        .ok()
-        .as_deref()
-        == Some("1");
+    let log_json = std::env::var("CYBER_JIANGHU_LOG_JSON").ok().as_deref() == Some("1");
     let fmt_builder = tracing_subscriber::fmt()
         .with_env_filter(env_filter)
         .with_target(false)
@@ -631,7 +636,31 @@ async fn main() -> Result<()> {
         }
     };
 
-    // 9.3 创建应用状态
+    // 9.3 加载并按开关启动训练导出 scheduler。
+    let training_export_config =
+        crate::training_export::config::load_config(&crate::paths::get_config_dir())
+            .context("加载 training_export 配置失败")?;
+    info!(
+        enabled = training_export_config.enabled,
+        interval_secs = training_export_config.scheduler.interval_secs,
+        "training_export 配置加载完成"
+    );
+    let (manual_tx, training_exporter_shutdown) = if training_export_config.enabled {
+        let (manual_tx, shutdown) = crate::training_export::scheduler::start_training_exporter(
+            training_export_config.clone(),
+            db_pool.clone(),
+        );
+        (Some(manual_tx), Some(shutdown))
+    } else {
+        info!("training_export 未启用, 不启动后台 task");
+        (None, None)
+    };
+    let training_export_handle = crate::training_export::handlers::TrainingExportHandle {
+        config: training_export_config,
+        manual_tx,
+    };
+
+    // 9.4 创建应用状态
     let state = Arc::new(AppState::new(
         db_pool.clone(),
         db_runtime_health,
@@ -650,6 +679,7 @@ async fn main() -> Result<()> {
         crate::paths::get_config_dir(),
         accepting_tick_id.clone(),
         governance,
+        training_export_handle,
     ));
 
     // 10. 启动Tick引擎（后台任务）
@@ -841,21 +871,17 @@ async fn main() -> Result<()> {
         )
         .route(
             "/api/dashboard/emergence",
-            get(handlers::dashboard::get_emergence).layer(
-                axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    handlers::auth::require_client_read_token,
-                ),
-            ),
+            get(handlers::dashboard::get_emergence).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_client_read_token,
+            )),
         )
         .route(
             "/api/dashboard/health",
-            get(handlers::dashboard::get_health).layer(
-                axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    handlers::auth::require_client_read_token,
-                ),
-            ),
+            get(handlers::dashboard::get_health).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_client_read_token,
+            )),
         )
         .route(
             "/api/dashboard/agents/offline",
@@ -1192,6 +1218,59 @@ async fn main() -> Result<()> {
                 ),
             ),
         )
+        // Training export — scheduled/manual 共用 scheduler, read/write 权限按 method 隔离。
+        .route(
+            "/api/v1/training/export",
+            post(handlers::training_export_handler::trigger_export).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_write_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/v1/training/exports",
+            get(handlers::training_export_handler::list_exports).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_client_read_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/v1/training/exports/{run_id}",
+            get(handlers::training_export_handler::get_export)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_client_read_token,
+                ))
+                .merge(
+                    delete(handlers::training_export_handler::delete_export).layer(
+                        axum::middleware::from_fn_with_state(
+                            state.clone(),
+                            handlers::auth::require_write_token,
+                        ),
+                    ),
+                ),
+        )
+        .route(
+            "/api/v1/training/exports/{run_id}/download",
+            get(handlers::training_export_handler::download_export).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_client_read_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/v1/training/checkpoint",
+            get(handlers::training_export_handler::get_checkpoint).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_client_read_token,
+                ),
+            ),
+        )
         .with_state(state);
 
     // 12. 启动Web服务器
@@ -1316,6 +1395,21 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Exporter 是非关键冷路径：它不参与主 select，意外退出不得关闭 server。
+    if let Some(shutdown) = training_exporter_shutdown {
+        if let Err(error) = shutdown.shutdown_tx.send(true) {
+            warn!("训练导出关闭信号发送失败（task 可能已退出）: {error:?}");
+        }
+        match tokio::time::timeout(TRAINING_EXPORT_SHUTDOWN_TIMEOUT, shutdown.handle).await {
+            Ok(Ok(())) => info!("训练导出 task 已优雅退出"),
+            Ok(Err(error)) => error!("训练导出 task join 失败: {error}"),
+            Err(_) => warn!(
+                timeout_secs = TRAINING_EXPORT_SHUTDOWN_TIMEOUT.as_secs(),
+                "训练导出 task 未在 timeout 内退出, 继续主流程"
+            ),
+        }
+    }
+
     info!("服务停止");
     Ok(())
 }
@@ -1326,7 +1420,8 @@ mod tests {
 
     #[test]
     fn test_render_admin_token_file_content_is_ascii_without_emoji_header() {
-        let content = render_admin_token_file_content("自动生成", "read-token", "配置", "write-token");
+        let content =
+            render_admin_token_file_content("自动生成", "read-token", "配置", "write-token");
         assert!(!content.contains("🔐"));
         assert!(content.contains("Cyber-Jianghu 管理员访问凭证"));
     }
@@ -1337,8 +1432,8 @@ mod tests {
     #[test]
     fn test_p1_9_axum_serve_uses_graceful_shutdown() {
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let source = std::fs::read_to_string(manifest_dir.join("src/main.rs"))
-            .expect("read main.rs source");
+        let source =
+            std::fs::read_to_string(manifest_dir.join("src/main.rs")).expect("read main.rs source");
         // 仅扫描生产代码段（`mod tests` 之前），避免测试自身字符串假阳性
         let tests_marker = source
             .find("#[cfg(test)]")
@@ -1364,8 +1459,8 @@ mod tests {
     #[test]
     fn test_p1_f2_tracing_uses_env_filter_and_dotenv_first() {
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let source = std::fs::read_to_string(manifest_dir.join("src/main.rs"))
-            .expect("read main.rs source");
+        let source =
+            std::fs::read_to_string(manifest_dir.join("src/main.rs")).expect("read main.rs source");
         let tests_marker = source
             .find("#[cfg(test)]")
             .expect("main.rs should have a #[cfg(test)] block");
@@ -1412,8 +1507,7 @@ mod tests {
             .and_then(|p| p.parent())
             .expect("crates/server should be inside a workspace")
             .join("Cargo.toml");
-        let content = std::fs::read_to_string(&workspace_toml)
-            .expect("read workspace Cargo.toml");
+        let content = std::fs::read_to_string(&workspace_toml).expect("read workspace Cargo.toml");
         // 找 tracing-subscriber = {...} 这行
         let ts_line = content
             .lines()

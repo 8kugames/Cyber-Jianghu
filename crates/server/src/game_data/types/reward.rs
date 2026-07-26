@@ -20,6 +20,30 @@ pub struct RewardConfig {
     pub output: OutputConfig,
 }
 
+impl RewardConfig {
+    /// 仅供 integration test 使用的零值占位。
+    #[allow(dead_code)]
+    pub fn empty() -> Self {
+        Self {
+            version: "test-stub".to_string(),
+            description: String::new(),
+            daily: DailyRewardConfig {
+                survival_score: 0.0,
+                physiological: PhysiologicalConfig {
+                    satiation_weight: 0.0,
+                    hydration_weight: 0.0,
+                },
+                tianhun: TianhunConfig {
+                    approved_score: 0.0,
+                    rejected_score: 0.0,
+                },
+            },
+            lifetime: LifetimeRewardConfig { death_penalty: 0.0 },
+            output: OutputConfig::default(),
+        }
+    }
+}
+
 /// 每日 reward 分量配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DailyRewardConfig {

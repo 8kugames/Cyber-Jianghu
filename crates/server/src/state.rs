@@ -1,6 +1,6 @@
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
-use std::net::IpAddr;
 use std::time::{Duration, Instant};
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
@@ -255,6 +255,9 @@ pub struct AppState {
 
     /// 治理状态（Soul 审议引擎、提案存储等）
     pub governance: Option<GovernanceState>,
+
+    /// 训练导出配置与 manual scheduler queue sender
+    pub training_export: crate::training_export::handlers::TrainingExportHandle,
 }
 
 impl AppState {
@@ -277,6 +280,7 @@ impl AppState {
         config_dir: std::path::PathBuf,
         current_accepting_tick_id: Arc<AtomicI64>,
         governance: Option<GovernanceState>,
+        training_export: crate::training_export::handlers::TrainingExportHandle,
     ) -> Self {
         Self {
             db_pool,
@@ -298,6 +302,7 @@ impl AppState {
             vendor_pending_events: crate::models::VendorPendingEvents::default(),
             prompt_template_cache: Arc::new(tokio::sync::RwLock::new(None)),
             governance,
+            training_export,
         }
     }
 }
@@ -313,13 +318,7 @@ mod tests {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
         let now = Instant::now();
 
-        assert!(check_device_register_rate_limit(
-            &limiter,
-            ip,
-            now,
-            Duration::from_secs(10)
-        )
-        .await);
+        assert!(check_device_register_rate_limit(&limiter, ip, now, Duration::from_secs(10)).await);
     }
 
     #[tokio::test]
@@ -328,19 +327,15 @@ mod tests {
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
         let now = Instant::now();
 
-        assert!(check_device_register_rate_limit(
-            &limiter,
-            ip,
-            now,
-            Duration::from_secs(10)
-        )
-        .await);
-        assert!(!check_device_register_rate_limit(
-            &limiter,
-            ip,
-            now + Duration::from_secs(5),
-            Duration::from_secs(10)
-        )
-        .await);
+        assert!(check_device_register_rate_limit(&limiter, ip, now, Duration::from_secs(10)).await);
+        assert!(
+            !check_device_register_rate_limit(
+                &limiter,
+                ip,
+                now + Duration::from_secs(5),
+                Duration::from_secs(10)
+            )
+            .await
+        );
     }
 }

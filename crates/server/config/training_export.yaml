@@ -8,6 +8,8 @@ data:
     interval_secs: 21600       # 6h (spec §5.2 参数1)
     run_timeout_secs: 600       # 10min (spec §5.2 参数3, 双层 timeout 内层)
     max_concurrent_runs: 1      # 严格 1, 串行
+    manual_enqueue_timeout_secs: 30  # manual queue 等待上限, 超时返回 408
+    manual_queue_capacity: 8    # 仅控制排队深度, 不改变 runner 单并发
 
   limits:
     max_traces_per_run: 50000   # spec §5.2 参数2
