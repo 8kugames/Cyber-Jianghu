@@ -4,6 +4,41 @@
 
 ## [Unreleased]
 
+## [0.1.290] - 2026-07-27
+
+### Major Features
+
+- **专用模型训练数据管线（reward + trace + SFT export）**：围绕"将 Agent 产生的 LLM 调用用于专用模型训练"目标，构建完整的数据采集→回传→导出闭环。哲学锚点：天道无为——reward 纯锚定生存因果，声望/关系/心境等主观认知不进 reward。
+  - 生存 Reward 天道账本（server）：每日结算（生存+生理+天魂审查三分量）+ 一生结算（寿数+统一死亡 penalty）+ 周期聚合 + 仪表盘 API（`GET /api/dashboard/reward/trends`、`/reward/lifetime/{id}`）；强制配置 `reward.yaml`（fail-fast），走 game_data 标准管线零硬编码；数据源改用 `agent_state_cache`（DashMap）消除时序竞态
+  - 训练 Trace 结构化落盘（agent）：人魂/天魂 LLM 调用 JSONL（含 agent_id+tick_id+prompt/response 全文+soul_stage+persona+wall_clock），persona 字段替代 system_prompt 全文（~200B vs ~15KB），日志滚动覆盖（`max_size_mb` 配置，LRU 删旧）
+  - **SFT 导出管线**（`src/training_export/`）：config 加载（复刻 action_evolution 模式 + env 覆盖）+ db 查询（`fetch_soul_cycle_metadata`，DISTINCT ON + UNNEST + SET LOCAL）+ runner（`run_once` 五步数据流）+ scheduler 后台 task（双层 timeout + sweep + shutdown）+ sft_transform 纯函数（对齐 Python `--no-db-filter`）+ checkpoint trace_id 集合与日期分桶 TTL；6 个 HTTP 端点（`/api/v1/training/export|exports|exports/{run_id}|exports/{run_id}/download|checkpoint`，写/读权限按 method 隔离）；cancel-aware 原子写 + 全量 env 覆盖 + per-bucket 容量 + 黄金对照测试基线
+- **关系图谱（C1-C4 数据可达性）**：`agent_relationships` 表（迁移 022）+ Strategy B 全量快照同步（Agent 每游戏日上报，天然幂等）+ 关系/世界快照/地点/对话/死亡 dashboard 端点 + C2 鉴权档（`require_client_read_token`，`CLIENT_READ_TOKEN` 与 admin read 分离）
+- **涌现检测接入 server**：causal_emergence / co_occurrence 检测 + MVP 健康度看板 + Chronicle 叙事打磨；Validator 增强（物品/人员 ID 存在性校验，三端打通）
+- **三魂元数据随 intent 提交**：消除独立 SoulCycleReport 的丢失风险（与 intent 同消息到达），执行结果回填
+
+### Refactors（数据诚实化 / protocol 为唯一真相源）
+
+- 枚举化穷尽匹配，消除 String 闭集与静默跳过：`OocRisk`、`ConfigType`、`EffectType`、`RequirementType`、`Operation`、`ValidationType`、`ItemType`（统一 5 变体，修复 Material/Tool 降级，删除 armor 死代码）、`LocationNodeData.node_type`（修复 region 被吞成 Map）
+- 合并重复类型：`NarrativeThreshold`/`AttributeDriveConfig`（→ protocol）；`LocationNodeData` 改为 `LocationNode` 别名；parent_id 哨兵消除 + wall_clock 时间戳统一为 i64 毫秒
+- `upsert_agent_state` 纳入 tx——消除跨表部分提交窗口
+
+### Bug Fixes
+
+- **agent WS 重连风暴**（`8d130537` 回归）：`handle_worldstate_send_failure` 误在零 receiver 时清空 `worldstate_tx`，而零 receiver 是 select! 间隙/初始 WorldState 推送的正常瞬时态→ `receive_world_state` 误判"Not connected"→ ~3Hz 重连死循环、零 intent。改为仅分级记日志、保留 sender
+- **chronicle_id 生成 SQL**：`format('C-%03d', n)` 用了 PG 不支持的 C printf 说明符（PG 仅 `%s/%I/%L`）→ 每次群像传记落库失败。改用 `'C-' || lpad(n::text, 3, '0')`
+- **tick/scheduler 游戏日边界漂移**：`tick_counter` ordinal 替代 `current_tick_id` modulo 墙钟秒，消除重启后偶发漂移
+- **dashboard 经历日志 model_id**：归一到直读字段，根除 JSONB 解析脆弱性
+- **reflector 硬性 OOC 词**：绝对禁止项不受生存凌驾/人设边界豁免（仅封顶到行为类意图）
+- **run_migrations**：改用 `sqlx::raw_sql` 支持多语句，修复 dev 启动阻塞
+- **emergence fetch_health**：`EXTRACT(EPOCH)` 返回 numeric 导致 sqlx panic
+- **agent-web llm-disabled 持久化**：SSE 认证/协议断层（8 层根因修复）
+- **chronicle get_chronicle**：读 raw_data 改用 Option 防 NULL 崩溃
+
+### Quality
+
+- **cargo fmt 全局归一化**：对齐当前 stable 的 let-chain 格式（CI `@stable` fmt 门），含 ReflectorSoul OOC 禁词表微调（移除"属性"，放宽元游戏过滤）
+- clippy `-D warnings` 累积 lint 清理，dev 上线前质量门
+
 ## [0.1.267] - 2026-07-01
 
 ### Bug Fixes

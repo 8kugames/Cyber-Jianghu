@@ -19,6 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Survival-Driven Emergence**: Hunger, resource scarcity, permanent death — pressure drives complex social structures
 - **Device-Character Separation**: Supports rebirth, one device manages multiple characters
 - **Built-in Admin Web Panel**: Character creation, state inspection, dream injection, and more
+- **Dedicated-Model Training Data Pipeline**: Structured collection of Agent↔LLM interaction traces into a survival-reward ledger + SFT export pipeline, for fine-tuning a world-specialized model. Reward anchors survival causality only (天道无为); subjective cognition (reputation/relationship/mood) never enters reward
 
 See [Readme.md](Readme.md) for full project description and architecture diagrams.
 
@@ -175,6 +176,7 @@ Key server modules:
 - `src/handlers/` - HTTP API endpoints (dashboard SPA via `/admin/*`)
 - `src/state.rs` - Shared AppState, AgentStateCache
 - `src/chronicle/` - Chronicle generation (群像传记): auto-generates every 7 game days
+- `src/training_export/` - SFT training-data export pipeline (config loader + scheduler + runner + sft_transform + checkpoint; reward ledger lives in `src/reward/`)
 
 **Migration Runner**: Server runs migrations on every startup via `run_migrations()` (replicates the Docker entrypoint logic), so the deploy does not depend on a mounted migration volume. Migration files in `crates/server/migrations/*.sql` are applied in filename order.
 
@@ -313,6 +315,8 @@ use super::builder::AgentBuilder;
 | Prompt templates (agent) | `crates/server/config/prompt_templates.yaml` (含 `rule_sections` 按需检索配置) |
 | Souls governance config | `crates/server/config/souls.yaml` (Soul 审议规则、投票阈值、主题路由) |
 | Action evolution config | `crates/server/config/action_evolution.yaml` (动作演化策略、能力清单) |
+| Training export config | `crates/server/config/training_export.yaml` (SFT 导出：调度/分桶/容量，env 覆盖) |
+| Reward config | `crates/server/config/reward.yaml` (生存 reward 天道账本：分量/周期，fail-fast 强制配置) |
 | Database migrations | `crates/server/migrations/*.sql` |
 | Docker stack | `docker-compose.yml`, `docker-compose.prod.yml` |
 
@@ -354,6 +358,7 @@ Timestamps in the relationship protocol are `i64` milliseconds (Unix epoch), not
 - `POST /api/v1/device/register` - Explicit device registration (server generates device_id, returns 201 Created)
 - `POST /api/v1/agent/register` - Register new agent (returns `narrative_config`)
 - `POST /api/v1/agent/retire` - Retire active character (mark as retired)
+- `POST /api/v1/agent/by-device` - Look up agent(s) by device_id (device→character mapping)
 - `POST /api/v1/agent/auto-rebirth` - Auto rebirth (INSERT new agent, old agent dead→retired)
 - `GET /api/v1/agent/{id}/context` - Get agent context
 - `POST /api/v1/agent/biography` - Receive biography from agent (body: `{agent_id, biography}`)
@@ -361,6 +366,14 @@ Timestamps in the relationship protocol are `i64` milliseconds (Unix epoch), not
 - `POST /api/v1/agent/grant-items` - Admin inventory injection (requires write_token)
 - `POST /api/v1/validate-action` - Validate action parameters
 - `POST /api/v1/action-evolution/propose` - Submit action evolution proposal
+
+**Training Data Export** (mixed auth: `write_token` for trigger/delete, `client_read_token` for reads; scheduler runs in background, endpoints are manual-trigger/inspect):
+- `POST /api/v1/training/export` - Trigger an SFT export run (write_token)
+- `GET /api/v1/training/exports` - List export runs (client read token)
+- `GET /api/v1/training/exports/{run_id}` - Get a run's metadata (client read token)
+- `DELETE /api/v1/training/exports/{run_id}` - Delete a run + artifacts (write_token)
+- `GET /api/v1/training/exports/{run_id}/download` - Download exported SFT data (client read token)
+- `GET /api/v1/training/checkpoint` - Get scheduler checkpoint / progress (client read token)
 
 **WebSocket**:
 - `WS /ws?token={auth_token}` - WebSocket connection
@@ -379,6 +392,8 @@ Timestamps in the relationship protocol are `i64` milliseconds (Unix epoch), not
 - `GET /api/dashboard/chronicles` - List chronicles
 - `GET /api/dashboard/chronicles/{id}` - Get chronicle
 - `GET /api/dashboard/chronicles/llm-stats` - LLM token stats
+- `GET /api/dashboard/reward/trends` - Survival-reward trends (daily/period aggregates)
+- `GET /api/dashboard/reward/lifetime/{id}` - Agent lifetime reward summary
 - `GET /api/dashboard/chronicles/pending` - Pending generation tasks
 - `GET /api/dashboard/actions-map` - Actions mapping
 - `GET /api/dashboard/items` - List items
@@ -432,6 +447,7 @@ Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env v
 - `POST /api/v1/character/generate` - LLM one-click character generation
 - `POST /api/v1/character/register` - Register new character (forwards to Server)
 - `POST /api/v1/character/rebirth` - Rebirth character
+- `POST /api/v1/admin/reload-character` - Reload character.yaml into the running agent (hot persona refresh)
 - `GET /api/v1/character/soul-cycles` - Get soul cycle records (paginated)
 - `GET /api/v1/character/dream/records` - Get dream records
 - `GET/POST /api/v1/character/dream` - Dream injection (sustained n-turn thought injection)
