@@ -179,8 +179,12 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
+          # cache-to 已移除：GHA cache (type=gha) 在 tag 触发的发布构建上导出报 not_found
+          # （v0.1.290 连续两次失败，build/push 本身成功，仅 cache 导出 cancel 了 push；
+          # 根因是 GHA cache scope/写入问题，drop mode=max 治标不治本）。
+          # 仅保留 cache-from 只读加速；如需恢复缓存写入，改用 type=registry
+          # （ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-server:buildcache）。
           cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Summary
         run: |
