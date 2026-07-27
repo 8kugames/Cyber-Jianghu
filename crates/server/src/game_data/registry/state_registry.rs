@@ -30,10 +30,12 @@ impl StateRegistry {
         // StatusAttributeDefinition.default_value 是 Option<f64>，原语期望 f32
         let default_max = attr.default_value.unwrap_or(0.0) as f32;
         let context = std::collections::HashMap::new();
-        Some(crate::game_data::types::StatusComponent::evaluate_max_value(
-            &attr.max_value_formula,
-            default_max,
-            &context,
-        ))
+        Some(
+            crate::game_data::types::StatusComponent::evaluate_max_value(
+                &attr.max_value_formula,
+                default_max,
+                &context,
+            ),
+        )
     }
 }

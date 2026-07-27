@@ -104,7 +104,8 @@ pub async fn invalidate_cache() {
 /// 加载 emergence.yaml 配置（fail-fast：缺失报错）
 pub fn load_emergence_config(config_dir: &Path) -> Result<EmergenceConfig> {
     let yaml_path = config_dir.join("emergence.yaml");
-    load_config(&yaml_path).with_context(|| format!("加载涌现检测配置失败: {}", yaml_path.display()))
+    load_config(&yaml_path)
+        .with_context(|| format!("加载涌现检测配置失败: {}", yaml_path.display()))
 }
 
 /// 涌现检测入口：给定窗口，跑两阶段检测。
@@ -137,8 +138,14 @@ pub async fn detect_window(
     let (rows, agent_names) = loader::fetch_window(db_pool, tick_start, tick_end).await?;
     let (events, candidate_count) = detector::run_detection(&rows, &agent_names, config);
 
-    let causal_count = events.iter().filter(|e| e.category == "causal_emergence").count();
-    let co_count = events.iter().filter(|e| e.category == "co_occurrence").count();
+    let causal_count = events
+        .iter()
+        .filter(|e| e.category == "causal_emergence")
+        .count();
+    let co_count = events
+        .iter()
+        .filter(|e| e.category == "co_occurrence")
+        .count();
 
     // 可选健康度
     let health = if include_health {

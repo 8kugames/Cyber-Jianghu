@@ -1012,7 +1012,7 @@ mod tests {
                 world_state.agent_id.unwrap_or_default(),
                 world_state.tick_id,
                 "说话",
-                Some(serde_json::json!({"content": "在下沈暮烟，行走江湖"})),
+                Some(serde_json::json!({"content": "在下张三，行走江湖"})),
             ),
             persona: PersonaInfo::default(),
             world_context: "测试地点".to_string(),
@@ -1020,8 +1020,8 @@ mod tests {
             runtime: ValidationRuntimeConfig {
                 graded_config: None,
                 recent_same_type_decisions: vec![
-                    "说话：你好，我叫沈暮烟".to_string(),
-                    "说话：在下沈暮烟".to_string(),
+                    "说话：你好，我叫张三".to_string(),
+                    "说话：在下张三".to_string(),
                 ],
             },
         };

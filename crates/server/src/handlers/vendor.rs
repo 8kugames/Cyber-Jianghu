@@ -63,13 +63,19 @@ pub async fn set_vendor_refill_rule(
     let before_state = crate::db::get_vendor_refills(&state.db_pool, agent_id)
         .await
         .ok()
-        .and_then(|rules| rules.into_iter().find(|rule| rule.item_id == payload.item_id))
-        .map(|rule| serde_json::json!({
-            "threshold": rule.threshold,
-            "refill_to": rule.refill_to,
-            "budget_ratio": rule.budget_ratio,
-            "enabled": rule.enabled,
-        }));
+        .and_then(|rules| {
+            rules
+                .into_iter()
+                .find(|rule| rule.item_id == payload.item_id)
+        })
+        .map(|rule| {
+            serde_json::json!({
+                "threshold": rule.threshold,
+                "refill_to": rule.refill_to,
+                "budget_ratio": rule.budget_ratio,
+                "enabled": rule.enabled,
+            })
+        });
     // 验证物品存在
     if !crate::game_data::registry::ItemRegistry::exists(&payload.item_id) {
         return Err((
@@ -165,12 +171,14 @@ pub async fn delete_vendor_refill_rule(
         .await
         .ok()
         .and_then(|rules| rules.into_iter().find(|rule| rule.item_id == item_id))
-        .map(|rule| serde_json::json!({
-            "threshold": rule.threshold,
-            "refill_to": rule.refill_to,
-            "budget_ratio": rule.budget_ratio,
-            "enabled": rule.enabled,
-        }));
+        .map(|rule| {
+            serde_json::json!({
+                "threshold": rule.threshold,
+                "refill_to": rule.refill_to,
+                "budget_ratio": rule.budget_ratio,
+                "enabled": rule.enabled,
+            })
+        });
     info!("删除补货规则: agent={}, item={}", agent_id, item_id);
 
     match crate::db::remove_vendor_refill(&state.db_pool, agent_id, &item_id).await {

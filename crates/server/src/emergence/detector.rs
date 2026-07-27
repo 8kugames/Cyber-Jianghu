@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::config::{CausalConfig, CategoryRule, DetectionConfig, EmergenceConfig};
+use super::config::{CategoryRule, CausalConfig, DetectionConfig, EmergenceConfig};
 
 // ============================================================================
 // 数据模型
@@ -151,7 +151,10 @@ pub fn cluster_by_spacetime(rows: &[ActionRow]) -> BTreeMap<(i64, String), Vec<A
     let mut clusters: BTreeMap<(i64, String), Vec<ActionRow>> = BTreeMap::new();
     for r in rows {
         if let Some(node) = &r.node_id {
-            clusters.entry((r.tick_id, node.clone())).or_default().push(r.clone());
+            clusters
+                .entry((r.tick_id, node.clone()))
+                .or_default()
+                .push(r.clone());
         }
     }
     clusters
@@ -179,12 +182,9 @@ pub fn cluster_passes_threshold(
 
     let mut categories: BTreeSet<String> = BTreeSet::new();
     for r in cluster_rows {
-        if let Some(cat) = classify_category(
-            &r.action_type,
-            &r.result,
-            &r.action_data,
-            category_rules,
-        ) {
+        if let Some(cat) =
+            classify_category(&r.action_type, &r.result, &r.action_data, category_rules)
+        {
             categories.insert(cat);
         }
     }
@@ -316,8 +316,14 @@ fn verify_causal_edges(
                 continue;
             }
             // B 的动作指向 partner(A)，且 B 的 thought 提及 A
-            let tokens = match_tokens(agent_names.get(&partner).map(|s| s.as_str()), partner, short_uuid_len);
-            let matched = tokens.iter().any(|tok| !tok.is_empty() && thought.contains(tok));
+            let tokens = match_tokens(
+                agent_names.get(&partner).map(|s| s.as_str()),
+                partner,
+                short_uuid_len,
+            );
+            let matched = tokens
+                .iter()
+                .any(|tok| !tok.is_empty() && thought.contains(tok));
             if matched {
                 edges.push(CausalEdge {
                     from_agent: *actor_b,
@@ -422,8 +428,16 @@ pub fn run_detection(
 
     // 排序：causal 优先，再按 tick_start；限量
     events.sort_by(|a, b| {
-        let ra = if a.category == "causal_emergence" { 0 } else { 1 };
-        let rb = if b.category == "causal_emergence" { 0 } else { 1 };
+        let ra = if a.category == "causal_emergence" {
+            0
+        } else {
+            1
+        };
+        let rb = if b.category == "causal_emergence" {
+            0
+        } else {
+            1
+        };
         (ra, a.tick_start).cmp(&(rb, b.tick_start))
     });
     events.truncate(det.max_events);
@@ -438,7 +452,7 @@ pub fn run_detection(
 mod tests {
     use super::*;
     use crate::emergence::config::{
-        CausalConfig, CategoryRule, DetectionConfig, EmergenceConfig, HealthConfig, TransferSpec,
+        CategoryRule, CausalConfig, DetectionConfig, EmergenceConfig, HealthConfig, TransferSpec,
     };
     use serde_json::json;
 
@@ -537,14 +551,35 @@ mod tests {
     #[test]
     fn test_causal_emergence_detected() {
         let rows = vec![
-            row(100, agent_a(), "攻击", json!({"target_agent_id": agent_b()}), None),
-            row(100, agent_b(), "攻击", json!({"target_agent_id": agent_a()}), Some("燕无归此人伤我，当还以颜色")),
-            row(100, agent_a(), "予", json!({"recipient_type":"agent","recipient_id":agent_b(),"item_id":"x","quantity":1}), None),
+            row(
+                100,
+                agent_a(),
+                "攻击",
+                json!({"target_agent_id": agent_b()}),
+                None,
+            ),
+            row(
+                100,
+                agent_b(),
+                "攻击",
+                json!({"target_agent_id": agent_a()}),
+                Some("燕无归此人伤我，当还以颜色"),
+            ),
+            row(
+                100,
+                agent_a(),
+                "予",
+                json!({"recipient_type":"agent","recipient_id":agent_b(),"item_id":"x","quantity":1}),
+                None,
+            ),
         ];
         let cfg = test_config();
         let (events, cand) = run_detection(&rows, &names(), &cfg);
         assert_eq!(cand, 1);
-        let causal: Vec<_> = events.iter().filter(|e| e.category == "causal_emergence").collect();
+        let causal: Vec<_> = events
+            .iter()
+            .filter(|e| e.category == "causal_emergence")
+            .collect();
         assert_eq!(causal.len(), 1);
         assert!(!causal[0].causal_edges.is_empty());
     }
@@ -553,15 +588,33 @@ mod tests {
     #[test]
     fn test_co_occurrence_when_no_causal() {
         let rows = vec![
-            row(100, agent_a(), "攻击", json!({"target_agent_id": agent_b()}), None),
+            row(
+                100,
+                agent_a(),
+                "攻击",
+                json!({"target_agent_id": agent_b()}),
+                None,
+            ),
             row(100, agent_b(), "说话", json!({}), Some("今天天气不错")),
-            row(100, agent_a(), "予", json!({"recipient_type":"agent","recipient_id":agent_b(),"item_id":"x","quantity":1}), None),
+            row(
+                100,
+                agent_a(),
+                "予",
+                json!({"recipient_type":"agent","recipient_id":agent_b(),"item_id":"x","quantity":1}),
+                None,
+            ),
         ];
         let cfg = test_config();
         let (events, cand) = run_detection(&rows, &names(), &cfg);
         assert_eq!(cand, 1);
-        let causal: Vec<_> = events.iter().filter(|e| e.category == "causal_emergence").collect();
-        let co: Vec<_> = events.iter().filter(|e| e.category == "co_occurrence").collect();
+        let causal: Vec<_> = events
+            .iter()
+            .filter(|e| e.category == "causal_emergence")
+            .collect();
+        let co: Vec<_> = events
+            .iter()
+            .filter(|e| e.category == "co_occurrence")
+            .collect();
         assert!(causal.is_empty());
         assert_eq!(co.len(), 1);
     }
@@ -570,8 +623,20 @@ mod tests {
     #[test]
     fn test_deterministic() {
         let rows = vec![
-            row(100, agent_a(), "攻击", json!({"target_agent_id": agent_b()}), None),
-            row(100, agent_b(), "攻击", json!({"target_agent_id": agent_a()}), Some("燕无归伤我")),
+            row(
+                100,
+                agent_a(),
+                "攻击",
+                json!({"target_agent_id": agent_b()}),
+                None,
+            ),
+            row(
+                100,
+                agent_b(),
+                "攻击",
+                json!({"target_agent_id": agent_a()}),
+                Some("燕无归伤我"),
+            ),
             row(101, agent_a(), "说话", json!({}), Some("钱三通此人")),
         ];
         let cfg = test_config();
@@ -590,25 +655,49 @@ mod tests {
     #[test]
     fn test_empty_thought_degrades_to_co_occurrence() {
         let rows = vec![
-            row(100, agent_a(), "攻击", json!({"target_agent_id": agent_b()}), None),
-            row(100, agent_b(), "攻击", json!({"target_agent_id": agent_a()}), None),
-            row(100, agent_a(), "予", json!({"recipient_type":"agent","recipient_id":agent_b(),"item_id":"x","quantity":1}), None),
+            row(
+                100,
+                agent_a(),
+                "攻击",
+                json!({"target_agent_id": agent_b()}),
+                None,
+            ),
+            row(
+                100,
+                agent_b(),
+                "攻击",
+                json!({"target_agent_id": agent_a()}),
+                None,
+            ),
+            row(
+                100,
+                agent_a(),
+                "予",
+                json!({"recipient_type":"agent","recipient_id":agent_b(),"item_id":"x","quantity":1}),
+                None,
+            ),
         ];
         let cfg = test_config();
         let (events, _) = run_detection(&rows, &names(), &cfg);
-        let causal: Vec<_> = events.iter().filter(|e| e.category == "causal_emergence").collect();
+        let causal: Vec<_> = events
+            .iter()
+            .filter(|e| e.category == "causal_emergence")
+            .collect();
         assert!(causal.is_empty());
     }
 
     // AC12: node_id 缺失排除
     #[test]
     fn test_missing_node_excluded() {
-        let mut r = row(100, agent_a(), "攻击", json!({"target_agent_id": agent_b()}), None);
+        let mut r = row(
+            100,
+            agent_a(),
+            "攻击",
+            json!({"target_agent_id": agent_b()}),
+            None,
+        );
         r.node_id = None;
-        let rows = vec![
-            r,
-            row(100, agent_b(), "说话", json!({}), Some("test")),
-        ];
+        let rows = vec![r, row(100, agent_b(), "说话", json!({}), Some("test"))];
         let cfg = test_config();
         let (events, cand) = run_detection(&rows, &names(), &cfg);
         assert_eq!(cand, 0);
@@ -618,9 +707,21 @@ mod tests {
     // AC13: pipe_seq 多意图去重
     #[test]
     fn test_pipe_seq_dedup() {
-        let mut r0 = row(100, agent_a(), "攻击", json!({"target_agent_id": agent_b()}), None);
+        let mut r0 = row(
+            100,
+            agent_a(),
+            "攻击",
+            json!({"target_agent_id": agent_b()}),
+            None,
+        );
         r0.pipe_seq = 0;
-        let mut r1 = row(100, agent_a(), "予", json!({"recipient_type":"agent","recipient_id":agent_b(),"item_id":"x","quantity":1}), None);
+        let mut r1 = row(
+            100,
+            agent_a(),
+            "予",
+            json!({"recipient_type":"agent","recipient_id":agent_b(),"item_id":"x","quantity":1}),
+            None,
+        );
         r1.pipe_seq = 1;
         let mut r2 = row(100, agent_a(), "说话", json!({}), None);
         r2.pipe_seq = 2;
@@ -646,7 +747,10 @@ mod tests {
             None
         );
         // require_target
-        assert_eq!(classify_category("攻击", "success", &json!({}), rules), None);
+        assert_eq!(
+            classify_category("攻击", "success", &json!({}), rules),
+            None
+        );
         // transfer
         assert_eq!(
             classify_category("予", "success", &json!({"recipient_type":"agent"}), rules),

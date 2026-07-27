@@ -89,9 +89,9 @@ pub type VendorPendingEvents =
 
 // API 响应相关
 pub use responses::{
-    AgentRegisterRequest, AgentRegisterResponse, DeviceRegisterErrorResponse,
+    AgentRegisterRequest, AgentRegisterResponse, DbHealthStatus, DeviceRegisterErrorResponse,
     DeviceRegisterResponse, DeviceVerifyErrorResponse, DeviceVerifyRequest, DeviceVerifyResponse,
-    DbHealthStatus, GameRules, HealthResponse,
+    GameRules, HealthResponse,
 };
 
 // ============================================================================

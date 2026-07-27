@@ -50,9 +50,7 @@ pub enum CategoryRule {
         require_target: bool,
     },
     /// 形态 B：物品转移类（予/取 方向字段判定，支持多个 transfer 原语）
-    TransferActions {
-        transfer_actions: Vec<TransferSpec>,
-    },
+    TransferActions { transfer_actions: Vec<TransferSpec> },
 }
 
 /// 单个转移规则（action + 方向字段判定）
@@ -199,22 +197,33 @@ mod real_yaml_tests {
     #[test]
     fn test_real_config_file_parses() {
         // 用真实的 config/emergence.yaml 实测，而非手写片段
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("config/emergence.yaml");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config/emergence.yaml");
         if !path.exists() {
             eprintln!("跳过：{} 不存在", path.display());
             return;
         }
         let cfg: EmergenceConfig = crate::game_data::loaders::config_format::load_config(&path)
             .expect("真实 emergence.yaml 必须能被 EmergenceConfig 解析");
-        assert!(!cfg.detection.category_rules.is_empty(), "category_rules 不能为空");
+        assert!(
+            !cfg.detection.category_rules.is_empty(),
+            "category_rules 不能为空"
+        );
         // 验证每条规则都正确解析（不是被吞成 None）
         for (name, rule) in &cfg.detection.category_rules {
             eprintln!("规则 {}: 解析为 {:?}", name, rule);
         }
         // 特别验证 trade 规则（transfer_actions 格式）
-        assert!(cfg.detection.category_rules.contains_key("trade"), "trade 规则必须存在");
-        assert!(cfg.detection.category_rules.contains_key("conflict"), "conflict 规则必须存在");
-        assert!(cfg.detection.category_rules.contains_key("communication"), "communication 规则必须存在");
+        assert!(
+            cfg.detection.category_rules.contains_key("trade"),
+            "trade 规则必须存在"
+        );
+        assert!(
+            cfg.detection.category_rules.contains_key("conflict"),
+            "conflict 规则必须存在"
+        );
+        assert!(
+            cfg.detection.category_rules.contains_key("communication"),
+            "communication 规则必须存在"
+        );
     }
 }

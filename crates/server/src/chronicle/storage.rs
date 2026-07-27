@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use sqlx::Row;
 
 use super::collector::CollectedData;
-use super::{format_game_day, AgentSummary, Chronicle, Highlight, LocationStat};
+use super::{AgentSummary, Chronicle, Highlight, LocationStat, format_game_day};
 
 /// 存储群像传记（兼容旧接口，summary_llm = None）
 pub async fn store(

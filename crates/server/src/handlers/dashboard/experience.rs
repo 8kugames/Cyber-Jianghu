@@ -107,12 +107,13 @@ pub async fn get_agent_experiences(
     let offset = (page - 1) * limit;
 
     // 获取经历日志总 tick 数（按 tick_id 分组计数）
-    let total: i64 =
-        sqlx::query_scalar("SELECT COUNT(DISTINCT tick_id) FROM agent_action_logs WHERE agent_id = $1")
-            .bind(agent_id)
-            .fetch_one(&state.db_pool)
-            .await
-            .unwrap_or(0);
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT tick_id) FROM agent_action_logs WHERE agent_id = $1",
+    )
+    .bind(agent_id)
+    .fetch_one(&state.db_pool)
+    .await
+    .unwrap_or(0);
 
     // 先获取分页的 tick_id 列表，再批量拉取全部 pipe_seq 行
     let tick_ids: Vec<i64> = sqlx::query_scalar(
@@ -510,14 +511,13 @@ pub async fn get_display_map(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<DisplayMapResponse>, StatusCode> {
     // items：从物品配置注册表（items.yaml）生成，单一权威源、零硬编码
-    let items: HashMap<String, String> =
-        crate::game_data::registry::ItemRegistry::all_item_ids()
-            .iter()
-            .filter_map(|id| {
-                crate::game_data::registry::ItemRegistry::get(id)
-                    .map(|entry| (entry.item_id, entry.name))
-            })
-            .collect();
+    let items: HashMap<String, String> = crate::game_data::registry::ItemRegistry::all_item_ids()
+        .iter()
+        .filter_map(|id| {
+            crate::game_data::registry::ItemRegistry::get(id)
+                .map(|entry| (entry.item_id, entry.name))
+        })
+        .collect();
 
     // agents：一条轻量 SQL，全状态、无 JOIN
     let rows = sqlx::query("SELECT agent_id, name FROM agents")

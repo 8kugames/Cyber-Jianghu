@@ -94,9 +94,7 @@ pub struct RecentEvent {
 ///
 /// 一次返回 agents + tick_info + recent_events，全部在单个只读事务内读取，
 /// 消除 tick 边界瞬时跨 agent 不一致。
-pub async fn get_world_snapshot(
-    State(state): State<Arc<AppState>>,
-) -> Json<WorldSnapshot> {
+pub async fn get_world_snapshot(State(state): State<Arc<AppState>>) -> Json<WorldSnapshot> {
     // 当前在线 agent_id 集合（从 WebSocket connection manager 取，不在事务内，
     // 因为这是内存态、不涉及 DB 一致性）
     let online_agents: std::collections::HashSet<Uuid> = {
@@ -129,14 +127,13 @@ pub async fn get_world_snapshot(
     };
 
     // 2) latest_state_tick_id + latest_tick_status（单查询取两列）
-    let (latest_state_tick_id, latest_tick_status) =
-        match fetch_tick_meta(&mut tx).await {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::error!("world-snapshot 查询 tick meta 失败: {}", e);
-                (0i64, "none".to_string())
-            }
-        };
+    let (latest_state_tick_id, latest_tick_status) = match fetch_tick_meta(&mut tx).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!("world-snapshot 查询 tick meta 失败: {}", e);
+            (0i64, "none".to_string())
+        }
+    };
 
     // 3) recent_events（最近 20 条有 narrative 的 action_logs）
     let recent_events = match fetch_recent_events(&mut tx).await {
@@ -197,10 +194,7 @@ async fn fetch_snapshot_agents(
 
     let rows = sqlx::query(query).fetch_all(&mut **tx).await?;
 
-    let agent_ids: Vec<Uuid> = rows
-        .iter()
-        .map(|r| r.get::<Uuid, _>("agent_id"))
-        .collect();
+    let agent_ids: Vec<Uuid> = rows.iter().map(|r| r.get::<Uuid, _>("agent_id")).collect();
 
     // 单事务内取 roles（保证一致快照）
     let role_rows = if agent_ids.is_empty() {
@@ -272,17 +266,15 @@ fn parse_attributes(attrs: &Option<serde_json::Value>) -> std::collections::Hash
 async fn fetch_tick_meta(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<(i64, String), sqlx::Error> {
-    let latest_state_tick_id: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(tick_id), 0) FROM agent_states",
-    )
-    .fetch_one(&mut **tx)
-    .await?;
+    let latest_state_tick_id: i64 =
+        sqlx::query_scalar("SELECT COALESCE(MAX(tick_id), 0) FROM agent_states")
+            .fetch_one(&mut **tx)
+            .await?;
 
-    let latest_tick_status: Option<String> = sqlx::query_scalar(
-        "SELECT status FROM tick_logs ORDER BY tick_id DESC LIMIT 1",
-    )
-    .fetch_optional(&mut **tx)
-    .await?;
+    let latest_tick_status: Option<String> =
+        sqlx::query_scalar("SELECT status FROM tick_logs ORDER BY tick_id DESC LIMIT 1")
+            .fetch_optional(&mut **tx)
+            .await?;
 
     Ok((
         latest_state_tick_id,
@@ -319,7 +311,8 @@ async fn fetch_recent_events(
             id: row.get("id"),
             tick_id: row.get("tick_id"),
             agent_id: row.get("agent_id"),
-            agent_name: row.get::<Option<String>, _>("agent_name")
+            agent_name: row
+                .get::<Option<String>, _>("agent_name")
                 .unwrap_or_else(|| "unknown".to_string()),
             action_type: row.get("action_type"),
             action_type_display: row.get("action_type_display"),

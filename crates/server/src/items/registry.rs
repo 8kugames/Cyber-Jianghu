@@ -55,7 +55,10 @@ pub fn init_item_cache_from_config(config_items: &[ItemConfigEntry]) -> Result<(
 
     for item in config_items {
         // 通过 FromStr 解析（支持全部 5 个变体），解析失败回退到 Consumable
-        let item_type = item.item_type.parse::<ItemType>().unwrap_or(ItemType::Consumable);
+        let item_type = item
+            .item_type
+            .parse::<ItemType>()
+            .unwrap_or(ItemType::Consumable);
 
         let def = ItemDefinition::new(
             &item.item_id,

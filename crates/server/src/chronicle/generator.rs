@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::game_data::registry::ActionRegistry;
 
-    use super::collector::{CollectedData, EmergenceCollectStatus};
+use super::collector::{CollectedData, EmergenceCollectStatus};
 
 /// LLM Token 统计（全局）
 static LLM_INPUT_TOKENS: AtomicU64 = AtomicU64::new(0);
@@ -289,7 +289,10 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
             for edge in e.causal_edges.iter().take(2) {
                 let from_name = agent_name_in(&edge.from_agent, data).unwrap_or("?");
                 let to_name = agent_name_in(&edge.to_agent, data).unwrap_or("?");
-                summary.push_str(&format!("    - {} → {}（{}）\n", from_name, to_name, edge.evidence));
+                summary.push_str(&format!(
+                    "    - {} → {}（{}）\n",
+                    from_name, to_name, edge.evidence
+                ));
             }
         }
         summary.push_str(nl);
@@ -327,10 +330,7 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
 ///
 /// 配置方式：从 llm.yaml 配置文件读取
 /// 添加超时和重试机制
-pub async fn generate_llm(
-    data: &CollectedData,
-    previous_summary: Option<&str>,
-) -> Result<String> {
+pub async fn generate_llm(data: &CollectedData, previous_summary: Option<&str>) -> Result<String> {
     // 从配置文件读取 LLM 配置
     let config = match crate::game_data::loaders::load_llm(&crate::paths::get_config_dir()) {
         Ok(cfg) => cfg,
@@ -700,7 +700,10 @@ mod tests {
 
         let prompt = build_llm_prompt(&data, None);
         // narrative 应被注入 prompt（让 LLM 拿到角色素材）
-        assert!(prompt.contains("今日与旧友重逢"), "LLM prompt 应包含 agent narrative");
+        assert!(
+            prompt.contains("今日与旧友重逢"),
+            "LLM prompt 应包含 agent narrative"
+        );
         assert!(prompt.contains("李四"));
     }
 
@@ -805,7 +808,10 @@ mod tests {
         };
 
         let prompt = build_llm_prompt(&data, None);
-        assert!(prompt.contains("因果涌现事件"), "LLM prompt 应包含涌现事件段");
+        assert!(
+            prompt.contains("因果涌现事件"),
+            "LLM prompt 应包含涌现事件段"
+        );
         assert!(prompt.contains("王五") && prompt.contains("赵六"));
     }
 }

@@ -113,14 +113,20 @@ async fn collect_emergence_events(
         Ok(c) => c,
         Err(e) => {
             tracing::warn!("[chronicle] 涌现配置加载失败，跳过涌现采集: {}", e);
-            return (Vec::new(), EmergenceCollectStatus::ConfigError(e.to_string()));
+            return (
+                Vec::new(),
+                EmergenceCollectStatus::ConfigError(e.to_string()),
+            );
         }
     };
     match crate::emergence::detect_window(db_pool, &config, period_start, period_end, false).await {
         Ok(result) => (result.events, EmergenceCollectStatus::Ok),
         Err(e) => {
             tracing::warn!("[chronicle] 涌现检测失败，跳过: {}", e);
-            (Vec::new(), EmergenceCollectStatus::DetectError(e.to_string()))
+            (
+                Vec::new(),
+                EmergenceCollectStatus::DetectError(e.to_string()),
+            )
         }
     }
 }
@@ -463,65 +469,68 @@ async fn collect_highlights(
         let agent_name: String = row.get("name");
         let action_data: Option<serde_json::Value> = row.get("action_data");
 
-        let (weight, highlight) = match ActionRegistry::get(&action_type).and_then(|c| c.highlight_kind) {
-            Some(HighlightKind::Dialogue) => {
-                let content = action_data
-                    .as_ref()
-                    .and_then(|d| d.get("content"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("...");
-                // 权重 = content 字符长度（长台词更可能是重要宣言/情节推进）
-                let weight = content.chars().count();
-                let h = Highlight {
-                    tick_id,
-                    event_type: "dialogue".to_string(),
-                    // 放宽截断到 150 字，减少腰斩重要台词
-                    description: super::truncate_text(
-                        &format!("{}\u{ff1a}\u{201c}{}\u{201d}", agent_name, content),
-                        150,
-                    ),
-                    agent_id: Some(agent_id),
-                    agent_name: Some(agent_name),
-                };
-                (weight, h)
-            }
-            Some(HighlightKind::Combat) => {
-                let result_message: Option<String> = row.get("result_message");
-                // 提取对手 agent_id（让"谁打谁"可还原）
-                let target_display = action_data
-                    .as_ref()
-                    .and_then(|d| d.get("target_agent_id"))
-                    .and_then(|v| v.as_str())
-                    .map(|t| format!("（对手：{}）", &t[..t.len().min(8)]))
-                    .unwrap_or_default();
-                let h = Highlight {
-                    tick_id,
-                    event_type: "combat".to_string(),
-                    description: result_message
+        let (weight, highlight) =
+            match ActionRegistry::get(&action_type).and_then(|c| c.highlight_kind) {
+                Some(HighlightKind::Dialogue) => {
+                    let content = action_data
                         .as_ref()
-                        .map(|m| format!("{}{}: {}", agent_name, target_display, m))
-                        .unwrap_or_else(|| format!("{}{} 发起了一场战斗", agent_name, target_display)),
-                    agent_id: Some(agent_id),
-                    agent_name: Some(agent_name),
-                };
-                // 战斗默认权重较高（冲突是戏剧性核心）
-                (10, h)
-            }
-            Some(HighlightKind::Social) => {
-                let result_message: Option<String> = row.get("result_message");
-                let h = Highlight {
-                    tick_id,
-                    event_type: "social".to_string(),
-                    description: result_message
-                        .map(|m| format!("{} 赠出: {}", agent_name, m))
-                        .unwrap_or_else(|| format!("{} 赠出物品", agent_name)),
-                    agent_id: Some(agent_id),
-                    agent_name: Some(agent_name),
-                };
-                (5, h)
-            }
-            None => continue,
-        };
+                        .and_then(|d| d.get("content"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("...");
+                    // 权重 = content 字符长度（长台词更可能是重要宣言/情节推进）
+                    let weight = content.chars().count();
+                    let h = Highlight {
+                        tick_id,
+                        event_type: "dialogue".to_string(),
+                        // 放宽截断到 150 字，减少腰斩重要台词
+                        description: super::truncate_text(
+                            &format!("{}\u{ff1a}\u{201c}{}\u{201d}", agent_name, content),
+                            150,
+                        ),
+                        agent_id: Some(agent_id),
+                        agent_name: Some(agent_name),
+                    };
+                    (weight, h)
+                }
+                Some(HighlightKind::Combat) => {
+                    let result_message: Option<String> = row.get("result_message");
+                    // 提取对手 agent_id（让"谁打谁"可还原）
+                    let target_display = action_data
+                        .as_ref()
+                        .and_then(|d| d.get("target_agent_id"))
+                        .and_then(|v| v.as_str())
+                        .map(|t| format!("（对手：{}）", &t[..t.len().min(8)]))
+                        .unwrap_or_default();
+                    let h = Highlight {
+                        tick_id,
+                        event_type: "combat".to_string(),
+                        description: result_message
+                            .as_ref()
+                            .map(|m| format!("{}{}: {}", agent_name, target_display, m))
+                            .unwrap_or_else(|| {
+                                format!("{}{} 发起了一场战斗", agent_name, target_display)
+                            }),
+                        agent_id: Some(agent_id),
+                        agent_name: Some(agent_name),
+                    };
+                    // 战斗默认权重较高（冲突是戏剧性核心）
+                    (10, h)
+                }
+                Some(HighlightKind::Social) => {
+                    let result_message: Option<String> = row.get("result_message");
+                    let h = Highlight {
+                        tick_id,
+                        event_type: "social".to_string(),
+                        description: result_message
+                            .map(|m| format!("{} 赠出: {}", agent_name, m))
+                            .unwrap_or_else(|| format!("{} 赠出物品", agent_name)),
+                        agent_id: Some(agent_id),
+                        agent_name: Some(agent_name),
+                    };
+                    (5, h)
+                }
+                None => continue,
+            };
 
         match highlight.event_type.as_str() {
             "dialogue" => dialogues.push((weight, highlight)),

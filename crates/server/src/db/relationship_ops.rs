@@ -16,9 +16,7 @@ use sqlx::{PgPool, Row};
 use tracing::debug;
 use uuid::Uuid;
 
-use cyber_jianghu_protocol::types::{
-    RelationshipKeyEvent, RelationshipMemory,
-};
+use cyber_jianghu_protocol::types::{RelationshipKeyEvent, RelationshipMemory};
 
 // ============================================================================
 // 写入（全量快照覆盖）
@@ -42,19 +40,14 @@ pub async fn upsert_relationship_snapshot(
     relationships: &[RelationshipMemory],
     synced_at: i64,
 ) -> Result<()> {
-    let mut tx = pool
-        .begin()
-        .await
-        .context("开启关系快照事务失败")?;
+    let mut tx = pool.begin().await.context("开启关系快照事务失败")?;
 
     // 1. 清空旧数据（CASCADE 处理 key_events，显式 DELETE 仅作防御）
-    sqlx::query(
-        "DELETE FROM agent_relationships WHERE source_agent_id = $1",
-    )
-    .bind(source_agent_id)
-    .execute(&mut *tx)
-    .await
-    .context("清理旧 agent_relationships 失败")?;
+    sqlx::query("DELETE FROM agent_relationships WHERE source_agent_id = $1")
+        .bind(source_agent_id)
+        .execute(&mut *tx)
+        .await
+        .context("清理旧 agent_relationships 失败")?;
 
     // 2. 插入关系行 + 事件
     for rel in relationships {
@@ -187,10 +180,7 @@ async fn fetch_relationships(
     use std::collections::HashMap;
     let mut events_by_pair: HashMap<(Uuid, Uuid), Vec<RelationshipKeyEvent>> = HashMap::new();
     for row in &event_rows {
-        let key = (
-            row.try_get::<Uuid, _>(0)?,
-            row.try_get::<Uuid, _>(1)?,
-        );
+        let key = (row.try_get::<Uuid, _>(0)?, row.try_get::<Uuid, _>(1)?);
         let ev = RelationshipKeyEvent {
             tick_id: row.try_get(2)?,
             event_type: row.try_get(3)?,
@@ -238,9 +228,7 @@ pub async fn get_relationships_by_agent(
 }
 
 /// 全局查询所有关系（含 key_events）
-pub async fn get_all_relationships(
-    pool: &PgPool,
-) -> Result<Vec<(Uuid, RelationshipMemory)>> {
+pub async fn get_all_relationships(pool: &PgPool) -> Result<Vec<(Uuid, RelationshipMemory)>> {
     fetch_relationships(pool, None).await
 }
 
@@ -276,13 +264,8 @@ mod tests {
         let migration = manifest_dir
             .join("migrations")
             .join("022_agent_relationships.sql");
-        let sql = std::fs::read_to_string(&migration).unwrap_or_else(|e| {
-            panic!(
-                "C1 迁移缺失：未找到 {}（{}）",
-                migration.display(),
-                e
-            )
-        });
+        let sql = std::fs::read_to_string(&migration)
+            .unwrap_or_else(|e| panic!("C1 迁移缺失：未找到 {}（{}）", migration.display(), e));
 
         let lower = sql.to_lowercase();
         assert!(
@@ -299,13 +282,8 @@ mod tests {
         let migration = manifest_dir
             .join("migrations")
             .join("022_agent_relationships.sql");
-        let sql = std::fs::read_to_string(&migration).unwrap_or_else(|e| {
-            panic!(
-                "C1 迁移缺失：未找到 {}（{}）",
-                migration.display(),
-                e
-            )
-        });
+        let sql = std::fs::read_to_string(&migration)
+            .unwrap_or_else(|e| panic!("C1 迁移缺失：未找到 {}（{}）", migration.display(), e));
 
         let lower = sql.to_lowercase();
         assert!(
@@ -327,7 +305,9 @@ mod tests {
             .connect(&url)
             .await
             .expect("connect DATABASE_URL");
-        crate::db::run_migrations(&pool).await.expect("run_migrations");
+        crate::db::run_migrations(&pool)
+            .await
+            .expect("run_migrations");
         pool
     }
 
@@ -382,12 +362,7 @@ mod tests {
         let target_b = Uuid::new_v4();
         let snapshot = vec![
             make_rel(target_a, "A", 10, vec![make_event(1, 5), make_event(2, 5)]),
-            make_rel(
-                target_b,
-                "B",
-                -10,
-                vec![make_event(3, -5)],
-            ),
+            make_rel(target_b, "B", -10, vec![make_event(3, -5)]),
         ];
 
         // 第一次写入
@@ -397,7 +372,11 @@ mod tests {
         let after_first = get_relationships_by_agent(&pool, source)
             .await
             .expect("fetch after first");
-        assert_eq!(after_first.len(), 2, "first upsert should persist 2 relations");
+        assert_eq!(
+            after_first.len(),
+            2,
+            "first upsert should persist 2 relations"
+        );
         let events_first: usize = after_first.iter().map(|r| r.key_events.len()).sum();
         assert_eq!(events_first, 3, "first upsert should persist 3 key_events");
 
@@ -464,7 +443,10 @@ mod tests {
         // 剩下那条必须是 target_b（被覆盖更新，favorability=30）
         let only = &after_second[0];
         assert_eq!(only.target_agent_id, target_b);
-        assert_eq!(only.favorability, 30, "remaining relation must reflect new snapshot values");
+        assert_eq!(
+            only.favorability, 30,
+            "remaining relation must reflect new snapshot values"
+        );
         // A→C 必须不再出现
         assert!(
             !after_second.iter().any(|r| r.target_agent_id == target_c),
@@ -535,7 +517,10 @@ mod tests {
             .await
             .expect("seed");
         assert_eq!(
-            get_relationships_by_agent(&pool, source).await.unwrap().len(),
+            get_relationships_by_agent(&pool, source)
+                .await
+                .unwrap()
+                .len(),
             2
         );
 

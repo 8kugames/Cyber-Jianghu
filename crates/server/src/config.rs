@@ -319,8 +319,14 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.server.host, "0.0.0.0");
         assert_eq!(config.server.port, 23333);
-        assert_eq!(config.database.max_connections, default_db_max_connections());
-        assert_eq!(config.database.min_connections, default_db_min_connections());
+        assert_eq!(
+            config.database.max_connections,
+            default_db_max_connections()
+        );
+        assert_eq!(
+            config.database.min_connections,
+            default_db_min_connections()
+        );
     }
 
     #[test]

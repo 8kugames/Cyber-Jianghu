@@ -298,7 +298,9 @@ pub fn compute_age_years(birth_tick: i64, current_tick: i64) -> i64 {
         let registry = match crate::game_data::registry_or_error() {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!("get_real_seconds_per_tick: registry 读取失败（fallback 0 = 不衰减）：{e:?}");
+                tracing::warn!(
+                    "get_real_seconds_per_tick: registry 读取失败（fallback 0 = 不衰减）：{e:?}"
+                );
                 return 0;
             }
         };
