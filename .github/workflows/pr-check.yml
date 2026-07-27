@@ -10,6 +10,14 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - ".github/workflows/pr-check.yml"
+  push:
+    # release 走 dev→main 直推 FF merge（非 PR），补 push 触发让 fmt/clippy/test
+    # 三门在集成到 main/dev 时也跑——CI 成为权威（消除本地 rustfmt 与 stable 的 skew）
+    branches: [main, dev]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - ".github/workflows/pr-check.yml"
   workflow_dispatch:
 
 env:
