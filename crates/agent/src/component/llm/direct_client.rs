@@ -573,7 +573,9 @@ impl DirectLlmClient {
     fn build_http_client(&self) -> Result<reqwest::Client> {
         // P1-F6 修复：超时从 config 消费，替代之前硬编码 120s。
         reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(self.config.request_timeout_secs))
+            .timeout(std::time::Duration::from_secs(
+                self.config.request_timeout_secs,
+            ))
             .connect_timeout(std::time::Duration::from_secs(
                 self.config.connect_timeout_secs,
             ))

@@ -159,8 +159,10 @@ impl SoulCycleRecorder {
         conn.execute_batch("ALTER TABLE soul_cycle_record ADD COLUMN tianhun_layers TEXT")
             .ok();
         // idempotent migration: add server_execution_results column (Server 执行结果回填)
-        conn.execute_batch("ALTER TABLE soul_cycle_record ADD COLUMN server_execution_results TEXT")
-            .ok();
+        conn.execute_batch(
+            "ALTER TABLE soul_cycle_record ADD COLUMN server_execution_results TEXT",
+        )
+        .ok();
 
         Ok(())
     }
@@ -189,7 +191,14 @@ impl SoulCycleRecorder {
                 renhun_thought_log = excluded.renhun_thought_log,
                 model_id = excluded.model_id,
                 created_at = excluded.created_at",
-            params![tick_id, attempt, narrative, thought_log, model_id, created_at],
+            params![
+                tick_id,
+                attempt,
+                narrative,
+                thought_log,
+                model_id,
+                created_at
+            ],
         );
 
         match result {
@@ -229,11 +238,13 @@ impl SoulCycleRecorder {
             let layers: Vec<serde_json::Value> = [(1, layer1), (2, layer2), (3, layer3)]
                 .into_iter()
                 .filter_map(|(idx, layer)| {
-                    layer.map(|v| serde_json::json!({
-                        "layer": format!("layer{}", idx),
-                        "passed": v != "rejected",
-                        "detail": if v == "rejected" { "驳回" } else { v },
-                    }))
+                    layer.map(|v| {
+                        serde_json::json!({
+                            "layer": format!("layer{}", idx),
+                            "passed": v != "rejected",
+                            "detail": if v == "rejected" { "驳回" } else { v },
+                        })
+                    })
                 })
                 .collect();
             if layers.is_empty() {
@@ -256,7 +267,15 @@ impl SoulCycleRecorder {
                 created_at = ?7
              WHERE tick_id = ?8 AND attempt = ?9",
             params![
-                result, layer1, layer2, layer3, reason, tianhun_layers, created_at, tick_id, attempt
+                result,
+                layer1,
+                layer2,
+                layer3,
+                reason,
+                tianhun_layers,
+                created_at,
+                tick_id,
+                attempt
             ],
         );
 
@@ -352,15 +371,18 @@ impl SoulCycleRecorder {
         match result {
             Ok(n) if n > 0 => tracing::debug!(
                 "[soul_cycle] Backfilled server results for tick {} attempt {}",
-                tick_id, attempt
+                tick_id,
+                attempt
             ),
             Ok(_) => tracing::warn!(
                 "[soul_cycle] No record found for tick {} attempt {} when backfilling",
-                tick_id, attempt
+                tick_id,
+                attempt
             ),
             Err(e) => tracing::warn!(
                 "[soul_cycle] Failed to backfill server results for tick {}: {}",
-                tick_id, e
+                tick_id,
+                e
             ),
         }
     }
@@ -738,33 +760,46 @@ mod tests {
     #[tokio::test]
     async fn test_tianhun_layers_column() {
         let (_dir, recorder) = make_recorder();
-        recorder.record_renhun(1, 0, "吃馒头", "...", "test-model").await;
+        recorder
+            .record_renhun(1, 0, "吃馒头", "...", "test-model")
+            .await;
         recorder
             .record_tianhun(
-                1, 0, "approved",
+                1,
+                0,
+                "approved",
                 Some("action_type合法"),
                 Some("物品存在"),
-                None, None,
+                None,
+                None,
             )
             .await;
         let records = recorder.get_by_tick(1).await.expect("get_by_tick");
         let record = &records[0];
         // 新列 tianhun_layers 应有值
-        assert!(record.tianhun_layers.is_some(), "tianhun_layers should be set");
-        let layers: Vec<serde_json::Value> = serde_json::from_str(
-            record.tianhun_layers.as_ref().unwrap()
-        ).expect("tianhun_layers JSON");
+        assert!(
+            record.tianhun_layers.is_some(),
+            "tianhun_layers should be set"
+        );
+        let layers: Vec<serde_json::Value> =
+            serde_json::from_str(record.tianhun_layers.as_ref().unwrap())
+                .expect("tianhun_layers JSON");
         assert_eq!(layers.len(), 2, "should have 2 layers (layer1, layer2)");
         assert_eq!(layers[0]["layer"], "layer1");
         assert!(layers[0]["passed"].as_bool().unwrap());
         // 旧列仍然兼容
-        assert_eq!(record.tianhun_layer1_result.as_deref(), Some("action_type合法"));
+        assert_eq!(
+            record.tianhun_layer1_result.as_deref(),
+            Some("action_type合法")
+        );
     }
 
     #[tokio::test]
     async fn test_server_execution_results_column() {
         let (_dir, recorder) = make_recorder();
-        recorder.record_renhun(1, 0, "吃馒头", "...", "test-model").await;
+        recorder
+            .record_renhun(1, 0, "吃馒头", "...", "test-model")
+            .await;
         let exec_results = r#"{"0":{"success":true,"error":null,"state_change_summary":"体力+5"}}"#;
         recorder.backfill_server_result(1, 0, exec_results).await;
         let records = recorder.get_by_tick(1).await.expect("get_by_tick");
@@ -777,7 +812,9 @@ mod tests {
     #[tokio::test]
     async fn test_record_tianhun_approved() {
         let (_dir, recorder) = make_recorder();
-        recorder.record_renhun(1, 0, "吃馒头", "...", "test-model").await;
+        recorder
+            .record_renhun(1, 0, "吃馒头", "...", "test-model")
+            .await;
         recorder
             .record_tianhun(
                 1,
@@ -800,7 +837,9 @@ mod tests {
     #[tokio::test]
     async fn test_record_tianhun_rejected() {
         let (_dir, recorder) = make_recorder();
-        recorder.record_renhun(1, 0, "无效", "...", "test-model").await;
+        recorder
+            .record_renhun(1, 0, "无效", "...", "test-model")
+            .await;
         recorder
             .record_tianhun(
                 1,
@@ -820,8 +859,12 @@ mod tests {
     #[tokio::test]
     async fn test_unique_constraint_tick_attempt() {
         let (_dir, recorder) = make_recorder();
-        recorder.record_renhun(1, 0, "第一次", "...", "test-model").await;
-        recorder.record_renhun(1, 0, "第二次覆盖", "...", "test-model").await;
+        recorder
+            .record_renhun(1, 0, "第一次", "...", "test-model")
+            .await;
+        recorder
+            .record_renhun(1, 0, "第二次覆盖", "...", "test-model")
+            .await;
         let records = recorder.get_by_tick(1).await.expect("get_by_tick in test");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].renhun_narrative.as_deref(), Some("第二次覆盖"));
@@ -843,7 +886,10 @@ mod tests {
                 None,
             )
             .await;
-        let records = recorder.get_immediate_by_tick(1).await.expect("get_immediate_by_tick in test");
+        let records = recorder
+            .get_immediate_by_tick(1)
+            .await
+            .expect("get_immediate_by_tick in test");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].action_type, "说话");
         assert_eq!(records[0].send_status, "sent");
@@ -865,7 +911,10 @@ mod tests {
                 Some("WebSocket 断开"),
             )
             .await;
-        let records = recorder.get_immediate_by_tick(1).await.expect("get_immediate_by_tick in test");
+        let records = recorder
+            .get_immediate_by_tick(1)
+            .await
+            .expect("get_immediate_by_tick in test");
         assert_eq!(records[0].send_status, "failed");
         assert_eq!(records[0].send_error.as_deref(), Some("WebSocket 断开"));
     }
@@ -873,7 +922,9 @@ mod tests {
     #[tokio::test]
     async fn test_world_time() {
         let (_dir, recorder) = make_recorder();
-        recorder.record_renhun(1, 0, "移动", "...", "test-model").await;
+        recorder
+            .record_renhun(1, 0, "移动", "...", "test-model")
+            .await;
         recorder.record_world_time(1, 0, "第三天 申时").await;
         let records = recorder.get_by_tick(1).await.expect("get_by_tick in test");
         assert_eq!(records[0].world_time.as_deref(), Some("第三天 申时"));
@@ -883,12 +934,19 @@ mod tests {
     async fn test_get_tick_ids_page_dedup_and_order() {
         let (_dir, recorder) = make_recorder();
         // tick 1 有 2 次 attempt，tick 2 和 3 各 1 次
-        recorder.record_renhun(1, 0, "a1", "...", "test-model").await;
-        recorder.record_renhun(1, 1, "a2", "...", "test-model").await;
+        recorder
+            .record_renhun(1, 0, "a1", "...", "test-model")
+            .await;
+        recorder
+            .record_renhun(1, 1, "a2", "...", "test-model")
+            .await;
         recorder.record_renhun(3, 0, "c", "...", "test-model").await;
         recorder.record_renhun(2, 0, "b", "...", "test-model").await;
 
-        let (ids, total) = recorder.get_tick_ids_page(1, 10).await.expect("get_tick_ids_page in test");
+        let (ids, total) = recorder
+            .get_tick_ids_page(1, 10)
+            .await
+            .expect("get_tick_ids_page in test");
         assert_eq!(total, 3);
         assert_eq!(ids, vec![3, 2, 1]); // 降序，tick 1 只出现一次
     }
@@ -902,8 +960,14 @@ mod tests {
                 .await;
         }
 
-        let (p1, total) = recorder.get_tick_ids_page(1, 3).await.expect("get_tick_ids_page p1 in test");
-        let (p2, _) = recorder.get_tick_ids_page(2, 3).await.expect("get_tick_ids_page p2 in test");
+        let (p1, total) = recorder
+            .get_tick_ids_page(1, 3)
+            .await
+            .expect("get_tick_ids_page p1 in test");
+        let (p2, _) = recorder
+            .get_tick_ids_page(2, 3)
+            .await
+            .expect("get_tick_ids_page p2 in test");
         assert_eq!(total, 5);
         assert_eq!(p1, vec![5, 4, 3]);
         assert_eq!(p2, vec![2, 1]);
@@ -924,11 +988,16 @@ mod tests {
     async fn test_get_by_ticks_batch() {
         let (_dir, recorder) = make_recorder();
         recorder.record_renhun(1, 0, "a", "...", "test-model").await;
-        recorder.record_renhun(1, 1, "a2", "...", "test-model").await;
+        recorder
+            .record_renhun(1, 1, "a2", "...", "test-model")
+            .await;
         recorder.record_renhun(3, 0, "c", "...", "test-model").await;
         // tick 2 不存在
 
-        let records = recorder.get_by_ticks(&[1, 2, 3]).await.expect("get_by_ticks in test");
+        let records = recorder
+            .get_by_ticks(&[1, 2, 3])
+            .await
+            .expect("get_by_ticks in test");
         assert_eq!(records.len(), 3); // tick1×2 + tick3×1
         assert_eq!(records[0].tick_id, 3); // 降序
         assert_eq!(records[1].tick_id, 1);
@@ -938,7 +1007,10 @@ mod tests {
     #[tokio::test]
     async fn test_get_by_ticks_empty() {
         let (_dir, recorder) = make_recorder();
-        let records = recorder.get_by_ticks(&[]).await.expect("get_by_ticks empty in test");
+        let records = recorder
+            .get_by_ticks(&[])
+            .await
+            .expect("get_by_ticks empty in test");
         assert!(records.is_empty());
     }
 
@@ -985,7 +1057,10 @@ mod tests {
             )
             .await;
 
-        let records = recorder.get_immediate_by_ticks(&[1, 2, 3]).await.expect("get_immediate_by_ticks in test");
+        let records = recorder
+            .get_immediate_by_ticks(&[1, 2, 3])
+            .await
+            .expect("get_immediate_by_ticks in test");
         assert_eq!(records.len(), 3);
         assert_eq!(records[0].tick_id, 1);
         assert_eq!(records[1].tick_id, 3);

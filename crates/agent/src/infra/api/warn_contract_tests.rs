@@ -63,7 +63,10 @@ mod tests {
         let (tx, rx) = mpsc::channel::<i32>(8);
         drop(rx); // receiver drop
         let send_result = tx.send(42).await;
-        assert!(send_result.is_err(), "mpsc send 在 receiver drop 后必须返 Err");
+        assert!(
+            send_result.is_err(),
+            "mpsc send 在 receiver drop 后必须返 Err"
+        );
         if let Err(e) = tx.send(42).await {
             tracing::warn!("downstream tx.send 失败（receiver 可能已 drop）：{e:?}");
         }

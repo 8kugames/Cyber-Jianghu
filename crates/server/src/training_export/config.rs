@@ -114,7 +114,10 @@ impl TrainingExportConfig {
             "training_export.limits.db_batch_size 必须大于 0"
         );
         // spec §5.3: 单次 run DB 查询次数 ≤ 5. 防止运维把 batch 调太小触发几十次查询.
-        let db_query_count = self.limits.max_traces_per_run.div_ceil(self.limits.db_batch_size);
+        let db_query_count = self
+            .limits
+            .max_traces_per_run
+            .div_ceil(self.limits.db_batch_size);
         ensure!(
             db_query_count <= 5,
             "training_export: max_traces_per_run ({}) / db_batch_size ({}) = {} > 5, 违反 spec §5.3 单次 run DB 查询次数上限. 请调大 db_batch_size 或调小 max_traces_per_run",

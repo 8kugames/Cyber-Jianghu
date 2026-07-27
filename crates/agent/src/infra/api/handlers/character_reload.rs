@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::config::{CharacterConfig, CharacterStatus, LanguageStyleConfig, GoalsConfig};
+use crate::config::{CharacterConfig, CharacterStatus, GoalsConfig, LanguageStyleConfig};
 use crate::infra::api::ReconnectRequest;
 
 use super::HttpApiState;
@@ -82,12 +82,7 @@ pub async fn reload_character(
         "auth_token": auth_token,
     });
 
-    let response = match client
-        .post(&server_url)
-        .json(&req_body)
-        .send()
-        .await
-    {
+    let response = match client.post(&server_url).json(&req_body).send().await {
         Ok(r) => r,
         Err(e) => {
             error!("reload-character: 连接 server 失败: {}", e);

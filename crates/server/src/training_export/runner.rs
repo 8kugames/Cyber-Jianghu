@@ -769,10 +769,7 @@ mod tests {
         let mut map = HashMap::new();
         map.insert(
             (agent, 100),
-            metadata(vec![
-                cycle(0, Some("rejected")),
-                cycle(1, Some("approved")),
-            ]),
+            metadata(vec![cycle(0, Some("rejected")), cycle(1, Some("approved"))]),
         );
 
         // 关键断言: 不取 cycles[-1] (Python 的 bug), 按 attempt 精确匹配
@@ -797,10 +794,7 @@ mod tests {
         let mut map = HashMap::new();
         map.insert(
             (agent, 100),
-            metadata(vec![
-                cycle(0, Some("approved")),
-                cycle(1, Some("approved")),
-            ]),
+            metadata(vec![cycle(0, Some("approved")), cycle(1, Some("approved"))]),
         );
 
         assert_eq!(lookup_attempt_match(&trace, &map), None);

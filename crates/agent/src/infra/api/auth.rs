@@ -159,10 +159,7 @@ pub async fn require_device_token(
     match auth_result {
         Ok(()) => Ok(next.run(req).await),
         Err(status) => {
-            warn!(
-                "P0-11(b) API 认证拒绝: path={}, status={}",
-                path, status
-            );
+            warn!("P0-11(b) API 认证拒绝: path={}, status={}", path, status);
             Err(status)
         }
     }
@@ -259,9 +256,7 @@ mod tests {
     #[test]
     fn test_check_auth_rejects_when_device_not_configured() {
         let headers = HeaderMap::new();
-        let uri = "/api/v1/config/llm"
-            .parse::<axum::http::Uri>()
-            .unwrap();
+        let uri = "/api/v1/config/llm".parse::<axum::http::Uri>().unwrap();
         // 受保护路径 + device_config=None → 503 fail-closed
         assert_eq!(
             check_auth(None, &headers, "/api/v1/config/llm", &uri),
@@ -272,9 +267,7 @@ mod tests {
     #[test]
     fn test_check_auth_rejects_missing_header() {
         let headers = HeaderMap::new();
-        let uri = "/api/v1/config/llm"
-            .parse::<axum::http::Uri>()
-            .unwrap();
+        let uri = "/api/v1/config/llm".parse::<axum::http::Uri>().unwrap();
         assert_eq!(
             check_auth(Some("secret"), &headers, "/api/v1/config/llm", &uri),
             Err(StatusCode::UNAUTHORIZED)
@@ -288,9 +281,7 @@ mod tests {
             "authorization",
             HeaderValue::from_static("Bearer wrong-token"),
         );
-        let uri = "/api/v1/config/llm"
-            .parse::<axum::http::Uri>()
-            .unwrap();
+        let uri = "/api/v1/config/llm".parse::<axum::http::Uri>().unwrap();
         assert_eq!(
             check_auth(Some("correct-token"), &headers, "/api/v1/config/llm", &uri),
             Err(StatusCode::UNAUTHORIZED)
@@ -304,9 +295,7 @@ mod tests {
             "authorization",
             HeaderValue::from_static("Bearer correct-token"),
         );
-        let uri = "/api/v1/config/llm"
-            .parse::<axum::http::Uri>()
-            .unwrap();
+        let uri = "/api/v1/config/llm".parse::<axum::http::Uri>().unwrap();
         assert_eq!(
             check_auth(Some("correct-token"), &headers, "/api/v1/config/llm", &uri),
             Ok(())
@@ -321,9 +310,7 @@ mod tests {
             "authorization",
             HeaderValue::from_static("Basic correct-token"),
         );
-        let uri = "/api/v1/config/llm"
-            .parse::<axum::http::Uri>()
-            .unwrap();
+        let uri = "/api/v1/config/llm".parse::<axum::http::Uri>().unwrap();
         assert_eq!(
             check_auth(Some("correct-token"), &headers, "/api/v1/config/llm", &uri),
             Err(StatusCode::UNAUTHORIZED)

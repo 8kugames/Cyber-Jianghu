@@ -9,7 +9,7 @@
 //! 的漂移都会在此暴露.
 
 use cyber_jianghu_protocol::TraceEntry;
-use cyber_jianghu_server::training_export::sft_transform::{transform_entry, TransformInput};
+use cyber_jianghu_server::training_export::sft_transform::{TransformInput, transform_entry};
 
 const INPUT_TRACES: &str = include_str!("sft_golden/input_traces.jsonl");
 const EXPECTED_SAMPLES: &str = include_str!("sft_golden/expected_samples.jsonl");
@@ -68,13 +68,14 @@ fn test_rust_transform_matches_python_golden() {
 fn test_golden_fixtures_cover_all_four_boundaries() {
     // 确认 fixture 真的覆盖了 spec §4.3 的四种边界, 避免 fixture 退化
     let inputs = parse_input_traces();
-    assert!(inputs.len() >= 5, "fixture 应至少 5 条, 实际 {}", inputs.len());
+    assert!(
+        inputs.len() >= 5,
+        "fixture 应至少 5 条, 实际 {}",
+        inputs.len()
+    );
 
     // 必须有 ok=false 的 fixture
-    assert!(
-        inputs.iter().any(|t| !t.ok),
-        "fixture 缺少 ok=false 用例"
-    );
+    assert!(inputs.iter().any(|t| !t.ok), "fixture 缺少 ok=false 用例");
     // 必须有 response 空白-only 的 fixture
     assert!(
         inputs.iter().any(|t| t.response.trim().is_empty()),
@@ -82,7 +83,9 @@ fn test_golden_fixtures_cover_all_four_boundaries() {
     );
     // 必须有 persona 双空的 fixture
     assert!(
-        inputs.iter().any(|t| t.persona_name.is_empty() && t.persona_description.is_empty()),
+        inputs
+            .iter()
+            .any(|t| t.persona_name.is_empty() && t.persona_description.is_empty()),
         "fixture 缺少 persona 双空用例"
     );
     // 必须有 persona name + desc 都有的 fixture

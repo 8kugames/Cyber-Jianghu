@@ -1,8 +1,8 @@
 // 天魂层展示名映射 handler —— 数据驱动，从 souls.yaml layer_display 读取
 
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::Json;
 use std::collections::HashMap;
 
 use super::HttpApiState;

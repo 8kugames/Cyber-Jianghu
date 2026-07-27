@@ -149,8 +149,8 @@ impl super::super::Agent {
                                 if let Some(ref store) = self.relationship_store {
                                     match store.get_all_relationships() {
                                         Ok(local_rels) => {
-                                            let snapshot_id = world_state.agent_id
-                                                .unwrap_or_default();
+                                            let snapshot_id =
+                                                world_state.agent_id.unwrap_or_default();
                                             if snapshot_id.is_nil() {
                                                 warn!(
                                                     "关系快照跳过：agent_id 未知（game_day={}）",

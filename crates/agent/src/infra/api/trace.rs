@@ -359,7 +359,9 @@ async fn enforce_max_size(base: &std::path::Path, max_size_mb: u64) {
             if metadata.is_dir() {
                 stack.push(path);
             } else if path.extension().is_some_and(|ext| ext == "jsonl") {
-                let mtime = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                let mtime = metadata
+                    .modified()
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                 let size = metadata.len();
                 files.push((path, size, mtime));
                 total += size;

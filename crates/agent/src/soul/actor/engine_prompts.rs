@@ -69,7 +69,9 @@ pub(super) struct TickMessageParams<'a> {
     /// 端侧"我眼中的江湖"：附近 entity 的关系认知（agent 自己的主观看法）。
     /// 完全本地、尊重不对称、不进 reward（万物自化）。
     /// 由 engine 在构造前批量查询填充，None 表示无关系数据（降级路径）。
-    pub relationships: Option<&'a std::collections::HashMap<uuid::Uuid, crate::component::social::RelationshipMemory>>,
+    pub relationships: Option<
+        &'a std::collections::HashMap<uuid::Uuid, crate::component::social::RelationshipMemory>,
+    >,
 }
 
 /// Prompt 各 section token 估算
@@ -338,7 +340,9 @@ impl super::CognitiveEngine {
     fn build_world_state_section(
         &self,
         world_state: &cyber_jianghu_protocol::WorldState,
-        relationships: Option<&std::collections::HashMap<uuid::Uuid, crate::component::social::RelationshipMemory>>,
+        relationships: Option<
+            &std::collections::HashMap<uuid::Uuid, crate::component::social::RelationshipMemory>,
+        >,
     ) -> String {
         let mut ws_parts = Vec::new();
 

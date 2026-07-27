@@ -149,7 +149,9 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
                                 if let Ok(json) = serde_json::to_string(&error_msg) {
                                     let mut tx = ws_tx.lock().await;
                                     if let Err(e) = tx.send(Message::Text(json.into())).await {
-                                        tracing::warn!("claw ws_tx.send(error) 失败（receiver 可能已 drop）：{e:?}");
+                                        tracing::warn!(
+                                            "claw ws_tx.send(error) 失败（receiver 可能已 drop）：{e:?}"
+                                        );
                                     }
                                 }
 
