@@ -22,7 +22,10 @@ impl super::super::Agent {
             return None;
         }
 
-        let immediate_records = recorder.get_immediate_by_tick(tick_id).await.unwrap_or_default();
+        let immediate_records = recorder
+            .get_immediate_by_tick(tick_id)
+            .await
+            .unwrap_or_default();
 
         let world_time = records.first().and_then(|r| r.world_time.clone());
 
@@ -64,12 +67,10 @@ impl super::super::Agent {
                         reason: r.tianhun_reason,
                     },
                     final_intent: r.final_intent_id.map(|id| {
-                        let pipeline_actions: Option<
-                            Vec<cyber_jianghu_protocol::PipelineAction>,
-                        > = r
-                            .final_pipeline_json
-                            .as_ref()
-                            .and_then(|s| serde_json::from_str(s).ok());
+                        let pipeline_actions: Option<Vec<cyber_jianghu_protocol::PipelineAction>> =
+                            r.final_pipeline_json
+                                .as_ref()
+                                .and_then(|s| serde_json::from_str(s).ok());
                         cyber_jianghu_protocol::FinalIntentReport {
                             intent_id: Some(id),
                             action_type: r.final_action_type.clone(),
@@ -129,9 +130,7 @@ impl super::super::Agent {
             let base_delay = self.config.llm.soul_cycle_report_base_delay_ms;
             if subsequent_count > 0 {
                 let metadata = self.build_soul_cycle_metadata(tick_id_for_report).await;
-                let world_time = metadata
-                    .as_ref()
-                    .and_then(|m| m.world_time.clone());
+                let world_time = metadata.as_ref().and_then(|m| m.world_time.clone());
                 for (idx, subsequent) in final_intent.subsequent_intents.iter().enumerate() {
                     let pipe_seq = (idx + 1) as i32;
                     let simplified_metadata = cyber_jianghu_protocol::SoulCycleMetadata {

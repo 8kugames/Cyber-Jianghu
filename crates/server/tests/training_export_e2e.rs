@@ -15,21 +15,17 @@
 
 #![cfg(test)]
 
+use cyber_jianghu_server::training_export::ExportRunRequest;
 use cyber_jianghu_server::training_export::checkpoint::Checkpoint;
 use cyber_jianghu_server::training_export::config::TrainingExportConfig;
 use cyber_jianghu_server::training_export::runner::run_once;
 use cyber_jianghu_server::training_export::sft_transform::SftSample;
-use cyber_jianghu_server::training_export::ExportRunRequest;
 use sqlx::postgres::PgPoolOptions;
 
 /// 读取 DATABASE_URL; 不存在则 skip.
 fn db_url() -> Option<String> {
     let url = std::env::var("DATABASE_URL").ok()?;
-    if url.is_empty() {
-        None
-    } else {
-        Some(url)
-    }
+    if url.is_empty() { None } else { Some(url) }
 }
 
 #[tokio::test]
@@ -93,10 +89,19 @@ async fn e2e_run_once_with_real_data_produces_valid_sft_jsonl() {
 
     // 断言 3: 每行是合法的 SftSample
     let lines: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
-    assert_eq!(lines.len(), result.samples.len(), "产物行数应 == samples.len()");
+    assert_eq!(
+        lines.len(),
+        result.samples.len(),
+        "产物行数应 == samples.len()"
+    );
     for (i, line) in lines.iter().enumerate() {
         let sample: SftSample = serde_json::from_str(line).unwrap_or_else(|e| {
-            panic!("第 {} 行反序列化失败: {} | 内容: {}", i, e, &line[..line.len().min(200)])
+            panic!(
+                "第 {} 行反序列化失败: {} | 内容: {}",
+                i,
+                e,
+                &line[..line.len().min(200)]
+            )
         });
         // 每个样本至少有 user + assistant (system 可选)
         assert!(
@@ -115,12 +120,18 @@ async fn e2e_run_once_with_real_data_produces_valid_sft_jsonl() {
             .iter()
             .find(|m| m.role == "assistant")
             .unwrap();
-        assert!(!asst.content.trim().is_empty(), "sample {} assistant 不应为空", i);
+        assert!(
+            !asst.content.trim().is_empty(),
+            "sample {} assistant 不应为空",
+            i
+        );
     }
     eprintln!("验证 {} 条 SftSample 全部合法", lines.len());
 
     // 断言 4: .meta.json 存在且可反序列化
-    let meta_path = output_path.with_extension("jsonl").with_file_name(format!("run={}.meta.json", run_id));
+    let meta_path = output_path
+        .with_extension("jsonl")
+        .with_file_name(format!("run={}.meta.json", run_id));
     let meta_content = tokio::fs::read_to_string(&meta_path)
         .await
         .expect(".meta.json 应存在");
@@ -146,7 +157,12 @@ async fn count_trace_entries(traces_dir: &std::path::Path) -> usize {
         return 0;
     };
     while let Ok(Some(agent_entry)) = agent_dirs.next_entry().await {
-        if !agent_entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
+        if !agent_entry
+            .file_type()
+            .await
+            .map(|t| t.is_dir())
+            .unwrap_or(false)
+        {
             continue;
         }
         let Ok(mut date_files) = tokio::fs::read_dir(agent_entry.path()).await else {

@@ -102,9 +102,12 @@ impl OpenClawBridge {
                 }
                 for id in to_remove {
                     if let Some(req) = pending.remove(&id)
-                        && let Err(e) = req.tx.send(Err(anyhow::anyhow!("{}", CANCELLED_ERROR))) {
-                            tracing::warn!("bridge req.tx.send(cancelled) 失败（receiver 可能已 drop）：{e:?}");
-                        }
+                        && let Err(e) = req.tx.send(Err(anyhow::anyhow!("{}", CANCELLED_ERROR)))
+                    {
+                        tracing::warn!(
+                            "bridge req.tx.send(cancelled) 失败（receiver 可能已 drop）：{e:?}"
+                        );
+                    }
                 }
             }
         });
@@ -120,9 +123,10 @@ impl OpenClawBridge {
 
         tokio::spawn(async move {
             if let Some(req) = pending.write().await.remove(&request_id)
-                && let Err(e) = req.tx.send(content) {
-                    tracing::warn!("bridge req.tx.send(content) 失败（receiver 可能已 drop）：{e:?}");
-                }
+                && let Err(e) = req.tx.send(content)
+            {
+                tracing::warn!("bridge req.tx.send(content) 失败（receiver 可能已 drop）：{e:?}");
+            }
         });
     }
 }

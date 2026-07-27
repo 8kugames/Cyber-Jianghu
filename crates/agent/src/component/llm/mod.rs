@@ -237,7 +237,7 @@ mod tests {
             narrative_window_size: 100,
             enable_streaming: true,
             enable_thinking: None,
-            request_timeout_secs: 90,  // P1-F6：自定义非默认值，断言端到端传播
+            request_timeout_secs: 90, // P1-F6：自定义非默认值，断言端到端传播
             connect_timeout_secs: 15,
             cache_diagnostics: crate::config::CacheDiagnosticsConfig::default(),
         };
@@ -256,11 +256,13 @@ mod tests {
         .expect("build_direct_client_with_max_tokens must succeed");
 
         assert_eq!(
-            client.config().request_timeout_secs, 90,
+            client.config().request_timeout_secs,
+            90,
             "P1-F6 端到端：LlmConfig.request_timeout_secs 必须传到 DirectLlmClient.config"
         );
         assert_eq!(
-            client.config().connect_timeout_secs, 15,
+            client.config().connect_timeout_secs,
+            15,
             "P1-F6 端到端：LlmConfig.connect_timeout_secs 必须传到 DirectLlmClient.config"
         );
     }

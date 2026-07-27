@@ -343,7 +343,12 @@ impl super::super::Agent {
                             && tick_llm_fail_count < opt_chaos_on_llm_fail
                         {
                             match self
-                                .self_correct_intent(world_state, memory_context, &rejection_reason, attempt)
+                                .self_correct_intent(
+                                    world_state,
+                                    memory_context,
+                                    &rejection_reason,
+                                    attempt,
+                                )
                                 .await
                             {
                                 Ok(corrected_intent) => {

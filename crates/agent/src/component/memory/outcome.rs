@@ -162,7 +162,9 @@ impl OutcomeMemory {
         let mut stmt = conn
             .prepare("PRAGMA table_info(outcome_records)")
             .context("查询 outcome_records schema 失败")?;
-        let mut rows = stmt.query([]).context("读取 outcome_records schema 行失败")?;
+        let mut rows = stmt
+            .query([])
+            .context("读取 outcome_records schema 行失败")?;
         while let Some(row) = rows.next().context("遍历 outcome_records schema 行失败")? {
             let name: String = row.get(1).context("读取 column name 失败")?;
             if name == column {
@@ -209,7 +211,11 @@ impl OutcomeMemory {
     ///
     /// P1-3 修复：返回 `Result<Vec<_>>` 让 caller 区分"无记录"与"DB 错"。
     /// 之前静默返回空 Vec 会让下游把"DB 错"误判为"该 action_type 无历史"。
-    pub fn query_recent(&self, action_type: &str, limit: usize) -> anyhow::Result<Vec<OutcomeRecord>> {
+    pub fn query_recent(
+        &self,
+        action_type: &str,
+        limit: usize,
+    ) -> anyhow::Result<Vec<OutcomeRecord>> {
         let conn = self
             .conn
             .lock()
@@ -411,9 +417,7 @@ impl OutcomeMemory {
         let action_types = match self.distinct_action_types() {
             Ok(t) => t,
             Err(e) => {
-                tracing::warn!(
-                    "outcome memory distinct_action_types 失败，prompt 降级为空：{e:?}"
-                );
+                tracing::warn!("outcome memory distinct_action_types 失败，prompt 降级为空：{e:?}");
                 return String::new();
             }
         };
@@ -423,9 +427,7 @@ impl OutcomeMemory {
             let records = match self.query_recent(at, self.prompt_limit) {
                 Ok(r) => r,
                 Err(e) => {
-                    tracing::warn!(
-                        "outcome memory query_recent({at}) 失败，跳过：{e:?}"
-                    );
+                    tracing::warn!("outcome memory query_recent({at}) 失败，跳过：{e:?}");
                     continue;
                 }
             };
@@ -469,7 +471,9 @@ impl OutcomeMemory {
         let conn = match self.conn.lock() {
             Ok(c) => c,
             Err(e) => {
-                tracing::warn!("outcome memory cleanup: lock poisoned（best-effort 跳过本轮清理）：{e:?}");
+                tracing::warn!(
+                    "outcome memory cleanup: lock poisoned（best-effort 跳过本轮清理）：{e:?}"
+                );
                 return;
             }
         };
@@ -579,7 +583,9 @@ mod tests {
         })
         .expect("record must succeed in test");
 
-        let types = mem.distinct_action_types().expect("distinct_action_types in test");
+        let types = mem
+            .distinct_action_types()
+            .expect("distinct_action_types in test");
         assert!(types.contains(&"攻击".to_string()));
 
         let ctx = mem.to_prompt_context();

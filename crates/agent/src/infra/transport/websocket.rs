@@ -745,9 +745,10 @@ impl WebSocketClient {
 
             // 发送关闭信号
             if let Some(tx) = state.shutdown_tx.take()
-                && let Err(e) = tx.send(()) {
-                    tracing::warn!("shutdown_tx.send 失败（receiver 可能已 drop）：{e:?}");
-                }
+                && let Err(e) = tx.send(())
+            {
+                tracing::warn!("shutdown_tx.send 失败（receiver 可能已 drop）：{e:?}");
+            }
 
             let handle = state.reader_task.take();
             state.connected = false;

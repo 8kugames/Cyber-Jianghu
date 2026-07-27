@@ -321,7 +321,9 @@ impl ReflectorSoul {
 
         // 块1：物品存在性（item_id ∈ known_item_ids，空集跳过保证向后兼容）
         if item_actions.contains(&action_type)
-            && let Some(item_id) = action_data.and_then(|d| d.get("item_id")).and_then(|v| v.as_str())
+            && let Some(item_id) = action_data
+                .and_then(|d| d.get("item_id"))
+                .and_then(|v| v.as_str())
         {
             let known = self.rules.read().await.known_item_ids.clone();
             if !known.is_empty() && !known.iter().any(|k| k == item_id) {
@@ -343,16 +345,25 @@ impl ReflectorSoul {
 
         // 取-agent：source_id 必须在附近
         if action_type == "取" {
-            let source_type = action_data.and_then(|d| d.get("source_type")).and_then(|v| v.as_str());
+            let source_type = action_data
+                .and_then(|d| d.get("source_type"))
+                .and_then(|v| v.as_str());
             if source_type == Some("agent") {
-                let source_id = action_data.and_then(|d| d.get("source_id")).and_then(|v| v.as_str());
+                let source_id = action_data
+                    .and_then(|d| d.get("source_id"))
+                    .and_then(|v| v.as_str());
                 match source_id {
                     None => {
                         return Err("取(从角色获取)必须指定 source_id".to_string());
                     }
                     Some(id) => {
                         if let Err(e) = cyber_jianghu_protocol::resolve_agent_id(id, &nearby_ids) {
-                            return Err(Self::format_target_rejection(id, e, &nearby_names, "来源角色"));
+                            return Err(Self::format_target_rejection(
+                                id,
+                                e,
+                                &nearby_names,
+                                "来源角色",
+                            ));
                         }
                     }
                 }
@@ -374,7 +385,12 @@ impl ReflectorSoul {
                     }
                     Some(id) => {
                         if let Err(e) = cyber_jianghu_protocol::resolve_agent_id(id, &nearby_ids) {
-                            return Err(Self::format_target_rejection(id, e, &nearby_names, "目标角色"));
+                            return Err(Self::format_target_rejection(
+                                id,
+                                e,
+                                &nearby_names,
+                                "目标角色",
+                            ));
                         }
                     }
                 }
