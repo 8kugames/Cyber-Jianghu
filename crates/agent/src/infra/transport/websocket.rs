@@ -75,28 +75,33 @@ async fn recv_with_timeout<T>(
     }
 }
 
-/// 处理 worldstate_tx.send 失败——receiver drop 时清理 sender，抑制噪音日志
+/// 处理 worldstate_tx.send 失败——仅分级记日志，**绝不清空 sender**
 ///
-/// 当 SSE consumer（SSE dashboard / panel）断开时，watch::Sender 的 receiver 计数归零，
-/// 后续 send 返回 SendError。如果不清理 sender，每次 send 都 warn 一条，导致 24h 累计
-/// 1300+ 条噪音日志（联调报告 §9.7 P1-2 观察）。
+/// watch::Sender::send 在零 receiver 时返回 SendError，但这是**正常的瞬时态**，不能据此
+/// 清空 sender：
+/// - lifecycle 主循环用 `select!` 包裹 `receive_world_state()`，每次别的分支胜出，该
+///   future 被 drop → 其 watch::Receiver 被 drop → 出现零 receiver 窗口；
+/// - server 在连接后会**立即推送 initial WorldState**（见 server
+///   websocket/handler.rs `build_initial_world_state`），此刻 lifecycle 尚在 reconnect
+///   注册流程、未 subscribe，同样处于零 receiver 状态。
 ///
-/// 修法：失败时用 watch::Sender::is_closed() 检测 receiver 是否 drop（true），是则
-/// debug 一条 + 清掉 `worldstate_field`；非典型失败（receiver 仍存在但 send 失败）
-/// 才 warn 一条（罕见）。
+/// 若在此处清空 `worldstate_tx`，lifecycle 下一次 `receive_world_state()` 会读到 None
+/// 并误判 "Not connected to server" → 触发 reconnect → 重连后再被清 → **WS 重连风暴**
+/// （~3Hz 死循环、backoff 永不升级、零 intent 提交）。这是 8d130537 引入、联调报告
+/// 0727.docker.1 §9.7 P0 复现的回归。
+///
+/// 修法：仅按 `is_closed()` 分级记日志（零 receiver → debug，已够抑制原 1300+/24h warn
+/// 噪音；罕见半失败 → warn 保留诊断），**保留 sender**——receiver 回归后 send 自然恢复。
 fn handle_worldstate_send_failure<T>(
     tx: &tokio::sync::watch::Sender<T>,
-    worldstate_field: &mut Option<tokio::sync::watch::Sender<T>>,
     context: &str,
     err: tokio::sync::watch::error::SendError<T>,
 ) {
     if tx.is_closed() {
         tracing::debug!(
-            "worldstate_tx.send 失败 [{}]：receiver 已 drop，清理 sender",
+            "worldstate_tx.send 失败 [{}]：暂无 receiver（select! 间隙或初始推送），保留 sender",
             context
         );
-        *worldstate_field = None;
-        // 抑制未使用变量警告
         let _ = err;
     } else {
         tracing::warn!(
@@ -809,13 +814,7 @@ async fn websocket_background_task(
                     guard.worldstate_tx.clone()
                 }
                     && let Err(e) = tx.send(None) {
-                        let mut guard = state.write().await;
-                        handle_worldstate_send_failure(
-                            tx,
-                            &mut guard.worldstate_tx,
-                            "read-timeout",
-                            e,
-                        );
+                        handle_worldstate_send_failure(tx, "read-timeout", e);
                     }
                 break;
             }
@@ -867,13 +866,7 @@ async fn websocket_background_task(
                                 debug!("Background: WorldState tick={}", data.tick_id);
                                 if let Some(ref tx) = ws_tx
                                     && let Err(e) = tx.send(Some(data)) {
-                                        let mut guard = state.write().await;
-                                        handle_worldstate_send_failure(
-                                            tx,
-                                            &mut guard.worldstate_tx,
-                                            "world-state-msg",
-                                            e,
-                                        );
+                                        handle_worldstate_send_failure(tx, "world-state-msg", e);
                                     }
                             }
                             Ok(msg @ ServerMessage::ConfigUpdate { .. }) => {
@@ -1495,30 +1488,29 @@ mod tests {
         );
     }
 
-    /// WI-001：receiver drop 后 send 失败时，handle_worldstate_send_failure
-    /// 必须清掉 worldstate_field（置 None）而不是每次都 warn 噪音
+    /// 0727.docker.1 §9.7 P0 回归：receiver drop 后 send 失败时，handle_worldstate_send_failure
+    /// 必须**只记日志、保留 sender**——清空 sender 会破坏 `receive_world_state()`，引发 WS 重连风暴。
     #[tokio::test]
-    async fn test_handle_worldstate_send_failure_clears_on_receiver_drop() {
+    async fn test_handle_worldstate_send_failure_keeps_sender_on_receiver_drop() {
         let (tx, rx) = tokio::sync::watch::channel::<Option<u32>>(None);
-        let mut worldstate_field: Option<tokio::sync::watch::Sender<Option<u32>>> = Some(tx.clone());
 
-        // 模拟 receiver drop（rx drop）
+        // 模拟零 receiver（select! 间隙 / lifecycle 未 subscribe 时收到初始 WorldState）
         drop(rx);
         assert!(
             tx.is_closed(),
-            "WI-001 前置：receiver drop 后 sender.is_closed() 必须为 true"
+            "前置：零 receiver 时 sender.is_closed() 必须为 true"
         );
 
-        // send 必须失败（receiver 已 drop）
-        let send_err = tx
-            .send(Some(42))
-            .expect_err("receiver drop 后 send 必须失败");
-        // 调用 helper：应清 field
-        super::handle_worldstate_send_failure(&tx, &mut worldstate_field, "test-ctx", send_err);
+        // 零 receiver 时 send 必须失败
+        let send_err = tx.send(Some(42)).expect_err("零 receiver 时 send 必须失败");
+        // 调用 helper：只记日志，不得清空 sender
+        super::handle_worldstate_send_failure(&tx, "test-ctx", send_err);
 
+        // 关键断言：sender 仍存活——subscribe 新 receiver 后 send 必须恢复成功
+        let _rx2 = tx.subscribe();
         assert!(
-            worldstate_field.is_none(),
-            "WI-001：receiver drop 后必须清掉 worldstate_field"
+            tx.send(Some(7)).is_ok(),
+            "helper 不得清空 sender：subscribe 回归后 send 必须恢复"
         );
     }
 }
