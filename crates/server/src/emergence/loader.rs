@@ -12,8 +12,8 @@ use anyhow::{Context, Result};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::detector::ActionRow;
 use super::HealthMetrics;
+use super::detector::ActionRow;
 
 /// 读取时间窗口内的动作流 + agent 名字映射。
 ///

@@ -49,11 +49,9 @@ pub async fn get_emergence(
     // 解析窗口（start/end 优先；否则 window 回溯；window 缺省 240）
     let tick_end = match q.end {
         Some(e) => e,
-        None => {
-            emergence::loader::current_max_tick(&state.db_pool)
-                .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        }
+        None => emergence::loader::current_max_tick(&state.db_pool)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?,
     };
     let tick_start = match q.start {
         Some(s) => s,

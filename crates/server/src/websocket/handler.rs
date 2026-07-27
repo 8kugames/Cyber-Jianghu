@@ -915,14 +915,8 @@ async fn handle_client_message(
             game_day,
             relationships,
         } => {
-            handle_relationship_snapshot(
-                device_id,
-                msg_agent_id,
-                game_day,
-                &relationships,
-                state,
-            )
-            .await
+            handle_relationship_snapshot(device_id, msg_agent_id, game_day, &relationships, state)
+                .await
         }
         ClientMessage::TraceReport { traces } => {
             handle_trace_report(device_id, &traces, state).await
@@ -1354,7 +1348,8 @@ async fn handle_intent(
 
             // 三魂元数据就地写入（与 intent 同一条消息到达，消除独立 SoulCycleReport 的丢失风险）
             if let Some(ref metadata) = soul_cycle_metadata {
-                let metadata_json = serde_json::to_value(metadata).unwrap_or(serde_json::Value::Null);
+                let metadata_json =
+                    serde_json::to_value(metadata).unwrap_or(serde_json::Value::Null);
                 if let Err(e) = crate::db::update_soul_cycle_metadata(
                     &state.db_pool,
                     agent_id,
@@ -1372,7 +1367,9 @@ async fn handle_intent(
 
                 // subsequent 占位（pipe_seq≥1）
                 let world_time = metadata.world_time.clone();
-                for (idx, (act_type, act_data, chaos, dream)) in subsequent_summaries.iter().enumerate() {
+                for (idx, (act_type, act_data, chaos, dream)) in
+                    subsequent_summaries.iter().enumerate()
+                {
                     let pipe_seq = (idx + 1) as i32;
                     let placeholder = cyber_jianghu_protocol::SoulCycleMetadata {
                         world_time: world_time.clone(),
@@ -1416,7 +1413,8 @@ async fn handle_intent(
                         }],
                         immediate_intents: vec![],
                     };
-                    let ph_json = serde_json::to_value(&placeholder).unwrap_or(serde_json::Value::Null);
+                    let ph_json =
+                        serde_json::to_value(&placeholder).unwrap_or(serde_json::Value::Null);
                     if let Err(e) = crate::db::update_soul_cycle_metadata(
                         &state.db_pool,
                         agent_id,
@@ -1991,8 +1989,7 @@ mod tests {
     fn test_relationship_ownership_check_rejects_cross_agent_even_if_target_exists() {
         let resolved = Uuid::new_v4();
         let other_real_agent = Uuid::new_v4();
-        let res =
-            validate_relationship_snapshot_ownership(resolved, other_real_agent);
+        let res = validate_relationship_snapshot_ownership(resolved, other_real_agent);
         assert!(res.is_err());
     }
 
@@ -2057,8 +2054,7 @@ mod tests {
 
         // AppState 过重无法轻量构造；这里直接验证底层调用语义：
         // 空 Vec + 失败的 DB 查询返回 Err（而非 panic / Ok）。
-        let resolved =
-            crate::db::get_agent_by_device_id(&pool, Uuid::new_v4()).await;
+        let resolved = crate::db::get_agent_by_device_id(&pool, Uuid::new_v4()).await;
         assert!(
             resolved.is_err(),
             "lazy pool must surface DB error, not panic"
@@ -2092,16 +2088,18 @@ mod tests {
         crate::db::upsert_relationship_snapshot(&pool, source, 1, &seed, 1)
             .await
             .expect("seed upsert");
-        let seeded =
-            crate::db::get_relationships_by_agent(&pool, source).await.unwrap();
+        let seeded = crate::db::get_relationships_by_agent(&pool, source)
+            .await
+            .unwrap();
         assert_eq!(seeded.len(), 1, "seed must persist one row");
 
         // 全量覆盖空 Vec —— 只 DELETE，不 INSERT
         crate::db::upsert_relationship_snapshot(&pool, source, 2, &[], 2)
             .await
             .expect("empty upsert");
-        let after =
-            crate::db::get_relationships_by_agent(&pool, source).await.unwrap();
+        let after = crate::db::get_relationships_by_agent(&pool, source)
+            .await
+            .unwrap();
         assert!(
             after.is_empty(),
             "empty Vec snapshot must DELETE all source rows without panic"

@@ -97,8 +97,7 @@ pub async fn apply_state_change(
             effects,
         } => {
             let remove_result =
-                crate::inventory::InventoryManager::remove_item(tx, *agent_id, item_id, 1)
-                    .await;
+                crate::inventory::InventoryManager::remove_item(tx, *agent_id, item_id, 1).await;
 
             if let Err(e) = remove_result {
                 warn!(
@@ -203,8 +202,7 @@ pub async fn apply_state_change(
                 "ground" => {
                     if let Some(state) = agent_states.iter().find(|s| s.agent_id == *agent_id) {
                         let node_id = state.node_id.clone();
-                        match crate::db::remove_ground_item(tx, &node_id, item_id, *quantity)
-                            .await
+                        match crate::db::remove_ground_item(tx, &node_id, item_id, *quantity).await
                         {
                             Ok(true) => {
                                 if let Err(e) = crate::inventory::InventoryManager::add_item(
@@ -319,22 +317,16 @@ pub async fn apply_state_change(
             quantity,
             location,
         } => {
-            if let Err(e) = crate::inventory::InventoryManager::remove_item(
-                tx, *agent_id, item_id, *quantity,
-            )
-            .await
+            if let Err(e) =
+                crate::inventory::InventoryManager::remove_item(tx, *agent_id, item_id, *quantity)
+                    .await
             {
                 warn!("丢弃物品失败（背包扣除失败）: {}", e);
                 false
             } else {
-                if let Err(e) = crate::db::add_ground_item(
-                    tx,
-                    location,
-                    item_id,
-                    *quantity,
-                    Some(*agent_id),
-                )
-                .await
+                if let Err(e) =
+                    crate::db::add_ground_item(tx, location, item_id, *quantity, Some(*agent_id))
+                        .await
                 {
                     warn!("丢弃物品添加到地面失败，回滚背包: {}", e);
                     if let Err(re) = crate::inventory::InventoryManager::add_item(
@@ -637,9 +629,7 @@ pub async fn apply_state_change(
                 if was_alive && !state.inventory_cleared_this_tick {
                     state.inventory_cleared_this_tick = true;
                     let location = state.node_id.clone();
-                    match crate::inventory::InventoryManager::clear_inventory(tx, *agent_id)
-                        .await
-                    {
+                    match crate::inventory::InventoryManager::clear_inventory(tx, *agent_id).await {
                         Ok(items) => {
                             for item in items {
                                 if let Err(e) = crate::db::add_ground_item(
@@ -681,8 +671,7 @@ pub async fn apply_state_change(
                 state.node_id = new_location.clone();
             }
 
-            if let Err(e) = crate::db::update_agent_location(tx, *agent_id, new_location).await
-            {
+            if let Err(e) = crate::db::update_agent_location(tx, *agent_id, new_location).await {
                 warn!("更新位置失败: {}", e);
                 false
             } else {

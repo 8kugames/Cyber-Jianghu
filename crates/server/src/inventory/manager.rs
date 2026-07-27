@@ -147,7 +147,10 @@ impl InventoryManager {
     }
 
     /// 获取Agent背包占用的格子数
-    pub async fn get_slot_count(conn: &mut sqlx::PgConnection, agent_id: Uuid) -> Result<i32, InventoryError> {
+    pub async fn get_slot_count(
+        conn: &mut sqlx::PgConnection,
+        agent_id: Uuid,
+    ) -> Result<i32, InventoryError> {
         let count = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM agent_inventory WHERE agent_id = $1",
         )
@@ -345,18 +348,20 @@ impl InventoryManager {
             // 当前可装备的大类只有 weapon。
             if let Some(config) = crate::game_data::ItemRegistry::get(item_id) {
                 if matches!(config.item_type.as_str(), "weapon") {
-                    sqlx::query("UPDATE agent_inventory SET is_equipped = false WHERE agent_id = $1")
-                        .bind(agent_id)
-                        .execute(&mut *conn)
-                        .await
-                        .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
+                    sqlx::query(
+                        "UPDATE agent_inventory SET is_equipped = false WHERE agent_id = $1",
+                    )
+                    .bind(agent_id)
+                    .execute(&mut *conn)
+                    .await
+                    .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
 
                     // 装备新物品
                     sqlx::query("UPDATE agent_inventory SET is_equipped = true WHERE id = $1")
                         .bind(item.id)
-                    .execute(&mut *conn)
-                    .await
-                    .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
+                        .execute(&mut *conn)
+                        .await
+                        .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
 
                     info!("成功装备物品: {}", item_id);
                     Ok(())

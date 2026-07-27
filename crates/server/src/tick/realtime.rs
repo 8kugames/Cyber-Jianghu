@@ -1045,8 +1045,7 @@ impl IntentWorker {
                 }
             };
 
-            match crate::inventory::InventoryManager::clear_inventory(&mut tx, agent_id).await
-            {
+            match crate::inventory::InventoryManager::clear_inventory(&mut tx, agent_id).await {
                 Ok(items) => {
                     for item in items {
                         if let Err(e) = crate::db::add_ground_item(

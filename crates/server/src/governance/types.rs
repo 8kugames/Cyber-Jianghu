@@ -113,14 +113,7 @@ mod tests {
     #[test]
     fn test_parse_vote_str_rejects_invalid_db_value() {
         for invalid in [
-            "",
-            "Approve",
-            "REJECT",
-            "approved",
-            "yes",
-            "maybe",
-            "0",
-            "1",
+            "", "Approve", "REJECT", "approved", "yes", "maybe", "0", "1",
         ] {
             assert!(
                 parse_vote_str(invalid).is_err(),
@@ -229,13 +222,7 @@ mod tests {
 
     #[test]
     fn test_proposal_stage_try_from_db_str_rejects_invalid_value() {
-        for invalid in [
-            "",
-            "awaiting_initial",
-            "AwaitingPeer",
-            "DONE",
-            "garbage",
-        ] {
+        for invalid in ["", "awaiting_initial", "AwaitingPeer", "DONE", "garbage"] {
             assert!(
                 ProposalStage::try_from_db_str(invalid).is_err(),
                 "expected Err for {invalid:?}"

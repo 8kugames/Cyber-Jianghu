@@ -27,14 +27,20 @@ pub async fn check_session(State(state): State<Arc<AppState>>, req: Request) -> 
 
     if let Some(token) = token {
         // 常量时间比对，避免计时侧信道（P1-20: admin token 不再用裸 ==）
-        if crate::handlers::auth::constant_time_eq(token.as_bytes(), state.admin_write_token.as_bytes()) {
+        if crate::handlers::auth::constant_time_eq(
+            token.as_bytes(),
+            state.admin_write_token.as_bytes(),
+        ) {
             return Json(serde_json::json!({
                 "authenticated": true,
                 "token_type": "write"
             }))
             .into_response();
         }
-        if crate::handlers::auth::constant_time_eq(token.as_bytes(), state.admin_read_token.as_bytes()) {
+        if crate::handlers::auth::constant_time_eq(
+            token.as_bytes(),
+            state.admin_read_token.as_bytes(),
+        ) {
             return Json(serde_json::json!({
                 "authenticated": true,
                 "token_type": "read"

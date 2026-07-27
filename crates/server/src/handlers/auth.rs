@@ -56,10 +56,7 @@ pub async fn require_client_read_token(
     req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    info!(
-        "require_client_read_token called: uri={}",
-        req.uri()
-    );
+    info!("require_client_read_token called: uri={}", req.uri());
 
     // 1) 优先：如果配了 CLIENT_READ_TOKEN，先尝试用它鉴权
     if let Some(client_token) = &state.client_read_token
@@ -123,10 +120,7 @@ pub async fn require_write_token(
     req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    info!(
-        "require_write_token called: uri={}",
-        req.uri()
-    );
+    info!("require_write_token called: uri={}", req.uri());
 
     if authenticate_admin_token(
         req.headers(),
@@ -243,15 +237,30 @@ mod tests {
     fn test_authenticate_admin_token_read_accepts_read_or_write() {
         let h_read = headers_with_bearer(READ_TOKEN);
         let h_write = headers_with_bearer(WRITE_TOKEN);
-        assert!(authenticate_admin_token(&h_read, READ_TOKEN, WRITE_TOKEN, false));
-        assert!(authenticate_admin_token(&h_write, READ_TOKEN, WRITE_TOKEN, false));
+        assert!(authenticate_admin_token(
+            &h_read,
+            READ_TOKEN,
+            WRITE_TOKEN,
+            false
+        ));
+        assert!(authenticate_admin_token(
+            &h_write,
+            READ_TOKEN,
+            WRITE_TOKEN,
+            false
+        ));
     }
 
     /// 验证 P1-20：写权限只允许 RW；R Token 必须被拒。
     #[test]
     fn test_authenticate_admin_token_write_rejects_read_token() {
         let h_read = headers_with_bearer(READ_TOKEN);
-        assert!(!authenticate_admin_token(&h_read, READ_TOKEN, WRITE_TOKEN, true));
+        assert!(!authenticate_admin_token(
+            &h_read,
+            READ_TOKEN,
+            WRITE_TOKEN,
+            true
+        ));
     }
 
     /// 验证 P1-20：缺 Header 直接拒绝。
@@ -259,7 +268,12 @@ mod tests {
     #[test]
     fn test_authenticate_admin_token_rejects_missing_header() {
         let h = HeaderMap::new();
-        assert!(!authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, false));
+        assert!(!authenticate_admin_token(
+            &h,
+            READ_TOKEN,
+            WRITE_TOKEN,
+            false
+        ));
         assert!(!authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, true));
     }
 
@@ -267,7 +281,12 @@ mod tests {
     #[test]
     fn test_authenticate_admin_token_rejects_invalid_value() {
         let h = headers_with_bearer("not-a-token");
-        assert!(!authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, false));
+        assert!(!authenticate_admin_token(
+            &h,
+            READ_TOKEN,
+            WRITE_TOKEN,
+            false
+        ));
         assert!(!authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, true));
     }
 
@@ -279,7 +298,12 @@ mod tests {
             header::AUTHORIZATION,
             HeaderValue::from_static("Basic dXNlcjpwYXNz"),
         );
-        assert!(!authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, false));
+        assert!(!authenticate_admin_token(
+            &h,
+            READ_TOKEN,
+            WRITE_TOKEN,
+            false
+        ));
     }
 
     // ---- require_client_read_token 的纯函数 authenticate_with_any_token 单测 ----

@@ -395,7 +395,11 @@ pub async fn update_agent_online(pool: &PgPool, agent_id: Uuid) -> Result<()> {
 /// # 返回
 /// - Ok(()): 更新成功
 /// - Err: 更新失败
-pub async fn update_agent_location(conn: &mut sqlx::PgConnection, agent_id: Uuid, node_id: &str) -> Result<()> {
+pub async fn update_agent_location(
+    conn: &mut sqlx::PgConnection,
+    agent_id: Uuid,
+    node_id: &str,
+) -> Result<()> {
     debug!("更新Agent位置: {} -> {}", agent_id, node_id);
 
     sqlx::query(
@@ -862,12 +866,13 @@ pub async fn auto_rebirth_agent(
     let mut tx = pool.begin().await.context("开始转世事务失败")?;
 
     // 1. 查询旧 agent（P1-10 F2：必须 device_id 匹配，杜绝跨设备转世）
-    let old_agent: Option<(String, String, Uuid, Option<String>)> = sqlx::query_as(REBIRTH_FETCH_OLD_AGENT_SQL)
-    .bind(old_agent_id)
-    .bind(device_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .context("查询旧 Agent 失败")?;
+    let old_agent: Option<(String, String, Uuid, Option<String>)> =
+        sqlx::query_as(REBIRTH_FETCH_OLD_AGENT_SQL)
+            .bind(old_agent_id)
+            .bind(device_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .context("查询旧 Agent 失败")?;
 
     let (name, system_prompt, fetched_device_id, inherited_model_id) = match old_agent {
         Some(a) => a,
@@ -1157,8 +1162,8 @@ WHERE agent_id = $1
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_rebirth_ticks, REBIRTH_FETCH_OLD_AGENT_SQL, REBIRTH_MARK_RETIRED_SQL,
-        ROTATE_DEVICE_TOKEN_SQL,
+        REBIRTH_FETCH_OLD_AGENT_SQL, REBIRTH_MARK_RETIRED_SQL, ROTATE_DEVICE_TOKEN_SQL,
+        compute_rebirth_ticks,
     };
 
     /// 验证 P1-5：state_tick 必须等于 caller 传入的世界 tick，不再用旧 agent 的
@@ -1167,7 +1172,10 @@ mod tests {
     fn test_compute_rebirth_ticks_uses_world_tick_for_state_tick() {
         assert_eq!(compute_rebirth_ticks(100, 10), (100, 90));
         assert_eq!(compute_rebirth_ticks(1, 0), (1, 1));
-        assert_eq!(compute_rebirth_ticks(1_000_000, 5_000), (1_000_000, 995_000));
+        assert_eq!(
+            compute_rebirth_ticks(1_000_000, 5_000),
+            (1_000_000, 995_000)
+        );
     }
 
     /// 验证 P1-5：starting_age_ticks == 0 时 birth_tick = world_tick，

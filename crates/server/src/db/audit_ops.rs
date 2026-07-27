@@ -28,10 +28,7 @@ pub struct AuditLogEntry<'a> {
     pub after_state: Option<serde_json::Value>,
 }
 
-pub fn build_audit_request_context(
-    headers: &HeaderMap,
-    addr: SocketAddr,
-) -> AuditRequestContext {
+pub fn build_audit_request_context(headers: &HeaderMap, addr: SocketAddr) -> AuditRequestContext {
     let request_id = headers
         .get("x-request-id")
         .and_then(|value| value.to_str().ok())

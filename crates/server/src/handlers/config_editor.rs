@@ -265,7 +265,8 @@ pub async fn update_config_content(
 
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "Hot reload failed, file rolled back. Please check server logs for details.".to_string(),
+                "Hot reload failed, file rolled back. Please check server logs for details."
+                    .to_string(),
             )
         }
     }

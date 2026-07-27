@@ -227,7 +227,9 @@ pub async fn append_daily_record(record: &DailyReward) {
         Some(c) if c.output.enabled => c,
         _ => return,
     };
-    let base = crate::paths::get_data_dir().join(&cfg.output.base_dir).join("daily");
+    let base = crate::paths::get_data_dir()
+        .join(&cfg.output.base_dir)
+        .join("daily");
     if tokio::fs::create_dir_all(&base).await.is_err() {
         return;
     }
@@ -237,7 +239,12 @@ pub async fn append_daily_record(record: &DailyReward) {
         Err(_) => return,
     };
     use tokio::io::AsyncWriteExt;
-    if let Ok(mut f) = tokio::fs::OpenOptions::new().create(true).append(true).open(&path).await {
+    if let Ok(mut f) = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .await
+    {
         let _ = f.write_all(line.as_bytes()).await;
     }
 }

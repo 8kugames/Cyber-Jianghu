@@ -3,9 +3,9 @@ use crate::actions::{
     YongData, YuData, parse_action_data,
 };
 use crate::db::DbPool;
-use crate::game_data::types::actions::{ValidationType, ValidatorKind};
-use crate::game_data::types::ActionValidation;
 use crate::game_data::ActionRegistry;
+use crate::game_data::types::ActionValidation;
+use crate::game_data::types::actions::{ValidationType, ValidatorKind};
 use crate::models::{AgentState, Intent};
 use cyber_jianghu_protocol::GameError;
 use uuid::Uuid;

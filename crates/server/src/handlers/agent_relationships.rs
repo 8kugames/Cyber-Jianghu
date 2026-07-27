@@ -54,10 +54,12 @@ pub struct AgentIdPath {
 pub async fn get_all_relationships(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ListResponse>, axum::http::StatusCode> {
-    let rows = db::get_all_relationships(&state.db_pool).await.map_err(|e| {
-        tracing::error!("查询 agent_relationships 全表失败: {}", e);
-        axum::http::StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let rows = db::get_all_relationships(&state.db_pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("查询 agent_relationships 全表失败: {}", e);
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     let relationships: Vec<RelationshipItem> = rows
         .into_iter()

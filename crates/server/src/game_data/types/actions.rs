@@ -8,8 +8,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use cyber_jianghu_protocol::types::governance::{AtomicKind, ProtocolKind, TargetArity};
 use cyber_jianghu_protocol::types::OocRisk;
+use cyber_jianghu_protocol::types::governance::{AtomicKind, ProtocolKind, TargetArity};
 
 // ============================================================================
 // 动作配置条目
@@ -235,7 +235,6 @@ pub enum ValidationType {
 }
 
 impl FieldValidation {
-
     /// 获取 i32 参数
     pub fn get_i32(&self, key: &str) -> Option<i32> {
         self.params.get(key).and_then(|v| {

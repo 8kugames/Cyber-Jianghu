@@ -773,10 +773,14 @@ pub async fn agent_grant_items(
                 user_agent: audit_ctx.user_agent,
                 before_state,
                 after_state: Some(serde_json::json!(
-                    payload.items.iter().map(|item| serde_json::json!({
-                        "item_id": item.item_id,
-                        "quantity_delta": item.quantity,
-                    })).collect::<Vec<_>>()
+                    payload
+                        .items
+                        .iter()
+                        .map(|item| serde_json::json!({
+                            "item_id": item.item_id,
+                            "quantity_delta": item.quantity,
+                        }))
+                        .collect::<Vec<_>>()
                 )),
             },
         )

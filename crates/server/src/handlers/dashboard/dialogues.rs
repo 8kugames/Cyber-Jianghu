@@ -185,10 +185,7 @@ pub async fn get_dialogues(
     dialogues.reverse();
 
     let count = dialogues.len();
-    Json(DialoguesResponse {
-        count,
-        dialogues,
-    })
+    Json(DialoguesResponse { count, dialogues })
 }
 
 #[cfg(test)]

@@ -901,8 +901,7 @@ impl TickScheduler {
                     let gd = self.game_data_cache.get();
                     gd.game_rules.data.agent_state.tick.real_seconds_per_tick as i64
                 };
-                let ticks_per_day_real_secs =
-                    ticks_per_game_day as i64 * real_seconds_per_tick;
+                let ticks_per_day_real_secs = ticks_per_game_day as i64 * real_seconds_per_tick;
                 let game_day = self.current_tick_id / ticks_per_day_real_secs;
                 let day_start_tick = self.current_tick_id - ticks_per_day_real_secs + 1;
                 tracing::info!(
@@ -944,8 +943,7 @@ impl TickScheduler {
                 period_ticks,
                 real_seconds_per_tick
             );
-            let chronicle_period_ticks =
-                (period_ticks / real_seconds_per_tick) as u64;
+            let chronicle_period_ticks = (period_ticks / real_seconds_per_tick) as u64;
             if self.tick_counter > 0 && self.tick_counter.is_multiple_of(chronicle_period_ticks) {
                 let period_start = self.current_tick_id - period_ticks + 1;
                 let db_pool = self.db_pool.clone();

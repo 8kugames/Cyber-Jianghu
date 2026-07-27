@@ -6,7 +6,7 @@ use cyber_jianghu_protocol::GovernanceTopic;
 use sqlx::{PgPool, Postgres, Row};
 use uuid::Uuid;
 
-use super::types::{parse_vote_str, ProposalEvidence, ProposalStage, ProposalStatus, VoteChoice};
+use super::types::{ProposalEvidence, ProposalStage, ProposalStatus, VoteChoice, parse_vote_str};
 
 // ---------------------------------------------------------------------------
 // Row types (sqlx::FromRow)
@@ -168,7 +168,11 @@ impl ProposalStore {
     ) -> Result<Uuid> {
         let topics_val = serde_json::to_value(governance_topics).context("serialize topics")?;
         let pid_json = serde_json::to_value(proposal_id).context("serialize proposal_id")?;
-        let mut tx = self.pool.begin().await.context("begin upsert proposal group tx")?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("begin upsert proposal group tx")?;
         let row = sqlx::query_as::<Postgres, GroupRow>(
             "INSERT INTO action_evolution_proposal_groups \
              (similarity_key, proposal_ids, governance_topics, primary_soul) \

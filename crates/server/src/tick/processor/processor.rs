@@ -74,7 +74,7 @@ impl StateProcessor {
         pipe_seq: i32,
     ) -> Result<SingleProcessingResult> {
         let mut tx = self.db_pool.begin().await.context("failed to begin tx")?;
-        
+
         let executor = ActionExecutor::new(self.db_pool.clone());
         let mut events: Vec<(uuid::Uuid, WorldEvent)> = Vec::new();
 
@@ -266,9 +266,7 @@ impl StateProcessor {
         // P0-2 修复：action_log 必须在 tx 内写入，与 state mutations 同生命周期。
         // 若 insert 失败 → execution_failed = true → 走 rollback 分支，state 不落库，
         // 保证"state 变更 + action_log"要么全成功要么全回滚（Saga 原子性）。
-        if let Err(e) =
-            crate::db::batch_insert_action_logs(&mut tx, &[action_log]).await
-        {
+        if let Err(e) = crate::db::batch_insert_action_logs(&mut tx, &[action_log]).await {
             warn!("Action log 写入失败（将回滚整个 Saga）: {:#}", e);
             execution_failed = true;
         }

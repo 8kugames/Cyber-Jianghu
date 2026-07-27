@@ -32,9 +32,7 @@ pub struct LocationsResponse {
 /// GET /api/dashboard/locations
 ///
 /// 返回完整地点图（节点+边），数据来自 LocationRegistry 的内存快照。
-pub async fn get_locations(
-    State(state): State<Arc<AppState>>,
-) -> Json<LocationsResponse> {
+pub async fn get_locations(State(state): State<Arc<AppState>>) -> Json<LocationsResponse> {
     // location_snapshot 返回 owned LocationRegistry（已脱离读锁）
     let registry = state.game_data.location_snapshot();
     let graph: LocationGraph = registry.export_graph();
