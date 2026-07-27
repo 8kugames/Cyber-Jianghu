@@ -87,7 +87,7 @@ pub async fn store_with_llm(
     // 幂等 INSERT ... ON CONFLICT：消除 SELECT-INSERT 竞态。
     //
     // chronicle_id 仅在 INSERT 路径（无冲突）由 SQL 内子查询原子生成：
-    //   format('C-%03d', COALESCE(MAX(...) + 1, 1))
+    //   'C-' || lpad((COALESCE(MAX(...) + 1, 1))::text, 3, '0')
     // 冲突时（同一 period_start/period_end 已存在）走 DO UPDATE 分支，
     // 此时 chronicle_id = chronicles.chronicle_id —— 显式保留原值，绝不被 EXCLUDED 覆盖。
     //
@@ -106,7 +106,9 @@ pub async fn store_with_llm(
             highlights, agent_summaries, action_stats,
             location_stats, deaths, births, raw_data, status
         ) VALUES (
-            (SELECT format('C-%03d', COALESCE(MAX(CAST(SUBSTRING(chronicle_id FROM 3) AS INT)), 0) + 1)
+            (SELECT 'C-' || lpad(
+                (COALESCE(MAX(CAST(SUBSTRING(chronicle_id FROM 3) AS INT)), 0) + 1)::text,
+                3, '0')
              FROM chronicles WHERE chronicle_id LIKE 'C-%'),
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
         )
