@@ -167,6 +167,16 @@ fn parse_hour_key(s: &str) -> DateTime<Utc> {
 
 const TOKEN_LOG_FILE: &str = "token_cost_count.tmp";
 
+/// 前缀漂移告警阈值：单次 persist_and_reset 周期（≈单 tick）内
+/// distinct system hash 数超过该值即 warn。
+/// 与 direct_client::emit_cache_diagnostics 的逐次 hash 变化告警互补：
+/// 后者捕获相邻两次调用的前缀变化，本阈值捕获单周期内的 hash 爆发。
+const PREFIX_DRIFT_HASH_WARN_THRESHOLD: usize = 4;
+
+fn has_prefix_drift(bucket: &HourBucketStats) -> bool {
+    bucket.system_hash_distribution.len() > PREFIX_DRIFT_HASH_WARN_THRESHOLD
+}
+
 fn log_file_path() -> Option<PathBuf> {
     Some(
         crate::config::data_base_dir()
@@ -452,8 +462,19 @@ pub fn persist_and_reset() {
         PersistedTokenStats::default()
     };
 
-    // 合并 in-memory → existing
+    // 合并 in-memory → existing（system_hash_distribution 仅存内存态：[u8;32] 无法作 JSON map key）
     for (model_key, hour_key, phs) in snapshot {
+        // 前缀漂移检查：落盘重置前基于内存桶的 hash 分布告警
+        if has_prefix_drift(&phs.bucket) {
+            tracing::warn!(
+                target: "cache_diagnostics",
+                model = %model_key,
+                hour = %hour_key,
+                distinct_hashes = phs.bucket.system_hash_distribution.len(),
+                threshold = PREFIX_DRIFT_HASH_WARN_THRESHOLD,
+                "system_hash_burst — 单周期 distinct hash 超阈值，疑似无谓改动 prompt 前缀"
+            );
+        }
         let model_detail = existing.detail.entry(hour_key).or_default();
         let bucket = model_detail.entry(model_key).or_default();
         bucket.prompt_tokens += phs.bucket.prompt_tokens;
@@ -884,6 +905,33 @@ mod tests {
             50,
             10,
             system_hash,
+        );
+    }
+
+    // ---- 10. has_prefix_drift 阈值边界 ----
+    fn bucket_with_hashes(n: usize) -> HourBucketStats {
+        let mut bucket = HourBucketStats::default();
+        for i in 0..n {
+            let mut h = [0u8; 32];
+            h[0] = i as u8;
+            bucket.system_hash_distribution.insert(h, 1);
+        }
+        bucket
+    }
+
+    #[test]
+    fn has_prefix_drift_threshold_boundary() {
+        assert!(
+            !has_prefix_drift(&bucket_with_hashes(1)),
+            "单 hash（稳定 agent）不应告警"
+        );
+        assert!(
+            !has_prefix_drift(&bucket_with_hashes(PREFIX_DRIFT_HASH_WARN_THRESHOLD)),
+            "等于阈值不应告警"
+        );
+        assert!(
+            has_prefix_drift(&bucket_with_hashes(PREFIX_DRIFT_HASH_WARN_THRESHOLD + 1)),
+            "超过阈值必须告警"
         );
     }
 }

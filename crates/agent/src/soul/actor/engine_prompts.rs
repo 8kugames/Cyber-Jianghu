@@ -507,7 +507,10 @@ impl super::CognitiveEngine {
             return String::new();
         }
         let mut s = String::from("## 已掌握技能 (查询详情: skill_view(skill_id))\n\n");
-        for id in skill_cache.keys() {
+        // HashMap 迭代序每进程随机，必须排序保证 semi-static 段字节稳定（LLM prefix cache）
+        let mut ids: Vec<&String> = skill_cache.keys().collect();
+        ids.sort_unstable();
+        for id in ids {
             s.push_str(&format!("- {}\n", id));
         }
         s
@@ -546,5 +549,34 @@ mod tests {
     fn compute_system_hash_returns_32_bytes() {
         let h = compute_system_hash("any content");
         assert_eq!(h.len(), 32);
+    }
+
+    #[test]
+    fn build_skill_index_sorted_regardless_of_insertion_order() {
+        let mut cache = std::collections::HashMap::new();
+        cache.insert("zeta-skill".to_string(), String::new());
+        cache.insert("alpha-skill".to_string(), String::new());
+        cache.insert("mid-skill".to_string(), String::new());
+        let out = super::super::CognitiveEngine::build_skill_index(&cache);
+        let a = out.find("alpha-skill").expect("alpha present");
+        let m = out.find("mid-skill").expect("mid present");
+        let z = out.find("zeta-skill").expect("zeta present");
+        assert!(a < m && m < z, "skill index must be sorted, got:\n{}", out);
+
+        // 不同插入顺序产出字节相同（进程重启 RandomState 变化不影响输出）
+        let mut cache2 = std::collections::HashMap::new();
+        cache2.insert("mid-skill".to_string(), String::new());
+        cache2.insert("zeta-skill".to_string(), String::new());
+        cache2.insert("alpha-skill".to_string(), String::new());
+        assert_eq!(
+            out,
+            super::super::CognitiveEngine::build_skill_index(&cache2)
+        );
+    }
+
+    #[test]
+    fn build_skill_index_empty_cache_returns_empty() {
+        let cache = std::collections::HashMap::new();
+        assert_eq!(super::super::CognitiveEngine::build_skill_index(&cache), "");
     }
 }
