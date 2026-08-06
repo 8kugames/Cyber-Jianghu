@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+## [0.1.291] - 2026-08-06
+
+### Performance
+
+- **LLM prefix cache 稳定化**（agent）：skill index 固定排序保证 system prompt 前缀字节级稳定；新增 system_hash 漂移告警（`cache_diagnostics` target）观测 provider prefix cache 失效
+
+### Bug Fixes
+
+- **prefix 漂移告警伪报**（agent，WI-010）：actor/validator 等调用类型共享同一 DirectLlmClient 并交替使用不同 prompt，单值"上一次 hash"比对在合法交替时持续误报。改为已知 hash 集合语义（容量 64，超限重置），仅全新前缀告警
+- **诊断路径多字节 panic**（agent，WI-011）：tool_calls 预览切片与 JSON parse 错误日志在内容含中文（多字节）时按字节偏移切片 panic。新增 `utf8_safe_end` 回退到字符边界；JSON parse 错误详情直写 message
+- **test-agents virtiofs 权限**：agent-5-longcat 目录经 virtiofs 映射为 root 属主，entrypoint chown 撞只读 trace.yaml 失败。设 `CONTAINER_UID/GID=0` 跳过权限修复
+
+### CI
+
+- pr-check 补 push 触发，gate main/dev 集成
+- Docker job 移除 `cache-to`，根治 GHA cache not_found
+
 ## [0.1.290] - 2026-07-27
 
 ### Major Features
