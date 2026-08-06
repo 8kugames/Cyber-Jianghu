@@ -862,12 +862,13 @@ fn parse_json_response<D: DeserializeOwned + Send>(response: &str) -> Result<D> 
         .join("\n");
 
     tracing::error!(
-        error_type = ?parse_err.classify(),
-        error_msg = %parse_err,
-        line = error_line,
-        column = parse_err.column(),
-        json_len = json_str.len(),
-        "\n{error_snippet}\n--- Full JSON ---\n{json_str}"
+        "[JSON parse] {} at line {} col {} (json_len={}):\n{}\n--- Full JSON ---\n{}",
+        parse_err,
+        error_line,
+        parse_err.column(),
+        json_str.len(),
+        error_snippet,
+        json_str
     );
     Err(parse_err.into())
 }
@@ -1924,6 +1925,19 @@ mod tests {
         let client = MockLlmClient::with_response(r#"{"message": "test"}"#);
         let result: TestResponse = client.complete_json("test prompt").await.unwrap();
         assert_eq!(result.message, "test");
+    }
+
+    #[test]
+    fn parse_json_response_malformed_multibyte_returns_err_without_panic() {
+        // WI-011 回归：诊断路径（error_snippet + 错误详情直写 message）对含中文的
+        // 非法 JSON 不得 panic，且必须返回 Err 供上层重试
+        let malformed = r#"{"action": "抱拳行礼", "target": 损坏的引号"#;
+        let result = parse_json_response::<serde_json::Value>(malformed);
+        assert!(result.is_err());
+
+        // 错误行号定位涉及多字节内容时同样安全
+        let malformed2 = format!("{}\n{}", "汉字行".repeat(50), r#"{"action": }"#);
+        assert!(parse_json_response::<serde_json::Value>(&malformed2).is_err());
     }
 
     // ========================================================================

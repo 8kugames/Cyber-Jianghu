@@ -406,8 +406,10 @@ pub struct DirectLlmClient {
     last_reasoning_content: std::sync::Mutex<Option<String>>,
     /// 最近一次 tool loop 的 tool call 日志
     last_tool_call_log: std::sync::Mutex<Option<Vec<cyber_jianghu_protocol::EarthToolCall>>>,
-    /// 上一次请求的 system_hash（用于检测 prefix cache 失效）
-    last_system_hash: std::sync::Mutex<Option<[u8; 32]>>,
+    /// 已见过的 system_hash 集合（用于检测 prefix cache 失效）。
+    /// actor/validator 等调用类型共享本 client 并交替使用不同 prompt，
+    /// 只比较"上一次"hash 会在合法交替时持续误报；集合语义下仅全新 hash 告警。
+    known_system_hashes: std::sync::Mutex<std::collections::HashSet<[u8; 32]>>,
     /// 共享 circuit-breaker：由 FallbackLlmClient 注入，保证
     /// `run_tool_loop` 内部 send_chat_exchange 也走同一份禁用表
     breaker: Option<std::sync::Arc<super::client::SharedBreaker>>,
@@ -420,10 +422,32 @@ impl Clone for DirectLlmClient {
             earth_soul_config: self.earth_soul_config.clone(),
             last_reasoning_content: std::sync::Mutex::new(None),
             last_tool_call_log: std::sync::Mutex::new(None),
-            last_system_hash: std::sync::Mutex::new(None),
+            known_system_hashes: std::sync::Mutex::new(std::collections::HashSet::new()),
             breaker: self.breaker.clone(),
         }
     }
+}
+
+/// 已知 system hash 集合容量。稳定运行时每 client 仅数种 prompt 类型
+/// （actor/validator/triage/summary），64 足够；超限重置避免无界增长
+/// （代价是重置后首个 hash 误报一次，可接受）。
+const KNOWN_SYSTEM_HASHES_MAX: usize = 64;
+
+/// 记录一次 system hash 观测。返回 true 当且仅当该 hash 从未见过（应告警）。
+fn track_system_hash(known: &mut std::collections::HashSet<[u8; 32]>, hash: [u8; 32]) -> bool {
+    if known.len() >= KNOWN_SYSTEM_HASHES_MAX {
+        known.clear();
+    }
+    known.insert(hash)
+}
+
+/// 将字节偏移回退到最近的 UTF-8 char 边界（防切片 panic）
+fn utf8_safe_end(s: &str, end: usize) -> usize {
+    let mut e = end.min(s.len());
+    while e > 0 && !s.is_char_boundary(e) {
+        e -= 1;
+    }
+    e
 }
 
 impl DirectLlmClient {
@@ -446,7 +470,7 @@ impl DirectLlmClient {
             earth_soul_config: None,
             last_reasoning_content: std::sync::Mutex::new(None),
             last_tool_call_log: std::sync::Mutex::new(None),
-            last_system_hash: std::sync::Mutex::new(None),
+            known_system_hashes: std::sync::Mutex::new(std::collections::HashSet::new()),
             breaker: None,
         })
     }
@@ -703,7 +727,8 @@ impl DirectLlmClient {
         );
         if request.tools.is_some() {
             let tool_calls_preview = if let Some(tc_start) = raw_body.find("\"tool_calls\"") {
-                &raw_body[tc_start..raw_body.len().min(tc_start + 3000)]
+                let end = utf8_safe_end(&raw_body, tc_start + 3000);
+                &raw_body[tc_start..end]
             } else {
                 "tool_calls field NOT FOUND in response"
             };
@@ -813,19 +838,15 @@ impl DirectLlmClient {
     ) {
         let hash_hex = hex::encode(system_hash);
 
-        if let Ok(mut guard) = self.last_system_hash.lock() {
-            if let Some(ref prev) = *guard
-                && prev != &system_hash
-            {
-                tracing::warn!(
-                    target: "cache_diagnostics",
-                    old_hash = %hex::encode(prev),
-                    new_hash = %hash_hex,
-                    model = %model,
-                    "system_hash_changed — prefix cache invalidated"
-                );
-            }
-            *guard = Some(system_hash);
+        if let Ok(mut guard) = self.known_system_hashes.lock()
+            && track_system_hash(&mut guard, system_hash)
+        {
+            tracing::warn!(
+                target: "cache_diagnostics",
+                new_hash = %hash_hex,
+                model = %model,
+                "system_hash_new — 出现未见过的 system prompt 前缀，provider cache 失效"
+            );
         }
 
         if crate::config::env_or("CYBER_JIANGHU_CACHE_DIAGNOSTICS_ENABLED", true) {
@@ -1651,6 +1672,61 @@ mod tests {
         );
         assert_eq!(LlmProvider::parse("ollama"), Some(LlmProvider::Ollama));
         assert_eq!(LlmProvider::parse("unknown"), None);
+    }
+
+    #[test]
+    fn utf8_safe_end_never_lands_inside_multibyte_char() {
+        // 回归：direct_client.rs tool_calls 预览切片曾在 '人'(3 字节) 内部切片 panic
+        let s = format!("{}\"tool_calls\"{}", "汉".repeat(1000), "人".repeat(1000));
+        let tc_start = s.find("\"tool_calls\"").unwrap();
+        let end = utf8_safe_end(&s, tc_start + 3000);
+        assert!(s.is_char_boundary(end));
+        assert!(end >= tc_start && end <= s.len());
+        // 切片不再 panic
+        let _preview = &s[tc_start..end];
+
+        // 边界：超出长度回退到 len；0 与空串安全
+        assert_eq!(utf8_safe_end(s.as_str(), usize::MAX), s.len());
+        assert_eq!(utf8_safe_end("", 10), 0);
+        // 单字符内部偏移回退到该字符起点
+        assert_eq!(utf8_safe_end("人", 1), 0);
+        assert_eq!(utf8_safe_end("人", 2), 0);
+        assert_eq!(utf8_safe_end("人", 3), 3);
+    }
+
+    #[test]
+    fn track_system_hash_warns_only_for_new_hashes() {
+        let mut known = std::collections::HashSet::new();
+        let actor = [1u8; 32];
+        let validator = [2u8; 32];
+
+        assert!(track_system_hash(&mut known, actor), "首次出现应告警");
+        assert!(
+            track_system_hash(&mut known, validator),
+            "第二种合法 prompt 首次出现应告警"
+        );
+        // actor/validator 交替不再误报（WI-010 回归断言）
+        for _ in 0..10 {
+            assert!(!track_system_hash(&mut known, actor));
+            assert!(!track_system_hash(&mut known, validator));
+        }
+        assert!(track_system_hash(&mut known, [3u8; 32]), "全新 hash 应告警");
+    }
+
+    #[test]
+    fn track_system_hash_resets_at_capacity() {
+        let mut known = std::collections::HashSet::new();
+        for i in 0..KNOWN_SYSTEM_HASHES_MAX {
+            let mut h = [0u8; 32];
+            h[0] = i as u8;
+            track_system_hash(&mut known, h);
+        }
+        assert_eq!(known.len(), KNOWN_SYSTEM_HASHES_MAX);
+        // 超限后重置：集合被清空，当前 hash 重新视为新 hash
+        let mut overflow = [9u8; 32];
+        overflow[1] = 1;
+        assert!(track_system_hash(&mut known, overflow));
+        assert_eq!(known.len(), 1);
     }
 
     #[test]
