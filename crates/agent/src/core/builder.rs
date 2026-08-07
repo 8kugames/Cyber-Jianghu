@@ -72,7 +72,7 @@ pub struct AgentBuilder {
     delta_engine: Option<crate::component::delta_engine::DeltaEngine>,
     /// Attention Controller（规则过滤 + 轻量 LLM 排序）
     attention_controller: Option<crate::component::attention::AttentionController>,
-    /// 人设（CU-5：默认初始人设；调用方可通过 `with_persona` 注入）
+    /// 人设（默认初始人设；调用方可通过 `with_persona` 注入）
     persona: Option<ThreadSafePersona>,
     /// 事件→特质映射器（默认 `EventTraitMapper::new()`）
     event_trait_mapper: Option<std::sync::Arc<std::sync::RwLock<EventTraitMapper>>>,
@@ -267,7 +267,7 @@ impl AgentBuilder {
         self
     }
 
-    /// 注入人设（CU-5：覆盖默认初始人设）
+    /// 注入人设（覆盖默认初始人设）
     pub fn with_persona(mut self, persona: ThreadSafePersona) -> Self {
         self.persona = Some(persona);
         self
@@ -486,7 +486,7 @@ impl AgentBuilder {
             persona_store: self.persona_store,
         };
 
-        // CU-5: Engine 需要从 Agent 拿 persona 引用（真相源在 Agent）
+        // Engine 需要从 Agent 拿 persona 引用（真相源在 Agent）
         if let Some(ref engine) = agent.cognitive_engine {
             engine.set_persona_ref(std::sync::Arc::new(agent.persona.clone()));
         }

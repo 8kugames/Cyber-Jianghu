@@ -1069,7 +1069,7 @@ mod tests {
 
     // ========================================================================
     // P0-AUDIT 闭环：7 个 query 方法必须返回 Result，DB 错时 caller 显式处理
-    // 模式同 P1-3（outcome.rs）：init → DROP TABLE → assert Err
+    // 模式同（outcome.rs）：init → DROP TABLE → assert Err
     // 之前静默返回 None / 空 Vec / (空, 0) 会让 caller 误以为"无数据"
     // ========================================================================
 

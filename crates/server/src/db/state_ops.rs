@@ -221,7 +221,7 @@ pub async fn batch_insert_agent_states(pool: &PgPool, states: &[AgentState]) -> 
     // 显式事务：保证原子性
     let mut tx = pool.begin().await.context("开启事务失败")?;
 
-    // F-05: 预先序列化所有属性，失败时立即返回错误（禁止静默吞掉）
+    // 预先序列化所有属性，失败时立即返回错误（禁止静默吞掉）
     let serialized: Vec<(uuid::Uuid, i64, serde_json::Value, String, bool)> = states
         .iter()
         .map(|state| {
@@ -317,7 +317,7 @@ pub async fn upsert_agent_state(pool: &PgPool, state: &AgentState) -> Result<i64
 /// `state_version` 做 CAS 更新，否则插入新行并返回版本号 0），但接受
 /// `&mut sqlx::PgConnection` 而非 `&PgPool`，使其可纳入 caller 的事务作用域。
 ///
-/// # 设计意图（P0-3 原子化重构）
+/// # 设计意图
 /// 之前 `processor.rs::process_single_intent` 在 tx 内写 inventory/ground_items/
 /// action_log 后 commit，然后 realtime.rs 用 pool（独立连接）调
 /// `upsert_agent_state`。若 commit 后、upsert 前崩溃 → inventory 已改、
@@ -475,7 +475,7 @@ pub async fn update_tick_log(pool: &PgPool, tick_log: &TickLog) -> Result<()> {
 /// - Ok(()): 插入成功
 /// - Err: 插入失败
 ///
-/// # P0-2 修复
+/// # 修复
 /// 签名从 `&PgPool` 改为 `&mut sqlx::PgConnection`，使 action_log 可纳入
 /// `process_single_intent` 的 Saga 事务（与 `clear_inventory`/`add_ground_item`
 /// 等既有约定一致）。若 insert 失败，caller 的 tx 会 rollback，state 不落库。

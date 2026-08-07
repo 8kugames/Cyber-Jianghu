@@ -232,10 +232,10 @@ pub async fn update_device_last_seen(pool: &PgPool, device_id: Uuid) -> Result<(
 }
 
 // ============================================================================
-// P1-12 设备 token 轮换
+// 设备 token 轮换
 // ============================================================================
 
-/// P1-12 核心 SQL 集中点：轮换 device 的 auth_token，
+/// 核心 SQL 集中点：轮换 device 的 auth_token，
 /// 同时重置 `token_created_at`、写 `token_rotated_at`。
 /// 返回新 token，调用方负责把新凭据传回客户端。
 pub(crate) const ROTATE_DEVICE_TOKEN_SQL: &str = r#"
@@ -523,7 +523,7 @@ pub struct RegistrationResult {
     pub initial_state: AgentState,
 }
 
-/// 事务性注册Agent（F-04）
+/// 事务性注册Agent
 ///
 /// 在单个数据库事务中执行：
 /// 1. 创建Agent记录（关联到设备）
@@ -775,7 +775,7 @@ pub async fn retire_agent(
         agent_id
     );
 
-    // P1-12 修复：归隐=旧凭据失效。立即轮换 device.auth_token，
+    // 归隐=旧凭据失效。立即轮换 device.auth_token，
     // 防止同设备连续创建角色时，旧凭据仍可被复用攻击新角色。
     if let Err(e) = rotate_device_token(pool, device_id).await {
         // 归隐已成功，仅记 error，不阻断主流程。
@@ -865,7 +865,7 @@ pub async fn auto_rebirth_agent(
     // 开始事务
     let mut tx = pool.begin().await.context("开始转世事务失败")?;
 
-    // 1. 查询旧 agent（P1-10 F2：必须 device_id 匹配，杜绝跨设备转世）
+    // 1. 查询旧 agent（必须 device_id 匹配，杜绝跨设备转世）
     let old_agent: Option<(String, String, Uuid, Option<String>)> =
         sqlx::query_as(REBIRTH_FETCH_OLD_AGENT_SQL)
             .bind(old_agent_id)
@@ -890,7 +890,7 @@ pub async fn auto_rebirth_agent(
     // 2. 旧 agent 保持 status='dead' 死亡标记
     //    retired_at 作为时间戳记录"转世完成"事件
     //    严禁写 status='retired'（用户硬性约束：不允许将已死亡角色设置为归隐）
-    // P1-10 F3：AND retired_at IS NULL 守卫，阻断 agent 端 retry 触发的重复重生。
+    // AND retired_at IS NULL 守卫，阻断 agent 端 retry 触发的重复重生。
     let update_result = sqlx::query(REBIRTH_MARK_RETIRED_SQL)
         .bind(old_agent_id)
         .execute(&mut *tx)
@@ -908,7 +908,7 @@ pub async fn auto_rebirth_agent(
         old_agent_id
     );
 
-    // 3. P1-5 修复：用 caller 传入的世界 tick（`state.current_accepting_tick_id`
+    // 3. 用 caller 传入的世界 tick（`state.current_accepting_tick_id`
     //    优先，回退到 `get_current_world_tick_id`）推导 state_tick / birth_tick。
     //    旧实现 `MAX(agent_states.tick_id) WHERE agent_id = old + 1` 会让新角色
     //    state 落后世界 N tick，导致 birth_tick 偏小、compute_age_years 异常。
@@ -1111,7 +1111,7 @@ pub async fn record_recipe_observation(
 
 /// 转世重生的 tick 计算（纯函数，可单测）。
 ///
-/// P1-5 修复：之前用 `MAX(agent_states.tick_id) WHERE agent_id = old` 取旧角色
+/// 之前用 `MAX(agent_states.tick_id) WHERE agent_id = old` 取旧角色
 /// 的最后状态 tick，再 +1 当新角色 tick。这套逻辑在"死亡到重生之间世界已推进
 /// N tick"时会让新角色 state 落后世界 N tick，进而 `birth_tick` 偏小、
 /// `compute_age_years` 返回的年龄小于 `starting_age`、寿终检查 / telemetry
@@ -1125,7 +1125,7 @@ pub fn compute_rebirth_ticks(world_tick: i64, starting_age_ticks: i64) -> (i64, 
     (world_tick, world_tick - starting_age_ticks)
 }
 
-/// P1-10 F1：前置拦截 `old_agent_id == Uuid::nil()`，避免无意义 round-trip。
+/// 前置拦截 `old_agent_id == Uuid::nil()`，避免无意义 round-trip。
 ///
 /// 旧行为：nil 也走 `auto_rebirth_agent` 内部 WHERE 过滤，DB 报
 /// "Agent 00000000-... 不存在或非 dead 状态"，靠副作用防错。Agent 端
@@ -1137,7 +1137,7 @@ pub fn ensure_old_agent_id_not_nil(old_agent_id: Uuid) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// P1-10 F2 + F3 核心 SQL 集中点。
+/// 核心 SQL 集中点。
 ///
 /// - F2：`AND device_id = $2` 强制旧 agent 必须属于 caller 的设备，杜绝跨设备转世。
 /// - F3：fetch 不带 retired_at 过滤，但配合下面的 UPDATE 守卫实现幂等性。
@@ -1149,7 +1149,7 @@ WHERE agent_id = $1
   AND status = 'dead'
 "#;
 
-/// P1-10 F3：UPDATE 增加 `AND retired_at IS NULL` 守卫，
+/// UPDATE 增加 `AND retired_at IS NULL` 守卫，
 /// 阻断 agent 端 retry 触发"同 dead agent 多次转世"。
 pub(crate) const REBIRTH_MARK_RETIRED_SQL: &str = r#"
 UPDATE agents
@@ -1166,7 +1166,7 @@ mod tests {
         compute_rebirth_ticks,
     };
 
-    /// 验证 P1-5：state_tick 必须等于 caller 传入的世界 tick，不再用旧 agent 的
+    /// 验证：state_tick 必须等于 caller 传入的世界 tick，不再用旧 agent 的
     /// `MAX(agent_states.tick_id) + 1`。这是"重生即现在"的核心契约。
     #[test]
     fn test_compute_rebirth_ticks_uses_world_tick_for_state_tick() {
@@ -1178,14 +1178,14 @@ mod tests {
         );
     }
 
-    /// 验证 P1-5：starting_age_ticks == 0 时 birth_tick = world_tick，
+    /// 验证：starting_age_ticks == 0 时 birth_tick = world_tick，
     /// 行为上等同于"新角色从世界 tick 出生，年龄从 0 起算"。
     #[test]
     fn test_compute_rebirth_ticks_zero_starting_age() {
         assert_eq!(compute_rebirth_ticks(42, 0), (42, 42));
     }
 
-    /// 验证 P1-5：oracle —— `birth_tick = world_tick - starting_age_ticks`，
+    /// 验证：oracle —— `birth_tick = world_tick - starting_age_ticks`，
     /// 应保证 `compute_age_years(birth_tick, world_tick) == starting_age`。
     /// 这是从 tick 推导年龄的可逆性测试。
     #[test]
@@ -1199,7 +1199,7 @@ mod tests {
         }
     }
 
-    /// 验证 P1-10 F2：旧 agent 查询必须按 device_id 过滤，杜绝跨设备转世。
+    /// 验证：旧 agent 查询必须按 device_id 过滤，杜绝跨设备转世。
     #[test]
     fn test_p1_10_f2_rebirth_fetch_sql_filters_by_device_id() {
         let lower = REBIRTH_FETCH_OLD_AGENT_SQL.to_lowercase();
@@ -1217,7 +1217,7 @@ mod tests {
         );
     }
 
-    /// 验证 P1-10 F3：retired_at 标记必须用 IS NULL 守卫实现幂等。
+    /// 验证：retired_at 标记必须用 IS NULL 守卫实现幂等。
     #[test]
     fn test_p1_10_f3_rebirth_mark_retired_sql_has_null_guard() {
         let lower = REBIRTH_MARK_RETIRED_SQL.to_lowercase();
@@ -1227,7 +1227,7 @@ mod tests {
         );
     }
 
-    /// 验证 P1-12：rotate_device_token 的 SQL 必须同时重置 token_created_at、
+    /// 验证：rotate_device_token 的 SQL 必须同时重置 token_created_at、
     /// 写 token_rotated_at、RETURNING 新 token。这是后续接入
     /// `retire_agent` / 调度器轮换 / 显式 endpoint 的基础。
     #[test]

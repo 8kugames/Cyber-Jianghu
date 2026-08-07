@@ -24,7 +24,7 @@ pub struct SingleProcessingResult {
     pub events: Vec<(uuid::Uuid, WorldEvent)>,
     /// 持久化后的 state_version（仅当 agent_states UPSERT 成功并 commit 后才有值）。
     ///
-    /// P0-3 原子化重构：upsert_agent_state 已纳入 tx（commit 前调用），故
+    /// upsert_agent_state 已纳入 tx（commit 前调用），故
     /// commit 成功 = persist 成功 = `Some(version)`。realtime.rs 据此直接更新
     /// DashMap，不再用 pool 二次 upsert。
     ///
@@ -216,7 +216,7 @@ impl StateProcessor {
             }
         }
 
-        // P0-2: Schema 校验（warning 模式，不阻断执行）
+        // Schema 校验（warning 模式，不阻断执行）
         let schema_violations = crate::actions::validate_action_data_schema(
             intent.action_type.as_str(),
             &intent.action_data,
@@ -263,7 +263,7 @@ impl StateProcessor {
             pipe_seq,
         };
 
-        // P0-2 修复：action_log 必须在 tx 内写入，与 state mutations 同生命周期。
+        // action_log 必须在 tx 内写入，与 state mutations 同生命周期。
         // 若 insert 失败 → execution_failed = true → 走 rollback 分支，state 不落库，
         // 保证"state 变更 + action_log"要么全成功要么全回滚（Saga 原子性）。
         if let Err(e) = crate::db::batch_insert_action_logs(&mut tx, &[action_log]).await {
@@ -271,7 +271,7 @@ impl StateProcessor {
             execution_failed = true;
         }
 
-        // P0-3 原子化重构：agent_states UPSERT 纳入 tx（commit 前），消除跨表
+        // agent_states UPSERT 纳入 tx（commit 前），消除跨表
         // 部分提交窗口。失败路径：
         //   - action_log insert 失败（上面）→ execution_failed=true → 不 upsert → rollback
         //   - upsert CAS 冲突（单消费者 FIFO 下几乎不可能）→ 返 Err → 标记失败 → rollback
@@ -463,7 +463,7 @@ mod tests {
         assert!(processor.mutators.len() >= 3);
     }
 
-    /// 验证 P0-2：`batch_insert_action_logs` 必须在 `tx.commit()` **之前**调用，
+    /// 验证：`batch_insert_action_logs` 必须在 `tx.commit()` **之前**调用，
     /// 且传入 `&mut tx`（而非 `&self.db_pool`）。
     ///
     /// 之前 action_log insert 在 commit 之后、用 pool 直写——若 insert 失败，

@@ -148,9 +148,16 @@ cmd_component_start() {
             success "服务端已启动"
             echo ""
             info "访问地址:"
-            echo "  - Dashboard: http://localhost:23333/admin${read_token:+?token=$read_token}"
+            echo "  - Dashboard: http://localhost:23333/admin"
             echo "  - WebSocket: ws://localhost:23333/ws"
             echo "  - Health:    http://localhost:23333/health"
+            if [ -n "$read_token" ] || [ -n "$write_token" ]; then
+                echo ""
+                warn "URL 不再自动登录，请在登录框粘贴下列 Token："
+                [ -n "$read_token"  ] && echo "  - Read Token (只读):  $read_token"
+                [ -n "$write_token" ] && echo "  - Write Token (读写): $write_token"
+                info "Token 文件: $admin_token_file"
+            fi
             ;;
         agent)
             info "启动 Agent ($mode)..."

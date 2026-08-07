@@ -488,7 +488,7 @@ async fn main() -> Result<()> {
     game_data::init_registry(game_data_cache.clone());
     info!("统一配置注册表初始化完成");
 
-    // P0-1: 配置完整性校验（warning 模式，不阻断启动）
+    // 配置完整性校验（warning 模式，不阻断启动）
     match crate::config_validator::load_rules() {
         Ok(rules) => {
             let result = crate::config_validator::run_all_validations(&rules);
@@ -1298,7 +1298,7 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
     // 13. 注册信号处理（优雅关闭）
-    // P1-9 修复：用单一 watch::channel 把 shutdown 信号广播给 axum::serve 与主 select!。
+    // 用单一 watch::channel 把 shutdown 信号广播给 axum::serve 与主 select!。
     // 之前 shutdown_signal 是只被一个分支消费的 async block，axum::serve 没挂上
     // .with_graceful_shutdown(...) → SIGTERM 触发时 in-flight HTTP 请求被截断。
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -1339,7 +1339,7 @@ async fn main() -> Result<()> {
 
     // 14. 等待服务器结束、Tick引擎失败、治理轮询失败或关闭信号
     tokio::select! {
-        // 关闭信号（P1-9：与 axum::serve.with_graceful_shutdown 共用 watch channel）
+        // 关闭信号（与 axum::serve.with_graceful_shutdown 共用 watch channel）
         _ = async {
             let _ = main_shutdown_rx.changed().await;
         } => {
@@ -1347,7 +1347,7 @@ async fn main() -> Result<()> {
             info!("服务已优雅关闭");
         }
 
-        // Web服务器运行（P1-9：挂上 .with_graceful_shutdown 让 in-flight 请求 drain）
+        // Web服务器运行（挂上 .with_graceful_shutdown 让 in-flight 请求 drain）
         result = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
             .with_graceful_shutdown(axum_shutdown) => {
             if let Err(e) = result {
@@ -1426,7 +1426,7 @@ mod tests {
         assert!(content.contains("Cyber-Jianghu 管理员访问凭证"));
     }
 
-    /// 验证 P1-9：axum::serve 必须链式调用 `.with_graceful_shutdown(...)`，
+    /// 验证：axum::serve 必须链式调用 `.with_graceful_shutdown(...)`，
     /// 否则 SIGTERM/SIGINT 触发时 in-flight HTTP 请求会被截断，
     /// DB 写入半完成、Saga 状态不一致（高风险）。
     #[test]

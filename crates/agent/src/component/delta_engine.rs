@@ -315,7 +315,6 @@ impl DeltaEngine {
         let prev_map: HashMap<&str, &cyber_jianghu_protocol::InventoryItem> =
             prev_inv.iter().map(|i| (i.item_id.as_str(), i)).collect();
 
-        // 新增或数量变化
         for (id, item) in &curr_map {
             match prev_map.get(id) {
                 None => {

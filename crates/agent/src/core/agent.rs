@@ -171,7 +171,7 @@ pub struct Agent {
     /// 当前 tick_id（原子计数，WS callback / 主循环共享）
     pub(crate) current_tick: std::sync::Arc<std::sync::atomic::AtomicI64>,
 
-    /// 动态人设（事件演化 + 状态真相源，CU-5 唯一 source of truth）
+    /// 动态人设（事件演化 + 状态真相源，唯一 source of truth）
     pub(crate) persona: ThreadSafePersona,
 
     /// 事件→特质映射器（每 tick 末尾 process_events 同步 events → traits）

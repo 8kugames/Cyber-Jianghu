@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn test_reflector_system_prompt_absolute_ooc_prohibition() {
-        // 回归 WI-005: 硬性 OOC 词属于绝对禁止项，不得被生存凌驾豁免覆盖。
+        // 硬性 OOC 词属于绝对禁止项，不得被生存凌驾豁免覆盖。
         // 触发场景：饱食度<40 的角色喊"HP 只剩 4 点"曾被天魂误判通过——根因是旧版
         // 生存凌驾条款无差别适用于"out_of_character 判定"，使绝对禁止项失守。
         let prompt = ReflectorPrompt::new();

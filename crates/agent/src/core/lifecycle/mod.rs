@@ -890,7 +890,7 @@ impl super::Agent {
                                         map
                                     };
 
-                                    // BUG-4b: intent 失败且 agent 已死亡 → 立即触发死亡处理
+                                    // intent 失败且 agent 已死亡 → 立即触发死亡处理
                                     // 双路径检测：(1) is_dead 原子标志 (2) server error 含 "is dead"/"not in cache"
                                     if !self.death_reported && first_failure.is_some() {
                                         let is_dead_now = self.http_api_state.as_ref()

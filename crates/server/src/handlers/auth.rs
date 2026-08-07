@@ -224,7 +224,7 @@ mod tests {
         h
     }
 
-    /// 验证 P1-20：合法 Bearer Header 必须能过 RW 鉴权。
+    /// 验证：合法 Bearer Header 必须能过 RW 鉴权。
     #[test]
     fn test_authenticate_admin_token_accepts_bearer_header() {
         let h = headers_with_bearer(WRITE_TOKEN);
@@ -232,7 +232,7 @@ mod tests {
         assert!(authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, false));
     }
 
-    /// 验证 P1-20：读权限允许 R 或 RW。
+    /// 验证：读权限允许 R 或 RW。
     #[test]
     fn test_authenticate_admin_token_read_accepts_read_or_write() {
         let h_read = headers_with_bearer(READ_TOKEN);
@@ -251,7 +251,7 @@ mod tests {
         ));
     }
 
-    /// 验证 P1-20：写权限只允许 RW；R Token 必须被拒。
+    /// 验证：写权限只允许 RW；R Token 必须被拒。
     #[test]
     fn test_authenticate_admin_token_write_rejects_read_token() {
         let h_read = headers_with_bearer(READ_TOKEN);
@@ -263,8 +263,8 @@ mod tests {
         ));
     }
 
-    /// 验证 P1-20：缺 Header 直接拒绝。
-    /// 即便 URL 拼了 `?token=...`，也不会被接受 —— 这是 P1-20 修复的核心契约。
+    /// 验证：缺 Header 直接拒绝。
+    /// 即便 URL 拼了 `?token=...`，也不会被接受 —— 这是核心契约。
     #[test]
     fn test_authenticate_admin_token_rejects_missing_header() {
         let h = HeaderMap::new();
@@ -277,7 +277,7 @@ mod tests {
         assert!(!authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, true));
     }
 
-    /// 验证 P1-20：错值 Header 必须被拒。
+    /// 验证：错值 Header 必须被拒。
     #[test]
     fn test_authenticate_admin_token_rejects_invalid_value() {
         let h = headers_with_bearer("not-a-token");
@@ -290,7 +290,7 @@ mod tests {
         assert!(!authenticate_admin_token(&h, READ_TOKEN, WRITE_TOKEN, true));
     }
 
-    /// 验证 P1-20：非 Bearer 前缀必须被拒。
+    /// 验证：非 Bearer 前缀必须被拒。
     #[test]
     fn test_authenticate_admin_token_rejects_non_bearer_scheme() {
         let mut h = HeaderMap::new();

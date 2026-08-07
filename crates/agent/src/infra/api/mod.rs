@@ -625,7 +625,7 @@ async fn static_file_handler(
 /// 则返回 503 SERVICE_UNAVAILABLE 错误
 pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Result<()> {
     let static_dir = get_static_serve_dir();
-    // P0-11(b)：所有 API 端点必须携带有效 device auth_token。
+    // 所有 API 端点必须携带有效 device auth_token。
     // 镜像 server 端 `require_*_token` 模式。白名单（health/静态资源）由中间件内部判定。
     let app = create_api_router()
         .layer(axum::middleware::from_fn_with_state(

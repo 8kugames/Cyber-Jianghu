@@ -21,12 +21,12 @@ pub struct LoginResponse {
 }
 
 pub async fn check_session(State(state): State<Arc<AppState>>, req: Request) -> impl IntoResponse {
-    // P1-20 修复：仅接受 Authorization Header；不再接受 URL query token。
+    // 仅接受 Authorization Header；不再接受 URL query token。
     // 之前 query fallback 会把 token 写入浏览器历史、access log、CDN 缓存。
     let token = extract_bearer_token(&req);
 
     if let Some(token) = token {
-        // 常量时间比对，避免计时侧信道（P1-20: admin token 不再用裸 ==）
+        // 常量时间比对，避免计时侧信道（admin token 不再用裸 ==）
         if crate::handlers::auth::constant_time_eq(
             token.as_bytes(),
             state.admin_write_token.as_bytes(),

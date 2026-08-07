@@ -381,7 +381,6 @@ impl From<&WsDecisionState> for WsSharedState {
             cognitive_context_builder: None,
             openclaw_connected: Arc::new(AtomicBool::new(false)),
             allow_external_connections,
-            // 新增验证相关字段
             intent_validator: Arc::new(RwLock::new(None)),
             game_rules: Arc::new(RwLock::new(None)),
             persona: Arc::new(RwLock::new(None)),

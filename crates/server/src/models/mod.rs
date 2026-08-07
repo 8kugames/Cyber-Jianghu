@@ -325,12 +325,5 @@ mod tests {
     }
 }
 
-// ============================================================================
-// Protocol 类型转换（From 实现）
-// ============================================================================
-
-// NOTE: From implementations for protocol types are no longer needed
-// since these types are now re-exported directly from cyber_jianghu_protocol
-
 #[cfg(test)]
 mod jsonb_test;

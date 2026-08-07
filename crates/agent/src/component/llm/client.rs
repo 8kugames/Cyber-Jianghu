@@ -1100,7 +1100,7 @@ const RATE_LIMIT_BACKOFF_SECS: u64 = 3600;
 // 共享 Circuit-Breaker
 // ============================================================================
 //
-// 修复 FINDING-002: 此前 `disabled_models` 仅存在于 `FallbackLlmClient`，
+// 此前 `disabled_models` 仅存在于 `FallbackLlmClient`，
 // 但 `run_tool_loop` 内部 `send_chat_exchange` 直接打到 `DirectLlmClient`，
 // 完全绕过该表，导致 sensenova 抖动一次就被放大成 566 次 400。
 //
@@ -1929,7 +1929,7 @@ mod tests {
 
     #[test]
     fn parse_json_response_malformed_multibyte_returns_err_without_panic() {
-        // WI-011 回归：诊断路径（error_snippet + 错误详情直写 message）对含中文的
+        // 诊断路径（error_snippet + 错误详情直写 message）对含中文的
         // 非法 JSON 不得 panic，且必须返回 Err 供上层重试
         let malformed = r#"{"action": "抱拳行礼", "target": 损坏的引号"#;
         let result = parse_json_response::<serde_json::Value>(malformed);

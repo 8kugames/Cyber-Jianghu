@@ -37,7 +37,7 @@ pub async fn reload_config_handler(
             let attributes_config = new_data.attributes.clone();
             state.game_data.update(new_data);
 
-            // 刷新所有已加载 agent 的 StatusComponent（解决 FINDING-005 5.1）
+            // 刷新所有已加载 agent 的 StatusComponent
             let refreshed = refresh_agent_status_metadata(&state, &attributes_config);
 
             let mut reloaded = vec![

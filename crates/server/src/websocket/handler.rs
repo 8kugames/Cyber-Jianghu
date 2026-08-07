@@ -1912,7 +1912,7 @@ mod tests {
         assert_eq!(map.get(&unrelated_agent), Some(&other_device));
     }
 
-    /// 验证 P1-7：初始背包加载失败时，helper 显式返回 Err，
+    /// 验证：初始背包加载失败时，helper 显式返回 Err，
     /// 不再向 caller 静默返回空 Vec。
     /// 真实 DB 抖动由 caller 决定是否关闭 WebSocket。
     #[tokio::test]
@@ -1931,7 +1931,7 @@ mod tests {
         );
     }
 
-    /// 验证 P1-7：地面物品加载失败也必须显式 Err。
+    /// 验证：地面物品加载失败也必须显式 Err。
     #[tokio::test]
     async fn test_load_nearby_ground_items_propagates_db_error() {
         let pool: sqlx::PgPool = sqlx::postgres::PgPoolOptions::new()

@@ -106,7 +106,7 @@ pub fn parse_tianhun_result(metadata_json: &serde_json::Value) -> Option<String>
 /// 消除读 PostgreSQL 的时序竞态（缺陷5修复）。
 /// 天魂结果：从 agent_action_logs.soul_cycle_metadata 查询（缺陷1修复）。
 ///
-/// 旁路调用：失败只 error 日志，不阻断 tick 主循环（P1-8 验收）。
+/// 旁路调用：失败只 error 日志，不阻断 tick 主循环。
 pub async fn settle_daily(
     pool: &DbPool,
     state_cache: &AgentStateCache,

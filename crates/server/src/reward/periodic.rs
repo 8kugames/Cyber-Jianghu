@@ -128,7 +128,7 @@ mod tests {
     use super::*;
     use crate::game_data::init_test_registry;
 
-    /// P2-1 验收：周期聚合应等于周期内 daily 之和。
+    /// 周期聚合应等于周期内 daily 之和。
     /// 此测试验证聚合逻辑的正确性（mock daily 文件）。
     #[tokio::test]
     async fn test_aggregate_daily_for_agent_sums_records() {

@@ -198,9 +198,9 @@ mod tests {
     }
 
     // ========================================================================
-    // CU-5: DynamicPersona lifecycle 接线测试
+    // DynamicPersona lifecycle 接线测试
     // ========================================================================
-    // 验证 CU-2 / CU-3a / CU-3b 的核心数据流:
+    // 验证核心数据流:
     //   process_events → EventTraitMapper.apply_to_persona → persona trait 变更
     //   update_tick_state → apply_all_decay + invalidate_persona_cache
     //
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_cognitive_engine_invalidate_persona_cache() {
-        // 验证 CU-3b: CognitiveEngine.invalidate_persona_cache 公开方法可用
+        // 验证：CognitiveEngine.invalidate_persona_cache 公开方法可用
         let agent_id = uuid::Uuid::new_v4();
         let persona = ThreadSafePersona::new(DynamicPersona::new(agent_id, "测试侠客", "基础描述"));
         let mapper = Arc::new(load_event_trait_rules(&integration_yaml_path()).expect("YAML 加载"));

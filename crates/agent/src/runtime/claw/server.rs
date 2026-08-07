@@ -374,7 +374,7 @@ pub async fn run_ws_server(
         .with_state(ws_state);
 
     // HTTP API 路由（复用 http 模块）
-    // P0-11(b)：API 端点必须携带 device auth_token（与 run_http_server 一致）
+    // API 端点必须携带 device auth_token（与 run_http_server 一致）
     let api_router = create_api_router()
         .layer(axum::middleware::from_fn_with_state(
             api_state.clone(),
