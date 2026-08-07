@@ -25,7 +25,7 @@ pub use types::{DailyReward, LifetimeReward, PeriodReward};
 mod tests {
     use super::*;
 
-    /// P1-2 来源断言式测试：证明 reward 各分量严格来自配置，无硬编码。
+    /// 来源断言式测试：证明 reward 各分量严格来自配置，无硬编码。
     ///
     /// 通过 init_test_registry 初始化真实配置（survival_score=1.0,
     /// satiation_weight=0.25, max_value=100），构造 agent 状态，
@@ -40,7 +40,7 @@ mod tests {
 
         let reward = compute_daily_reward(&agent, 1, None).expect("reward should compute");
 
-        // P1-4: 生理分量 = 80/100×0.25 + 60/100×0.25 = 0.20 + 0.15 = 0.35
+        // 生理分量 = 80/100×0.25 + 60/100×0.25 = 0.20 + 0.15 = 0.35
         assert!(
             (reward.physiological - 0.35).abs() < 0.001,
             "physiological 应来自配置派生值，got {}",
@@ -59,7 +59,7 @@ mod tests {
         );
     }
 
-    /// P1-2 反例：死亡 agent 的 survival 分量应为 0（证明 survival 来自 is_alive，非硬编码 +1）
+    /// 反例：死亡 agent 的 survival 分量应为 0（证明 survival 来自 is_alive，非硬编码 +1）
     #[test]
     fn test_daily_reward_dead_agent_zero_survival() {
         crate::game_data::init_test_registry();
@@ -72,7 +72,7 @@ mod tests {
         );
     }
 
-    /// P1-2 反例：篡改 satiation 值，physiological 应随之改变（证明非硬编码）
+    /// 反例：篡改 satiation 值，physiological 应随之改变（证明非硬编码）
     #[test]
     fn test_daily_reward_physiological_tracks_value() {
         crate::game_data::init_test_registry();
@@ -88,7 +88,7 @@ mod tests {
         );
     }
 
-    /// P1-6: 死因不参与 penalty——reward 模块不按死因差异化（由 lifetime 统一 -50 保证）
+    /// 死因不参与 penalty——reward 模块不按死因差异化（由 lifetime 统一 -50 保证）
     /// 此处验证 compute_daily_reward 无死因逻辑：天魂 None 时不影响分量
     #[test]
     fn test_daily_reward_tianhun_none_zero() {

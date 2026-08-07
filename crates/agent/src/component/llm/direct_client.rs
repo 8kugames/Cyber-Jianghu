@@ -1705,7 +1705,7 @@ mod tests {
             track_system_hash(&mut known, validator),
             "第二种合法 prompt 首次出现应告警"
         );
-        // actor/validator 交替不再误报（WI-010 回归断言）
+        // actor/validator 交替不再误报
         for _ in 0..10 {
             assert!(!track_system_hash(&mut known, actor));
             assert!(!track_system_hash(&mut known, validator));

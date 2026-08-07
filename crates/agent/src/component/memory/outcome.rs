@@ -176,7 +176,7 @@ impl OutcomeMemory {
 
     /// 记录行动结果
     ///
-    /// P1-3 修复：返回 `Result<()>` 让 caller 显式处理 DB 错误。
+    /// 返回 `Result<()>` 让 caller 显式处理 DB 错误。
     /// 之前用 `if let Err(e) = ... { debug!(...) }` 静默吞错 + `debug!` 级
     /// 默认不输出 → 运维看不到任何失败痕迹。
     pub fn record(&self, record: OutcomeRecord) -> anyhow::Result<()> {
@@ -235,7 +235,7 @@ impl OutcomeMemory {
 
     /// 查询与特定 Agent 的交互历史
     ///
-    /// P1-3 修复：返回 `Result<Vec<_>>`。
+    /// 返回 `Result<Vec<_>>`。
     pub fn query_by_target(
         &self,
         target_agent_id: &str,
@@ -260,7 +260,7 @@ impl OutcomeMemory {
 
     /// 获取某 action 的成功率
     ///
-    /// P1-3 修复：返回 `Result<f64>`。
+    /// 返回 `Result<f64>`。
     /// 之前静默返回 0.0 会让 caller 把"DB 错"误判为"该 action 100% 失败"。
     pub fn success_rate(&self, action_type: &str) -> anyhow::Result<f64> {
         let conn = self
@@ -330,7 +330,7 @@ impl OutcomeMemory {
 
     /// 生成 prompt 注入文本（按动作类型 + 交互对象聚合）
     ///
-    /// P1-3 修复：query 失败时 warn! 记录后降级为空字符串，**不 panic**。
+    /// query 失败时 warn! 记录后降级为空字符串，**不 panic**。
     /// 业务契约：memory 是 best-effort，DB 错时主流程（LLM prompt 构建）不能阻断。
     pub fn to_prompt_context(&self) -> String {
         let pairs = match self.distinct_action_target_pairs() {
@@ -413,7 +413,7 @@ impl OutcomeMemory {
     /// 生成 prompt 注入文本（旧版，仅按动作类型聚合）
     #[allow(dead_code)]
     fn to_prompt_context_by_action(&self) -> String {
-        // P1-3 修复：与新 to_prompt_context 相同的 best-effort 降级策略。
+        // 与新 to_prompt_context 相同的 best-effort 降级策略。
         let action_types = match self.distinct_action_types() {
             Ok(t) => t,
             Err(e) => {
@@ -791,7 +791,7 @@ mod tests {
     }
 
     // ========================================================================
-    // P1-3 闭环：silent error visibility 测试
+    // silent error visibility 测试
     // 测试方法：先 init OutcomeMemory（建表），再从外部 DROP TABLE，
     // 让 cached conn 的下个 query 失败（"no such table"）。
     // 修复前：返回空 Vec / 0.0 / ()，不报错 → 静默吞错
@@ -804,7 +804,7 @@ mod tests {
             .expect("drop outcome_records from underneath");
     }
 
-    /// 验证 P1-3：record() 必须返回 Result，DB 错时返回 Err。
+    /// 验证：record() 必须返回 Result，DB 错时返回 Err。
     /// 之前用 `if let Err(e) = ... { debug!(...) }` 静默吞错，且 debug 级
     /// 默认不输出，运维完全看不到。
     #[test]
@@ -830,7 +830,7 @@ mod tests {
         let _ = std::fs::remove_file(&db);
     }
 
-    /// 验证 P1-3：query_recent() 必须返回 Result，DB 错时返回 Err。
+    /// 验证：query_recent() 必须返回 Result，DB 错时返回 Err。
     /// 之前返回空 Vec 会让 caller 误以为"无记录"而非"DB 坏"——这是误导。
     #[test]
     fn test_p1_3_query_recent_returns_err_on_broken_db() {
@@ -847,7 +847,7 @@ mod tests {
         let _ = std::fs::remove_file(&db);
     }
 
-    /// 验证 P1-3：query_by_target() 必须返回 Result。
+    /// 验证：query_by_target() 必须返回 Result。
     #[test]
     fn test_p1_3_query_by_target_returns_err_on_broken_db() {
         let db = temp_db();
@@ -862,7 +862,7 @@ mod tests {
         let _ = std::fs::remove_file(&db);
     }
 
-    /// 验证 P1-3：success_rate() 必须返回 Result，DB 错时返回 Err。
+    /// 验证：success_rate() 必须返回 Result，DB 错时返回 Err。
     /// 之前返回 0.0 会让 caller 误以为"零成功率"而非"DB 错"——这是误导。
     #[test]
     fn test_p1_3_success_rate_returns_err_on_broken_db() {
@@ -879,7 +879,7 @@ mod tests {
         let _ = std::fs::remove_file(&db);
     }
 
-    /// 验证 P1-3：to_prompt_context() 必须在 query 失败时降级为空字符串（或部分内容），
+    /// 验证：to_prompt_context() 必须在 query 失败时降级为空字符串（或部分内容），
     /// **不 panic** 且不 block 调用方。caller 期望的契约是 best-effort：
     /// DB 错 → 空内容 + 警告日志，而非 panic / 阻断主流程。
     #[test]

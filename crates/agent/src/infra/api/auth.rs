@@ -1,6 +1,6 @@
 //! HTTP API 认证中间件
 //!
-//! 背景（P0-11(b)）：Agent HTTP API 之前完全无认证。bind 已改为 127.0.0.1（P0-11(a)），
+//! 背景：Agent HTTP API 之前完全无认证。bind 已改为 127.0.0.1，
 //! 但本机任何进程仍可调用 `POST /api/v1/config/llm` 改 LLM endpoint（玩家大脑劫持）。
 //!
 //! 修复：镜像 server 端 `axum::middleware::from_fn_with_state` + `Authorization: Bearer <token>`

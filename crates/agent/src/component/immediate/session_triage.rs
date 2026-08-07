@@ -159,7 +159,7 @@ impl SessionTriageEngine {
 
             // 阶段 2：立即检测游戏日是否已切换（不论有无事件）
             if let Some(s) = self.check_game_day_ended().await {
-                // WI-002 诊断: 已 break（game_day 跨过），已拿到 summary 长度
+                // 已 break（game_day 跨过），已拿到 summary 长度
                 tracing::debug!(
                     "[WI-002-diagnose] session_triage break, summary_len={}",
                     s.len()

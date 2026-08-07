@@ -34,7 +34,7 @@ use cyber_jianghu_protocol::WorldState;
 /// 认知引擎配置
 ///
 /// persona 不在此处：真相源是 `Agent.persona`（`ThreadSafePersona`），
-/// Engine 通过 `persona_ref` 引用读取快照。详见 CU-5 docstring on `update_persona`。
+/// Engine 通过 `persona_ref` 引用读取快照。详见 `update_persona` 的 docstring。
 #[derive(Clone, Debug)]
 pub struct CognitiveEngineConfig {
     /// Agent 名称
@@ -1632,7 +1632,7 @@ impl CognitiveEngine {
 
     /// 记录行动结果到 Outcome Memory
     ///
-    /// P1-3 修复：mem.record() 现在返回 Result，这里显式处理（warn + best-effort 继续）。
+    /// mem.record() 现在返回 Result，这里显式处理（warn + best-effort 继续）。
     pub fn record_outcome(&self, record: crate::component::memory::OutcomeRecord) {
         if let Some(ref mem) = self.outcome_memory
             && let Err(e) = mem.record(record)

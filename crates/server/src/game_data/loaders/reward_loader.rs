@@ -67,7 +67,7 @@ lifetime:
 
     #[test]
     fn test_load_reward_missing_fail_fast() {
-        // P1-1 验收：配置缺失必须 Err（非静默 None）
+        // 配置缺失必须 Err（非静默 None）
         let dir = TempDir::new().unwrap();
         let result = load_reward(dir.path());
         assert!(result.is_err(), "缺失 reward 配置必须 fail-fast 返回 Err");

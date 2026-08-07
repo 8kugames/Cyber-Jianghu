@@ -317,7 +317,7 @@ mod tests {
         assert_eq!(health.last_error, None);
     }
 
-    /// 验证 P1-17：必须存在迁移文件 `019_agent_daily_summaries_fk.sql`，
+    /// 验证：必须存在迁移文件 `019_agent_daily_summaries_fk.sql`，
     /// 且包含 `agent_daily_summaries.agent_id` → `agents(agent_id)` 的
     /// `ON DELETE CASCADE` 外键约束，闭环孤儿行问题。
     #[test]
@@ -349,7 +349,7 @@ mod tests {
         );
     }
 
-    /// 验证 P1-12：必须存在迁移文件 `020_device_token_rotation.sql`，
+    /// 验证：必须存在迁移文件 `020_device_token_rotation.sql`，
     /// 为 `devices` 表加 `token_created_at` 与 `token_rotated_at` 列。
     /// 解决"设备 token 一次生成终身有效"的真实风险。
     #[test]

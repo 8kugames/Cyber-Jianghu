@@ -33,7 +33,7 @@ use crate::state::AppState;
 ///    - 分配默认初始物品
 /// 4. 构建并返回游戏规则
 ///
-/// 注意（P0-15 修复）：system_prompt 由服务器根据 payload 字段统一生成
+/// 注意：system_prompt 由服务器根据 payload 字段统一生成
 /// （`payload.generate_system_prompt()`），而非直接接受客户端提交的 prompt 字符串。
 /// 这是从协议层根治 prompt injection——客户端无法注入"忽略所有指令"等覆盖性内容。
 pub async fn agent_register(
@@ -106,7 +106,7 @@ pub async fn agent_register(
         })
         .collect();
 
-    // 6. 事务性注册（F-04：原子性保证）
+    // 6. 事务性注册（原子性保证）
     let registration = match crate::db::register_agent_transactional(
         &state.db_pool,
         payload.device_id, // 关联设备ID
@@ -392,7 +392,7 @@ pub async fn agent_auto_rebirth(
         payload.old_agent_id, payload.device_id
     );
 
-    // P1-10 F1：前置拦截 nil UUID
+    // 前置拦截 nil UUID
     if let Err(e) = db::ensure_old_agent_id_not_nil(payload.old_agent_id) {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -484,7 +484,7 @@ pub async fn agent_auto_rebirth(
         })
         .unwrap_or(true);
 
-    // P1-5 修复：从内存原子变量取当前世界 tick；未启动 scheduler 时回退到 DB。
+    // 从内存原子变量取当前世界 tick；未启动 scheduler 时回退到 DB。
     // 之前 auto_rebirth_agent 内部用 `MAX(agent_states.tick_id) WHERE agent_id = old + 1`
     // 会在"死亡到重生之间世界已推进 N tick"时让新角色 state 落后世界 N tick。
     let world_tick = {
@@ -504,7 +504,7 @@ pub async fn agent_auto_rebirth(
     let result = db::auto_rebirth_agent(
         &state.db_pool,
         payload.old_agent_id,
-        payload.device_id, // P1-10 F2：传入 caller device_id，DB 层强制归属校验
+        payload.device_id, // 传入 caller device_id，DB 层强制归属校验
         db::AutoRebirthParams {
             spawn_location: &spawn_location,
             initial_items: &initial_items_data,

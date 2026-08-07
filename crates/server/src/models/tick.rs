@@ -105,7 +105,7 @@ impl TickLog {
         self.status = TickStatus::Completed;
     }
 
-    /// 标记Tick失败（F-06）
+    /// 标记Tick失败
     pub fn fail(&mut self, error_message: &str) {
         self.completed_at = Some(Utc::now());
         self.duration_ms = Some(

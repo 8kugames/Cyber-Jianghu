@@ -34,7 +34,7 @@ pub struct ExperienceEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub soul_cycle_metadata: Option<serde_json::Value>,
     /// 模型 ID 权威归一值（per-attempt first cycle model_id → agents.model_id 兜底），供前端直接渲染
-    /// 见 WI-006：原方案是 history.js 从 soul_cycle_metadata.cycles 数组扫首个非空，脆弱
+    /// 原方案是 history.js 从 soul_cycle_metadata.cycles 数组扫首个非空，脆弱
     /// 且 soul_cycle_metadata 为 null 时降级为 "-"。此处由 server SQL COALESCE 归一，
     /// 前端不再做 JSONB 字符串提取。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -143,7 +143,7 @@ pub async fn get_agent_experiences(
     }
 
     // 构建 IN 子句参数（sqlx 不支持变长 IN，用 = ANY 替代）
-    // WI-006: model_id 权威归一 — per-attempt first cycle model_id (JSONB chain) → agents.model_id 兜底。
+    // model_id 权威归一 — per-attempt first cycle model_id (JSONB chain) → agents.model_id 兜底。
     // 历史数据 agents.model_id 为 NULL 时降级为 NULL (前端渲染 "-")，属可接受的早期数据局限。
     let rows = sqlx::query(
         "SELECT a.tick_id, a.action_type, a.action_type_display, a.action_data, a.result, a.result_message,
@@ -292,7 +292,7 @@ pub struct StreamEntry {
     pub reflector_thought: Option<String>,
     pub narrative: Option<String>,
     pub soul_cycle_metadata: Option<serde_json::Value>,
-    /// 模型 ID 权威归一值（同 `ExperienceEntry.model_id`）。见 WI-006。
+    /// 模型 ID 权威归一值（同 `ExperienceEntry.model_id`）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_id: Option<String>,
     /// 游戏日编号（0 表示无元数据）
@@ -368,7 +368,7 @@ pub async fn get_experiences(
     .unwrap_or(0);
 
     // 查询条目：使用 LATERAL JOIN 获取动作发生时的位置
-    // WI-006: model_id 权威归一并入主查询,见 get_agent_experiences 同名注释。
+    // model_id 权威归一并入主查询,见 get_agent_experiences 同名注释。
     let rows = sqlx::query(
         r#"
         SELECT a.tick_id, a.agent_id, ag.device_id, ag.name as agent_name, loc.node_id as location,

@@ -352,7 +352,7 @@ mod tests {
         ))
     }
 
-    /// 验证 P1-8：文件不存在时返回 Ok(None)，允许覆盖创建（首次写配置）。
+    /// 验证：文件不存在时返回 Ok(None)，允许覆盖创建（首次写配置）。
     #[test]
     fn test_read_original_content_returns_none_for_missing_file() {
         let dir = temp_dir("missing");
@@ -365,7 +365,7 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
-    /// 验证 P1-8：文件存在但读失败时必须 Err，禁止静默回退为 None。
+    /// 验证：文件存在但读失败时必须 Err，禁止静默回退为 None。
     /// 这里用"目录占位文件路径"模拟：把目录当成文件读，
     /// 任何非 NotFound 错误都必须冒泡，让 caller 阻断后续覆盖。
     #[test]
@@ -383,7 +383,7 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
-    /// 验证 P1-8：文件存在且可读时返回 Ok(Some(content))。
+    /// 验证：文件存在且可读时返回 Ok(Some(content))。
     #[test]
     fn test_read_original_content_returns_existing_content() {
         let dir = temp_dir("existing");
