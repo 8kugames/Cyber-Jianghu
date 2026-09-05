@@ -3,7 +3,7 @@
 // ============================================================================
 //
 // 验证:
-// 1. 26 规则正确加载
+// 1. 28 规则正确加载
 // 2. 损坏 YAML → fail-fast
 // 3. 缺失文件 → fail-fast
 // 4. 空 rules → fail-fast
@@ -27,9 +27,9 @@ fn real_yaml_path() -> PathBuf {
 }
 
 #[test]
-fn test_load_yaml_succeeds_with_26_rules() {
-    let mapper = load_event_trait_rules(&real_yaml_path()).expect("YAML 26 规则必须可加载");
-    assert_eq!(mapper.rules().len(), 26, "26 规则是创世基线");
+fn test_load_yaml_succeeds_with_28_rules() {
+    let mapper = load_event_trait_rules(&real_yaml_path()).expect("YAML 28 规则必须可加载");
+    assert_eq!(mapper.rules().len(), 28, "28 规则是创世基线");
 }
 
 #[test]
@@ -84,6 +84,8 @@ fn test_yaml_loaded_rules_match_hardcoded_baseline() {
         (EventType::Helped, "信任", 10, 1.2),
         (EventType::BattleWin, "自信", 15, 1.3),
         (EventType::BattleLose, "恐惧", 20, 1.4),
+        (EventType::WitnessedDeath, "恐惧", 12, 1.2),
+        (EventType::WitnessedDeath, "沮丧", 8, 1.0),
     ];
 
     for (event_type, trait_name, base_delta, weight) in expect {

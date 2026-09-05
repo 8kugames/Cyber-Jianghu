@@ -342,7 +342,7 @@ impl IntentWorker {
 
         // 8. 交互驱动即时推送 WorldState（提交 Agent + 同位置 Agent）
         let events: Vec<WorldEvent> = result.events.iter().map(|(_, e)| e.clone()).collect();
-        self.send_reactive_world_state(agent_id, tick_id, events)
+        self.send_reactive_world_state(&persisted_state.node_id, tick_id, events)
             .await;
 
         // 9. 广播事件给同位置 Agent
@@ -503,7 +503,7 @@ impl IntentWorker {
 
         // 提取纯 WorldEvent Vec 用于 reactive push，保留元组用于 broadcast
         let events: Vec<WorldEvent> = event_tuples.iter().map(|(_, e)| e.clone()).collect();
-        self.send_reactive_world_state(agent_id, tick_id, events)
+        self.send_reactive_world_state(&persisted_state.node_id, tick_id, events)
             .await;
 
         for (target_id, event) in &event_tuples {
@@ -756,25 +756,18 @@ impl IntentWorker {
 
     /// 交互驱动即时推送 WorldState
     ///
-    /// Intent 执行后，为提交 Agent 及同位置在线 Agent 构建并发送最新 WorldState。
-    /// 确保 Agent 在下一次认知决策前拥有最新的世界状态。
+    /// Intent 执行 / 死亡善后等事件后，为同位置在线 Agent 构建并发送最新 WorldState。
+    /// 确保 Agent 在下一次认知决策前拥有最新的世界状态与事件流
+    /// （events_log → 记忆 + 特质演化的规范通道）。
     async fn send_reactive_world_state(
         &self,
-        agent_id: Uuid,
+        location: &str,
         tick_id: i64,
         events: Vec<WorldEvent>,
     ) {
-        // 1. 从 DashMap 读取更新后的状态
-        let updated_state = match self.state_cache.get(&agent_id) {
-            Some(r) => r.value().clone(),
-            None => {
-                debug!("Agent {} 不在缓存中，跳过 reactive WorldState", agent_id);
-                return;
-            }
-        };
+        let location = location.to_string();
 
-        // 2. 收集同位置 Agent（含自身）
-        let location = updated_state.node_id.clone();
+        // 收集同位置存活 Agent（发起者状态刚写入缓存，天然包含自身）
         let co_located: Vec<AgentState> = self
             .state_cache
             .iter()
@@ -945,8 +938,7 @@ impl IntentWorker {
         }
 
         debug!(
-            "reactive WorldState: agent={}, location={}, 推送 {} 个 Agent",
-            agent_id,
+            "reactive WorldState: location={}, 推送 {} 个 Agent",
             location,
             co_located.len()
         );
@@ -973,6 +965,14 @@ impl IntentWorker {
         for notif in &notifications {
             let agent_id = notif.agent_id;
             let location = &notif.location;
+
+            // 死者姓名（DashMap 移除前捕获）。目击事件必须具名 —— 涌现行为
+            // （哀悼/记仇/避讳）依赖目击者记住"谁"死了，而非"有人"死了。
+            let deceased_name: Option<String> = self
+                .state_cache
+                .get(&agent_id)
+                .map(|s| s.value().name.clone())
+                .filter(|n| !n.is_empty());
 
             // 死亡归因日志 + 元数据构建（DashMap 移除前完成）
             let death_metadata = if let Some(state) = self.state_cache.get(&agent_id) {
@@ -1098,9 +1098,10 @@ impl IntentWorker {
                 let event = WorldEvent {
                     event_type: WorldEventType::DeathNotification,
                     tick_id,
-                    description: format!("有人在 {} 亡故：{}", location, notif.description),
+                    description: notif.witness_description(deceased_name.as_deref()),
                     metadata: serde_json::json!({
                         "agent_id": agent_id.to_string(),
+                        "agent_name": deceased_name,
                         "cause": notif.cause,
                         "location": location,
                     }),
@@ -1111,6 +1112,15 @@ impl IntentWorker {
                         warn!("死亡事件广播失败: target={}, error={}", target_id, e);
                     }
                 }
+
+                // 4.5 reactive WorldState 推送：把具名死亡事件带入同位置 Agent 的
+                // events_log —— 记忆 + 特质演化的规范通道。ImmediateEvent 只保证
+                // "看见"（triage 紧急提示），本推送使目击事件进入"记住并受其影响"
+                // 通道（WitnessedDeath → 恐惧/沮丧 特质变化 + 权重 1.0 情节记忆）。
+                // best-effort：WorldState 走 watch latest-wins 通道，目击者未及
+                // 消费的事件可能被后续广播覆写。
+                self.send_reactive_world_state(location, tick_id, vec![event.clone()])
+                    .await;
             }
 
             // 5. 发送 AgentDied + (可选) WebSocket Close

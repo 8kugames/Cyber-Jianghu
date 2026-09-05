@@ -2,7 +2,7 @@
 # 事件-特质映射规则
 # ============================================================================
 #
-# 26 rules / 10 event types
+# 28 rules / 11 event types
 # 创世基线,见计划书 §十六
 #
 # 加载路径: config_dir()/persona_event_rules.yaml
@@ -12,7 +12,7 @@
 #   - 都返回 Result::Err,启动失败(无静默 fallback)
 #
 # 字段说明:
-#   - event_type:  事件类型枚举(Attacked / Deceived / Helped / TradeSuccess / TradeFail / BattleWin / BattleLose / Hungry / Thirsty / SocialInteraction)
+#   - event_type:  事件类型枚举(Attacked / Deceived / Helped / TradeSuccess / TradeFail / BattleWin / BattleLose / Hungry / Thirsty / SocialInteraction / WitnessedDeath)
 #   - trait_name:  目标特质名称(中文)
 #   - base_delta:  基础变化量 [-100, +100]
 #   - weight:      权重(> 0,影响变化幅度)
@@ -187,3 +187,16 @@ rules:
     base_delta: 2
     weight: 1.0
     # design_intent: 微量积累——信任来自多次正向互动
+
+  # === WitnessedDeath(目睹死亡) ===
+  - event_type: WitnessedDeath
+    trait_name: 恐惧
+    base_delta: 12
+    weight: 1.2
+    # design_intent: 目睹同类之死触发深层求生恐惧——强于被攻击(10),弱于亲历败亡(20),因死者非己
+
+  - event_type: WitnessedDeath
+    trait_name: 沮丧
+    base_delta: 8
+    weight: 1.0
+    # design_intent: 目睹生命凋零的低落——哀悼的种子,随时间自然衰减

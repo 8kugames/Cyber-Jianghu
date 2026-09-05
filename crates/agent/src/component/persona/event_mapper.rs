@@ -42,6 +42,8 @@ pub enum EventType {
     Thirsty,
     /// 社交互动
     SocialInteraction,
+    /// 目睹他人死亡
+    WitnessedDeath,
     /// 其他事件
     Other,
 }
@@ -159,6 +161,7 @@ impl EventContext {
                 }
                 EventType::Other
             }
+            WorldEventType::DeathNotification => EventType::WitnessedDeath,
             WorldEventType::SocialInteraction => EventType::SocialInteraction,
             _ => EventType::Other,
         }
@@ -293,6 +296,27 @@ mod tests {
     }
 
     #[test]
+    fn test_death_notification_classifies_as_witnessed_death() {
+        let event = WorldEvent {
+            event_type: WorldEventType::DeathNotification,
+            tick_id: 1,
+            description: "张三在 龙门大堂 亡故：饥渴交加，体力不支".to_string(),
+            metadata: serde_json::json!({
+                "agent_id": uuid::Uuid::new_v4().to_string(),
+                "agent_name": "张三",
+                "cause": "satiation",
+                "location": "龙门大堂",
+            }),
+        };
+
+        assert_eq!(
+            EventContext::classify_event(&event),
+            EventType::WitnessedDeath,
+            "DeathNotification 必须分类为 WitnessedDeath（特质演化链依赖此分类）"
+        );
+    }
+
+    #[test]
     fn test_trait_mapping_rules() {
         let yaml_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -301,8 +325,8 @@ mod tests {
             .unwrap()
             .join("crates/server/config/persona_event_rules.yaml");
         let mapper = crate::component::persona::rules_loader::load_event_trait_rules(&yaml_path)
-            .expect("YAML 26 规则必须可加载");
-        assert_eq!(mapper.rules().len(), 26);
+            .expect("YAML 28 规则必须可加载");
+        assert_eq!(mapper.rules().len(), 28);
 
         // 验证被攻击规则（社交维度保留）
         let attacked_rule = mapper
@@ -322,7 +346,7 @@ mod tests {
             .unwrap()
             .join("crates/server/config/persona_event_rules.yaml");
         let mapper = crate::component::persona::rules_loader::load_event_trait_rules(&yaml_path)
-            .expect("YAML 26 规则必须可加载");
+            .expect("YAML 28 规则必须可加载");
         let agent_id = uuid::Uuid::new_v4();
         let mut persona = DynamicPersona::new(agent_id, "测试角色", "基础描述");
         persona.set_trait("攻击性", 50);
