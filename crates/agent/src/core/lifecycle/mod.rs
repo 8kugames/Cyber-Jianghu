@@ -545,20 +545,23 @@ impl super::Agent {
                     self.update_tick_state(&world_state).await;
 
                     // 1.5 检查是否死亡（只报告一次）
-                    // 路径 1: WorldState.events_log 中包含 DeathNotification
+                    // 路径 1: WorldState.events_log 中包含「自身」的 DeathNotification。
+                    //   目击他人死亡同样以 DeathNotification 形式投递（WitnessedDeath），
+                    //   必须比对死者 ID 与自身——否则目击者被误判为自身死亡且无自愈路径
+                    //   （见 death::find_self_death）
                     // 路径 2: AgentDied WS 回调已设置 is_dead=true，但 events_log 可能已过期
-                    let death_via_events = !self.death_reported
-                        && world_state.events_log.iter().any(|e| {
-                            e.event_type == cyber_jianghu_protocol::WorldEventType::DeathNotification
-                        });
+                    let self_death = if self.death_reported {
+                        None
+                    } else {
+                        death::find_self_death(&world_state.events_log, world_state.agent_id)
+                    };
                     let death_via_callback = !self.death_reported
                         && self.http_api_state.as_ref()
                             .map(|s| s.is_dead.load(std::sync::atomic::Ordering::Relaxed))
                             .unwrap_or(false);
 
-                    if death_via_events || death_via_callback {
-                        let death_desc = world_state.events_log.iter()
-                            .find(|e| e.event_type == cyber_jianghu_protocol::WorldEventType::DeathNotification)
+                    if self_death.is_some() || death_via_callback {
+                        let death_desc = self_death
                             .map(|e| e.description.as_str())
                             .unwrap_or("AgentDied 回调通知（events_log 未包含 DeathNotification）");
                         self.handle_death(
@@ -1146,7 +1149,8 @@ impl super::Agent {
     /// 统一死亡处理：持久化状态 → 生成传记 → 调度重生
     ///
     /// 可从两条路径调用：
-    /// 1. WorldState.events_log 中包含 DeathNotification（死亡后最后一条 WorldState 恰好到达）
+    /// 1. WorldState.events_log 中包含「自身」的 DeathNotification（比对死者 ID，
+    ///    见 death::find_self_death；目击他人死亡不触发本函数）
     /// 2. AgentDied 消息通过 death_event_tx 广播到达
     async fn handle_death(
         &mut self,
