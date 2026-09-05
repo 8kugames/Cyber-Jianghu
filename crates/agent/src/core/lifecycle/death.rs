@@ -3,6 +3,30 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use super::super::Agent;
+use crate::models::{WorldEvent, WorldEventType};
+
+/// 在 events_log 中查找「自身」的死亡事件。
+///
+/// 服务端把同位置他人的死亡（目击事件，WitnessedDeath）与自身死亡以同一种
+/// `WorldEventType::DeathNotification` 投递进 events_log，唯一区别是
+/// `metadata.agent_id` 记录死者 ID。必须比对死者与自身：目击者若被误判为
+/// 自身死亡，is_dead 置位后无自愈路径（server auto-rebirth 按
+/// status='dead' 守卫拒绝活体重生），将永久停在决策跳过循环。
+///
+/// 身份无法核对时（自身 ID 未知、事件未携带死者 ID）不触发死亡报告：
+/// 误报（假死）不可逆，漏报只损失一次提前上报，AgentDied 回调（路径 2）
+/// 仍会兜底。
+pub(super) fn find_self_death(
+    events_log: &[WorldEvent],
+    self_agent_id: Option<Uuid>,
+) -> Option<&WorldEvent> {
+    let self_id = self_agent_id?;
+    let self_id_str = self_id.to_string();
+    events_log.iter().find(|e| {
+        e.event_type == WorldEventType::DeathNotification
+            && e.metadata.get("agent_id").and_then(|v| v.as_str()) == Some(self_id_str.as_str())
+    })
+}
 
 struct RebirthParams {
     old_agent_id: Uuid,
@@ -185,4 +209,135 @@ pub(super) async fn maybe_schedule_auto_rebirth(
         retry_interval,
         context: context.to_string(),
     });
+}
+
+// ============================================================================
+// 测试
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::find_self_death;
+    use crate::component::persona::event_mapper::EventContext;
+    use crate::component::persona::rules_loader::load_event_trait_rules;
+    use crate::models::{WorldEvent, WorldEventType};
+    use uuid::Uuid;
+
+    fn death_event(deceased: Option<Uuid>, description: &str) -> WorldEvent {
+        WorldEvent {
+            event_type: WorldEventType::DeathNotification,
+            tick_id: 1,
+            description: description.to_string(),
+            metadata: match deceased {
+                Some(id) => serde_json::json!({ "agent_id": id.to_string() }),
+                None => serde_json::json!({}),
+            },
+        }
+    }
+
+    fn other_event() -> WorldEvent {
+        WorldEvent {
+            event_type: WorldEventType::ActionResult,
+            tick_id: 1,
+            description: "采集了野草".to_string(),
+            metadata: serde_json::json!({}),
+        }
+    }
+
+    #[test]
+    fn witnessed_death_of_other_is_not_self_death() {
+        // P0 回归锁定：目击他人死亡不得触发自身死亡报告（否则目击者永久假死）
+        let self_id = Uuid::new_v4();
+        let other_id = Uuid::new_v4();
+        let log = vec![
+            other_event(),
+            death_event(Some(other_id), "张三在 龙门大堂 亡故：饥渴交加，体力不支"),
+        ];
+        assert!(
+            find_self_death(&log, Some(self_id)).is_none(),
+            "目击他人死亡不得被判为自身死亡"
+        );
+    }
+
+    #[test]
+    fn own_death_in_events_log_is_detected() {
+        let self_id = Uuid::new_v4();
+        let log = vec![other_event(), death_event(Some(self_id), "你已亡故")];
+        let found = find_self_death(&log, Some(self_id)).expect("自身死亡必须被检测到");
+        assert_eq!(found.description, "你已亡故");
+    }
+
+    #[test]
+    fn mixed_log_finds_self_death_not_witnessed() {
+        let self_id = Uuid::new_v4();
+        let log = vec![
+            death_event(Some(Uuid::new_v4()), "张三亡故"),
+            death_event(Some(self_id), "你亡故"),
+        ];
+        assert_eq!(
+            find_self_death(&log, Some(self_id)).map(|e| e.description.as_str()),
+            Some("你亡故"),
+            "同 tick 既有目击又有自身死亡时，必须定位自身那条"
+        );
+    }
+
+    #[test]
+    fn death_event_without_deceased_id_is_ignored() {
+        // fail-safe：身份无法核对不触发死亡。误报（假死）不可逆，
+        // 漏报由 AgentDied WS 回调（路径 2）兜底。
+        let self_id = Uuid::new_v4();
+        let log = vec![death_event(None, "有人亡故")];
+        assert!(find_self_death(&log, Some(self_id)).is_none());
+    }
+
+    #[test]
+    fn unknown_self_identity_is_ignored() {
+        let other_id = Uuid::new_v4();
+        let log = vec![death_event(Some(other_id), "张三亡故")];
+        assert!(find_self_death(&log, None).is_none());
+    }
+
+    #[test]
+    fn witnessed_death_still_drives_trait_evolution() {
+        // 目击合同另一半：不假死（上列测试），但必须被 WitnessedDeath 规则影响——
+        // 事件经 classify_event 进入特质演化，而非被丢弃。
+        let other_id = Uuid::new_v4();
+        let log = vec![death_event(
+            Some(other_id),
+            "张三在 龙门大堂 亡故：饥渴交加，体力不支",
+        )];
+        assert!(
+            find_self_death(&log, Some(Uuid::new_v4())).is_none(),
+            "目击者不假死"
+        );
+
+        let yaml_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("crates/server/config/persona_event_rules.yaml");
+        let mapper = load_event_trait_rules(&yaml_path).expect("YAML 28 规则必须可加载");
+        let event = &log[0];
+        assert_eq!(
+            EventContext::classify_event(event),
+            crate::component::persona::event_mapper::EventType::WitnessedDeath,
+            "目击死亡必须分类为 WitnessedDeath"
+        );
+
+        let agent_id = Uuid::new_v4();
+        let mut persona =
+            crate::component::persona::DynamicPersona::new(agent_id, "目击者", "基础描述");
+        persona.set_trait("恐惧", 10);
+        persona.set_trait("沮丧", 10);
+        mapper.apply_to_persona(event, &mut persona, 1);
+        assert!(
+            persona.get_trait("恐惧").unwrap() > 10,
+            "目击死亡必须提升恐惧特质"
+        );
+        assert!(
+            persona.get_trait("沮丧").unwrap() > 10,
+            "目击死亡必须提升沮丧特质"
+        );
+    }
 }
