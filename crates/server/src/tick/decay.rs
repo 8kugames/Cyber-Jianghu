@@ -57,6 +57,58 @@ impl DeathNotification {
             died_at: chrono::Utc::now().timestamp_millis(),
         }
     }
+
+    /// 生成目击者视角的死亡事件描述（具名化）。
+    ///
+    /// 涌现行为（哀悼/记仇/避讳）依赖目击者记住"谁"死了，而非"有人"死了。
+    /// 姓名缺失时回退到匿名描述（DashMap 已被清理等边界情况）。
+    pub fn witness_description(&self, deceased_name: Option<&str>) -> String {
+        match deceased_name {
+            Some(name) if !name.is_empty() => {
+                format!("{}在 {} 亡故：{}", name, self.location, self.description)
+            }
+            _ => format!("有人在 {} 亡故：{}", self.location, self.description),
+        }
+    }
+}
+
+#[cfg(test)]
+mod death_notification_tests {
+    use super::*;
+
+    fn make_notification() -> DeathNotification {
+        DeathNotification::new(
+            Uuid::new_v4(),
+            "satiation".to_string(),
+            "饥渴交加，体力不支".to_string(),
+            "龙门大堂".to_string(),
+            42,
+        )
+    }
+
+    #[test]
+    fn witness_description_includes_name_when_known() {
+        let n = make_notification();
+        let desc = n.witness_description(Some("张三"));
+        assert_eq!(desc, "张三在 龙门大堂 亡故：饥渴交加，体力不支");
+        assert!(desc.contains("张三"), "描述必须包含死者姓名");
+        assert!(!desc.contains("有人"), "已知姓名时不应使用匿名描述");
+    }
+
+    #[test]
+    fn witness_description_falls_back_to_anonymous() {
+        let n = make_notification();
+        let desc = n.witness_description(None);
+        assert_eq!(desc, "有人在 龙门大堂 亡故：饥渴交加，体力不支");
+    }
+
+    #[test]
+    fn witness_description_falls_back_when_name_empty() {
+        let n = make_notification();
+        // 空姓名等价于未知（DB JOIN 缺失等边界）
+        let desc = n.witness_description(Some(""));
+        assert!(desc.starts_with("有人"), "空姓名应回退匿名描述");
+    }
 }
 
 /// 应用生理值衰减和环境压力伤害

@@ -1,10 +1,10 @@
 // ============================================================================
-// 26 规则 YAML 加载器
+// 28 规则 YAML 加载器
 // ============================================================================
 //
 // 把 hardcoded 规则搬到 persona_event_rules.yaml,符合"零魔法值"原则。
 //
-// 失败模式:fail-fast — 文件缺失 / YAML 损坏 / 空 rules / schema 不匹配 / 规则数 != 26
+// 失败模式:fail-fast — 文件缺失 / YAML 损坏 / 空 rules / schema 不匹配 / 规则数 != 28
 // 都返回 Result::Err,启动失败(无静默 fallback,符合创世哲学"快速失败")。
 // 见计划书 §十六。
 // ============================================================================
@@ -29,12 +29,12 @@ pub struct RuleYaml {
     pub weight: f32,
 }
 
-const EXPECTED_RULE_COUNT: usize = 26;
+const EXPECTED_RULE_COUNT: usize = 28;
 
 pub fn load_event_trait_rules(path: &Path) -> Result<EventTraitMapper> {
     if !path.exists() {
         bail!(
-            "persona_event_rules.yaml 不存在: {} — 创世 26 规则必须显式提供(无静默 fallback)",
+            "persona_event_rules.yaml 不存在: {} — 创世 28 规则必须显式提供(无静默 fallback)",
             path.display()
         );
     }
@@ -50,7 +50,7 @@ pub fn load_event_trait_rules(path: &Path) -> Result<EventTraitMapper> {
 
     if parsed.rules.len() != EXPECTED_RULE_COUNT {
         bail!(
-            "persona_event_rules.yaml 规则数 {} != {} — 26 条是创世基线,若需调整请同步更新计划书 §十六",
+            "persona_event_rules.yaml 规则数 {} != {} — 28 条是创世基线,若需调整请同步更新计划书 §十六",
             parsed.rules.len(),
             EXPECTED_RULE_COUNT
         );
