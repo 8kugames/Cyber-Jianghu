@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [0.1.292] - 2026-09-06
+
+### Major Features
+
+- **WitnessedDeath 目击死亡特质演化**（白皮书 05_心智模型 §5 压力源落地）：死亡通知具名化（`witness_description`），死亡善后向同位置存活 Agent 的 events_log 写入 DeathNotification（记忆 + 特质演化规范通道，best-effort）；persona_event_rules 新增 WitnessedDeath→恐惧/沮丧规则（26→28 条，EXPECTED_RULE_COUNT fail-fast 门禁同步）；query_world↔compactor 合同测试锁定 execute_query_world 输出与 compact_tool_result 读取的 JSON 键契约，防 compactor 静默失效
+
+### Bug Fixes
+
+- **目击者假死回归**（agent）：lifecycle 路径 1 的死亡检测原用 `any(DeathNotification)` 判定自身死亡、不校验死者——目击他人死亡即触发 handle_death，is_dead 永久置位，而 server auto-rebirth 按 `status='dead'` 守卫拒绝活体重生，目击者永久停在决策跳过循环。新增 `find_self_death` 比对 `metadata.agent_id` 与自身 ID；身份无法核对时 fail-safe 不触发（误报不可逆，漏报由 AgentDied 回调路径兜底）；6 个单元测试锁定（目击不假死、自身死亡仍可检测、同 tick 混合日志、WitnessedDeath 特质演化联合合同）
+
+### Tooling
+
+- **验收 run 观测快照脚本**（`scripts/acceptance_snapshot.sh`）：定时抓取 MVP 健康度看板与涌现检测端点落盘 JSON 快照，只读观测不干预；配套 `docs/reports/acceptance-run-config-2026-09.md` 验收配置锁定与 run 纪律（涌现基线回溯报告按项目约定留盘 docs/reports/，不进 git）
+
 ## [0.1.291] - 2026-08-06
 
 ### Performance
