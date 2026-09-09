@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Tooling
+
+- **/release 流程与 hook 对齐**（`.claude/skills/release/SKILL.md`）：重排为「先提交全部代码（hook bump 落定）→ 读定稿版本转正 CHANGELOG → 仅含 CHANGELOG.md 的发版提交（不触发 bump）→ 打 tag」，保证 tag v<VER> = 打 tag 时 Cargo.toml = CHANGELOG [VER]，消除旧流程 tag 落后 1 个 patch 的错位
+- **pre-commit 版本号控制落地**（`githooks/pre-commit`）：吸收并删除 `scripts/version-bump.sh`——暂存区含 `crates/<crate>` 的 .rs/.toml/.yaml 变更时该 crate 版本 patch +1，同步依赖方 path 依赖版本，被改动的 Cargo.toml 与 Cargo.lock（`cargo update -w` 同步刷新）自动 git add 并入本次 commit（补齐原脚本“声称已 add 但未实现”的缺口）；CRATES 清单补上 workspace 成员 embedding；移除会吞依赖名的 sed 回退分支，统一走 perl 并前置快速失败；patch 段 10# 强制十进制防前导零。激活：`git config core.hooksPath githooks`（`install.sh` 任意命令执行时幂等自动激活）；跳过：`git commit --no-verify`
+
 ## [0.1.292] - 2026-09-06
 
 ### Major Features
@@ -75,8 +80,6 @@
 ### Bug Fixes
 
 - **tick/scheduler**: 修复游戏日边界检测（生存奖励结算+编年史）在服务器重启后的偶发漂移。使用 `tick_counter` ordinal 计数器（每 tick +1）替代 `current_tick_id` modulo 墙钟秒判断，消除 modulo 对齐对墙钟余数的偶发依赖，确保每 N 个 tick 精确触发一次
-
-
 
 ### 专用模型训练数据管线（reward + trace + 导出）
 
@@ -175,6 +178,7 @@ agent 死亡与转世重生全链路 P0 修复，消除幽灵状态与 auto_rebi
 ---
 
 > **BREAKING**（治理数据流重大重构）：
+>
 > - 删除 `ProposedActionIR` + `IRSource` 类型（protocol crate 0.1.73 → 后续版本）
 > - DB migration 013 删除 `action_evolution_proposals` 表 IR 字段（actor_arity / target_arity / tick_span / phase_count / protocol_kind / effect_refs / requirement_refs）
 > - DB migration 014 新增 `action_evolution_proposal_groups.stage` 列
@@ -209,6 +213,7 @@ agent 死亡与转世重生全链路 P0 修复，消除幽灵状态与 auto_rebi
 ```
 
 **关键设计**：
+
 - 禁止弃权（LLM 超时/失败强制 Reject）
 - 同 similarity_key 多 proposal 共享 fate
 - stage 持久化，重启可断点续跑

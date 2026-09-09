@@ -102,6 +102,20 @@ EOF
 }
 
 # ============================================================================
+# 确保 git hooks (githooks/) 已激活 (幂等; 非仓库环境静默跳过)
+# ============================================================================
+ensure_git_hooks() {
+    command -v git &>/dev/null || return 0
+    git rev-parse --git-dir &>/dev/null || return 0
+    local current
+    current="$(git config --get core.hooksPath 2>/dev/null || true)"
+    if [ "$current" != "githooks" ]; then
+        git config core.hooksPath githooks
+        success "已激活版本控制 pre-commit hook (core.hooksPath=githooks)"
+    fi
+}
+
+# ============================================================================
 # 解析模式参数
 # ============================================================================
 resolve_mode() {
@@ -318,6 +332,8 @@ main() {
     local cmd="${2:-}"
 
     [ -z "$component" ] || [ -z "$cmd" ] && { show_help; exit 1; }
+
+    ensure_git_hooks
 
     case "$cmd" in
         start|stop|restart|status|logs|build|reset) check_dependencies ;;
