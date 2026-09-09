@@ -12,9 +12,14 @@ description: >
 
 Fixed-sequence git workflow. No deviation.
 
+## Version Alignment Invariant
+
+The pre-commit hook (`githooks/pre-commit`) bumps the server patch version whenever a commit stages `crates/**` `.rs/.toml/.yaml` changes. To keep `tag v<VER>` == `Cargo.toml at the tagged commit` == `CHANGELOG [<VER>]`, the order below is mandatory: commit all code first, read the settled version, then a CHANGELOG-only release commit (no `crates/**` changes staged, so no bump), then tag.
+
 ## Prerequisites
 
 Before starting, verify:
+
 1. Working tree has staged or unstaged changes (or user explicitly says to proceed)
 2. Current branch is `dev`
 3. Server `Cargo.toml` has a valid semver version
@@ -22,15 +27,28 @@ Before starting, verify:
 
 If working tree is clean and user didn't explicitly ask to release, stop and ask.
 
-## Step 1: Promote CHANGELOG [Unreleased]
+## Step 1: Commit all pending work
 
-Read the server version from `crates/server/Cargo.toml` (the `version = "X.Y.Z"` line). This is the release version `<VER>`.
+If there are staged or unstaged changes, stage the relevant files and commit them, using the project's commit message conventions:
+
+- `fix(scope): description` for bugfixes
+- `feat(scope): description` for new features
+- `refactor(scope): description` for refactors
+- `chore(scope): description` for maintenance
+
+The pre-commit hook auto-bumps the server version on these commits — expected. All bumps must settle here. If the user already committed everything, skip this step.
+
+## Step 2: Promote CHANGELOG [Unreleased]
+
+Read the server version from `crates/server/Cargo.toml` (the `version = "X.Y.Z"` line). All hook bumps are settled at this point — this is the release version `<VER>`.
 
 In `CHANGELOG.md`:
+
 1. Rename `## [Unreleased]` to `## [<VER>] - <today's date YYYY-MM-DD>`
 2. Insert a new empty `## [Unreleased]` line above it (for the next cycle)
 
 Example result:
+
 ```
 ## [Unreleased]
 
@@ -39,47 +57,43 @@ Example result:
 ### Your feature notes...
 ```
 
-Stage `CHANGELOG.md` so it lands in the release commit.
+## Step 3: Release commit (CHANGELOG only)
 
-## Step 2: Commit
+Stage `CHANGELOG.md` and verify it is the ONLY staged file. If any `crates/**` change is still pending, go back to Step 1 — committing it here would let the hook bump past `<VER>` and break the alignment invariant.
 
-If there are unstaged changes, stage the relevant files and commit. Use the project's commit message conventions:
-- `fix(scope): description` for bugfixes
-- `feat(scope): description` for new features
-- `refactor(scope): description` for refactors
-- `chore(scope): description` for maintenance
+```bash
+git commit -m "chore(release): v<VER>"
+```
 
-The pre-commit hook auto-bumps the server version in `Cargo.toml`.
+Only `CHANGELOG.md` is staged, so the hook does not trigger and the server version stays `<VER>`.
 
-If user already committed, skip this step.
-
-## Step 3: Push dev
+## Step 4: Push dev
 
 ```bash
 git push origin dev
 ```
 
-## Step 4: Merge to main
+## Step 5: Merge to main
 
 ```bash
 git checkout main && git merge dev --no-edit
 ```
 
-## Step 5: Push main
+## Step 6: Push main
 
 ```bash
 git push origin main
 ```
 
-## Step 6: Tag and push
+## Step 7: Tag and push
 
-Use the version `<VER>` read in Step 1.
+Use the version `<VER>` read in Step 2. The alignment invariant guarantees `v<VER>` equals the Cargo.toml version at the tagged commit.
 
 ```bash
 git tag v<VER> && git push origin v<VER>
 ```
 
-## Step 7: Return to dev
+## Step 8: Return to dev
 
 ```bash
 git checkout dev
@@ -90,15 +104,16 @@ git checkout dev
 Report a summary table:
 
 ```
-| Step         | Result                              |
-|--------------|-------------------------------------|
-| changelog    | [Unreleased] → [<VER>] - <date>     |
-| commit       | <hash> <message>                    |
-| push dev     | <range>                             |
-| merge        | <hash> (N files, +A/-D)             |
-| push main    | <range>                             |
-| tag          | v<VER>                              |
-| branch       | dev                                 |
+| Step           | Result                              |
+|----------------|-------------------------------------|
+| work commits   | <hashes/messages>                   |
+| changelog      | [Unreleased] → [<VER>] - <date>     |
+| release commit | <hash> chore(release): v<VER>       |
+| push dev       | <range>                             |
+| merge          | <hash> (N files, +A/-D)             |
+| push main      | <range>                             |
+| tag            | v<VER> (= Cargo.toml at tag)        |
+| branch         | dev                                 |
 ```
 
 ## Error handling
