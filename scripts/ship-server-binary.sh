@@ -77,7 +77,8 @@ BACKUP="$CD/Dockerfile.bak"
 trap '[ -f "$BACKUP" ] && mv "$BACKUP" "$CD/Dockerfile"' EXIT
 
 cp -f "$CD/Dockerfile" "$BACKUP"
-mv ~/cyber-jianghu-server "$RP/server-bin"
+mkdir -p "$RP/.bin"
+mv ~/cyber-jianghu-server "$RP/.bin/server-bin"
 
 python3 - "$CD/Dockerfile" <<'PY'
 import re, sys, pathlib
@@ -85,7 +86,7 @@ p = pathlib.Path(sys.argv[1])
 src = p.read_text()
 new = re.sub(
     r"FROM rust:trixie AS builder.*?(?=^FROM )",
-    "FROM scratch AS builder\nCOPY server-bin /app/server-bin\n\n",
+    "FROM scratch AS builder\nCOPY .bin/server-bin /app/server-bin\n\n",
     src, flags=re.DOTALL | re.MULTILINE)
 new = new.replace("    cp /app/target/release/cyber-jianghu-server /app/server-bin && \\\n", "")
 p.write_text(new)

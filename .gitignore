@@ -101,7 +101,7 @@ $RECYCLE.BIN/
 *.lnk
 
 # 临时文件
-tmp/
+.tmp/
 temp/
 *.tmp
 *.temp
@@ -137,4 +137,5 @@ flamegraph.svg
 
 # LLM 配置含明文 API key —— web 端首次保存自动生成，不入库
 crates/server/config/llm.yaml
-push_server.sh
+.bin/
+.test-agents/.env
