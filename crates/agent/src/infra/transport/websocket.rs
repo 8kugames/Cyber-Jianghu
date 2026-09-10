@@ -1174,12 +1174,6 @@ async fn websocket_background_task(
                             Ok(ServerMessage::Pong { .. }) => {
                                 debug!("Background: Pong received");
                             }
-                            Ok(ref msg @ ServerMessage::DailySummaryData { .. }) => {
-                                debug!("Background: DailySummaryData received");
-                                if let Some(ref cb) = server_msg_cb {
-                                    cb(msg.clone());
-                                }
-                            }
                             Err(e) => {
                                 warn!("Background: Parse error: {}", e);
                             }
