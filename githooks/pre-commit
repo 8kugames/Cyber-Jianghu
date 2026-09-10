@@ -133,12 +133,22 @@ for crate in "${CRATES[@]}"; do
     update_dependencies "$crate" "$new_version"
 done
 
-# 版本文件自动并入本次 commit (Cargo.lock 不同步：已 untrack 且被 .gitignore 忽略，仅本地刷新)
+# 版本文件自动并入本次 commit。
+# Cargo.lock 的处理刻意与 Cargo.toml 分开表述，避免误读：
+#   · Cargo.toml（版本提升）      → git add 并入本次 commit
+#   · Cargo.lock（依赖锁定文件）  → 仅刷新工作树本地文件，按 untrack 决策永不入库
 if [ ${#MODIFIED_FILES[@]} -gt 0 ]; then
-    cargo update -w
+    # 静默执行：cargo 自带的 "Locking/Updating ..." 输出无前缀，
+    # 易被误读为入库动作，故吞掉后由钩子自行播报
+    if cargo update -w > /dev/null 2>&1; then
+        echo -e "  ${BLUE}→${NC} Cargo.lock 已刷新（仅本地维护，不入库 —— untrack 决策）"
+    else
+        echo -e "${YELLOW}⚠${NC} cargo update -w 失败，Cargo.lock 未刷新（不影响本次 commit，可稍后手动执行）"
+    fi
+
     git add "${MODIFIED_FILES[@]}"
-    echo "[pre-commit] 版本文件已并入本次 commit:"
-    for f in "${MODIFIED_FILES[@]}"; do
-        echo "    $f"
-    done
+
+    echo "[pre-commit] 以下 Cargo.toml（版本提升）已并入本次 commit:"
+    printf '    %s\n' "${MODIFIED_FILES[@]}" | sort -u
+    echo "[pre-commit] Cargo.lock 不入库：仅工作树本地刷新；实际入库内容以 git show HEAD 为准"
 fi
