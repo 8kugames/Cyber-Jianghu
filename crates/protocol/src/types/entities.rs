@@ -52,7 +52,7 @@ pub struct AgentSelfState {
     #[serde(default)]
     pub status_effects: Vec<String>,
 
-    /// 背包物品
+    /// 背包物品（item_id 为物品 uuid，v5 派生）
     #[serde(default)]
     pub inventory: Vec<InventoryItem>,
 
@@ -60,7 +60,7 @@ pub struct AgentSelfState {
     #[serde(default)]
     pub skills: Vec<SkillInfo>,
 
-    /// 已知配方详情（Server 权威，每 tick 下发）
+    /// 已知配方详情（Server 权威，每 tick 下发；recipe_id 为配方 uuid，v5 派生）
     #[serde(default)]
     pub recipe_details: Vec<RecipeDetail>,
 
@@ -103,7 +103,8 @@ impl AgentSelfState {
 /// 背包物品
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InventoryItem {
-    /// 物品 ID
+    /// 物品 uuid（v5 从内部 item_id 确定性派生，全链路引用标识；
+    /// Agent 在意图中照抄此 uuid，Server 在动作边界反解回内部 item_id）
     pub item_id: String,
 
     /// 物品名称
@@ -133,7 +134,7 @@ pub struct SkillInfo {
 /// 配方详情（Server 权威，每 tick 下发到 AgentSelfState）
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RecipeDetail {
-    /// 配方 ID（对应 recipes.yaml 中的 key）
+    /// 配方 uuid（v5 从内部 recipe_id 确定性派生；制造/教导意图照抄此 uuid）
     pub recipe_id: String,
     /// 配方名称（显示用）
     pub name: String,
@@ -141,7 +142,7 @@ pub struct RecipeDetail {
     pub description: String,
     /// 所需材料
     pub materials: Vec<RecipeMaterialInfo>,
-    /// 产出物品 ID
+    /// 产出物品 uuid（v5 派生，同背包物品标识体系）
     pub result_item: String,
     /// 产出物品名称
     pub result_item_name: String,
@@ -154,7 +155,7 @@ pub struct RecipeDetail {
 /// 配方材料信息
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RecipeMaterialInfo {
-    /// 材料 ID
+    /// 材料 uuid（v5 派生，同背包物品标识体系）
     pub item_id: String,
     /// 材料名称
     pub item_name: String,
@@ -215,7 +216,7 @@ pub struct RecentAction {
 /// 场景物品（可拾取）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SceneItem {
-    /// 物品 ID
+    /// 物品 uuid（v5 派生，同背包物品标识体系；拾取意图照抄此 uuid）
     pub item_id: String,
 
     /// 物品名称
@@ -350,10 +351,11 @@ pub struct ActionEffectInfo {
     pub params: HashMap<String, serde_json::Value>,
 }
 
-/// 初始物品配置
+/// 初始物品配置（注册时种子清单；item_id 为原始配置键，
+/// 仅用于 Server 端发放与展示，非动作引用标识）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InitialItem {
-    /// 物品 ID
+    /// 物品 ID（原始配置键，非 uuid）
     pub item_id: String,
 
     /// 物品名称

@@ -1849,7 +1849,8 @@ pub(crate) async fn load_initial_inventory(
                 .map(|c| c.item_type.clone())
                 .unwrap_or_default();
             crate::models::InventoryItem {
-                item_id: item.item_id,
+                // 协议层携带物品 uuid（v5 派生），动作边界反解
+                item_id: crate::items::item_uuid(&item.item_id).to_string(),
                 name,
                 quantity: item.quantity,
                 is_equipped: item.is_equipped,
@@ -1880,7 +1881,7 @@ pub(crate) async fn load_nearby_ground_items(
                 .map(|c| c.item_type.clone())
                 .unwrap_or_default();
             cyber_jianghu_protocol::SceneItem {
-                item_id: gi.item_id,
+                item_id: crate::items::item_uuid(&gi.item_id).to_string(),
                 name,
                 quantity: gi.quantity,
                 item_type,

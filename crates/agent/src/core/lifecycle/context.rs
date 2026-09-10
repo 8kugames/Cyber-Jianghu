@@ -216,9 +216,25 @@ impl super::super::Agent {
                 .await
             {
                 Ok(triaged) => {
+                    // 发送者展示统一 姓名[短 uuid]（id 缺失时退化为裸姓名/有人）
+                    let display_sender =
+                        |event: &crate::component::immediate::event_store::StoredEvent| -> String {
+                            let name = event.from_agent_name.as_deref().unwrap_or("");
+                            if name.is_empty() {
+                                return "有人".to_string();
+                            }
+                            match event
+                                .from_agent_id
+                                .as_deref()
+                                .and_then(|id| uuid::Uuid::parse_str(id).ok())
+                            {
+                                Some(uid) => crate::core::utils::display_agent_name(name, uid),
+                                None => name.to_string(),
+                            }
+                        };
                     // URGENT: 逐条高可见性展示
                     for event in &triaged.urgent {
-                        let sender = event.from_agent_name.as_deref().unwrap_or("有人");
+                        let sender = display_sender(event);
                         memory_context.push_str(&format!(
                             "\n!! 紧急事件: {}「{}」",
                             sender, event.description
@@ -232,7 +248,7 @@ impl super::super::Agent {
                             .iter()
                             .take(config.context.max_batch_summary_chars / 20) // 粗略条目数限制
                             .map(|e| {
-                                let sender = e.from_agent_name.as_deref().unwrap_or("有人");
+                                let sender = display_sender(e);
                                 format!("- {}: {}", sender, e.description)
                             })
                             .collect();

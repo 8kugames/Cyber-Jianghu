@@ -49,7 +49,7 @@ pub(crate) async fn validate_intent_handler(
 
     let tick_id = match resolve_tick_id_or_reject(req.tick_id, &state).await {
         Ok(id) => id,
-        Err(resp) => return resp,
+        Err(resp) => return *resp,
     };
 
     let validator = match &state.intent_validator {
@@ -105,6 +105,7 @@ pub(crate) async fn validate_intent_handler(
         runtime: ValidationRuntimeConfig {
             graded_config,
             recent_same_type_decisions: vec![],
+            acquired_item_ids: vec![],
         },
     };
 

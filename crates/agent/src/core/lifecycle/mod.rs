@@ -743,6 +743,7 @@ impl super::Agent {
                                 final_intent.clone(),
                                 &world_state,
                                 graded_config.as_ref(),
+                                Vec::new(),
                             )
                             .await?
                         {

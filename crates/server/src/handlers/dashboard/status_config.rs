@@ -64,8 +64,18 @@ pub struct AgentDetail {
     pub max_age: Option<i64>,
     pub biography: Option<String>,
     pub roles: Vec<String>,
+    /// 已知配方（制造/传授的前提；名称与 uuid 由前端经 display-map 翻译）
+    pub known_recipes: Vec<AgentKnownRecipe>,
     /// 角色注册时上报的 LLM 模型 ID（如 glm-4、gpt-4o）
     pub model_id: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct AgentKnownRecipe {
+    pub recipe_id: String,
+    /// initial=初始 / taught=传授 / observed=观察习得
+    pub source: String,
+    pub learned_at_tick: i64,
 }
 
 #[derive(Serialize)]
@@ -129,6 +139,24 @@ pub async fn get_agent_details(
     .fetch_all(&state.db_pool)
     .await
     .unwrap_or_default();
+
+    // 已知配方（制造/传授的前提）
+    let known_recipe_rows = sqlx::query(
+        "SELECT recipe_id, source, learned_at_tick FROM agent_known_recipes \
+         WHERE agent_id = $1 ORDER BY learned_at_tick, recipe_id",
+    )
+    .bind(agent_id)
+    .fetch_all(&state.db_pool)
+    .await
+    .unwrap_or_default();
+    let known_recipes = known_recipe_rows
+        .iter()
+        .map(|row| AgentKnownRecipe {
+            recipe_id: row.get("recipe_id"),
+            source: row.get("source"),
+            learned_at_tick: row.get("learned_at_tick"),
+        })
+        .collect();
 
     let (
         location,
@@ -309,6 +337,7 @@ pub async fn get_agent_details(
         max_age,
         biography: agent_row.get("biography"),
         roles,
+        known_recipes,
         model_id: agent_row.get("model_id"),
     }))
 }

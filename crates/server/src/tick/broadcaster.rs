@@ -106,7 +106,9 @@ impl Broadcaster {
                                 .map(|c| c.item_type.clone())
                                 .unwrap_or_default();
                             crate::models::InventoryItem {
-                                item_id: item.item_id.clone(),
+                                // 协议层携带物品 uuid（v5 派生）：Agent 按 uuid 引用物品，
+                                // Server 在动作边界反解回内部 item_id
+                                item_id: crate::items::item_uuid(&item.item_id).to_string(),
                                 name,
                                 quantity: item.quantity,
                                 is_equipped: item.is_equipped,
@@ -234,7 +236,7 @@ impl Broadcaster {
                                 .map(|c| c.item_type.clone())
                                 .unwrap_or_default();
                             cyber_jianghu_protocol::SceneItem {
-                                item_id: gi.item_id.clone(),
+                                item_id: crate::items::item_uuid(&gi.item_id).to_string(),
                                 name,
                                 quantity: gi.quantity,
                                 item_type,
@@ -452,7 +454,8 @@ impl Broadcaster {
                             .filter_map(|id| {
                                 crate::game_data::ItemRegistry::get(id).map(|entry| {
                                     crate::models::GatherableItem {
-                                        item_id: id.clone(),
+                                        // 采集引用 uuid（与背包/地面物品同标识体系）
+                                        item_id: crate::items::item_uuid(id).to_string(),
                                         name: entry.name.clone(),
                                         item_type: entry.item_type.clone(),
                                     }
@@ -541,7 +544,8 @@ pub fn build_recipe_details(
                     .map(|m| {
                         let item_config = crate::game_data::registry::ItemRegistry::get(&m.item_id);
                         cyber_jianghu_protocol::types::entities::RecipeMaterialInfo {
-                            item_id: m.item_id.clone(),
+                            // 材料引用 uuid（与背包/地面物品同标识体系）
+                            item_id: crate::items::item_uuid(&m.item_id).to_string(),
                             item_name: item_config
                                 .as_ref()
                                 .map(|c| c.name.clone())
@@ -551,11 +555,11 @@ pub fn build_recipe_details(
                     })
                     .collect();
             Some(cyber_jianghu_protocol::types::entities::RecipeDetail {
-                recipe_id: recipe_id.clone(),
+                recipe_id: crate::game_data::registry::RecipeRegistry::uuid(recipe_id).to_string(),
                 name: recipe.name,
                 description: recipe.description,
                 materials,
-                result_item: recipe.result_item.clone(),
+                result_item: crate::items::item_uuid(&recipe.result_item).to_string(),
                 result_item_name: result_item_config
                     .as_ref()
                     .map(|c| c.name.clone())

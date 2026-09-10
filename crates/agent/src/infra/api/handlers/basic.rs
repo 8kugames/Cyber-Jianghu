@@ -22,11 +22,11 @@ pub(crate) struct ErrorResponse {
 }
 
 /// 解析 tick_id：优先使用请求中的值，否则使用当前状态的 tick_id
-/// 如果当前没有状态，则拒绝请求
+/// 如果当前没有状态，则拒绝请求（Err 装箱控制 Result 体积，clippy result_large_err）
 pub(crate) async fn resolve_tick_id_or_reject(
     req_tick_id: Option<i64>,
     state: &HttpApiState,
-) -> Result<i64, axum::response::Response> {
+) -> Result<i64, Box<axum::response::Response>> {
     if let Some(tick_id) = req_tick_id {
         return Ok(tick_id);
     }
@@ -43,7 +43,7 @@ pub(crate) async fn resolve_tick_id_or_reject(
                 }),
             )
                 .into_response();
-            Err(resp)
+            Err(Box::new(resp))
         }
     }
 }

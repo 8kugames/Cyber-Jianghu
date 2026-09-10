@@ -173,10 +173,16 @@ fn build_action_example(
         fields.push("\"target_location\": \"(从可前往的地点列表复制)\"".to_string());
     }
     if has_recipe_id {
-        fields.push("\"recipe_id\": \"(配方 ID)\"".to_string());
+        fields.push(
+            "\"recipe_id\": \"(必填: 从持有配方的 recipe_id 复制完整 uuid，不要填配方名字)\""
+                .to_string(),
+        );
     }
     if has_item_id {
-        fields.push("\"item_id\": \"(从背包或附近物品列表复制)\"".to_string());
+        fields.push(
+            "\"item_id\": \"(必填: 从背包/地面物品列表复制完整物品 uuid，不要填物品名字)\""
+                .to_string(),
+        );
     }
     if has_quantity {
         fields.push("\"quantity\": 1".to_string());

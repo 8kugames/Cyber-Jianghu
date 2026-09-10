@@ -428,7 +428,10 @@ async fn collect_highlights(
             Highlight {
                 tick_id,
                 event_type: "death".to_string(),
-                description: format!("{} 在江湖中陨落", name),
+                description: format!(
+                    "{} 在江湖中陨落",
+                    crate::display::display_agent_name(&name, agent_id)
+                ),
                 agent_id: Some(agent_id),
                 agent_name: Some(name),
             }
@@ -455,6 +458,39 @@ async fn collect_highlights(
     .fetch_all(db_pool)
     .await
     .context("查询关键事件失败")?;
+
+    // 预扫描攻击事件的 target_agent_id，批量查询对手名（一次查询，避免 N+1）
+    let mut target_ids: Vec<uuid::Uuid> = event_rows
+        .iter()
+        .filter(|row| {
+            let action_type: String = row.get("action_type");
+            action_type == "攻击"
+        })
+        .filter_map(|row| {
+            let action_data: Option<serde_json::Value> = row.get("action_data");
+            let data = action_data?;
+            let id_str: &str = data.get("target_agent_id")?.as_str()?;
+            id_str.parse().ok()
+        })
+        .collect();
+    target_ids.sort();
+    target_ids.dedup();
+    let target_names: HashMap<uuid::Uuid, String> = if target_ids.is_empty() {
+        HashMap::new()
+    } else {
+        sqlx::query("SELECT agent_id, name FROM agents WHERE agent_id = ANY($1)")
+            .bind(&target_ids)
+            .fetch_all(db_pool)
+            .await
+            .context("查询对手名称失败")?
+            .into_iter()
+            .map(|row| {
+                let agent_id: uuid::Uuid = row.get("agent_id");
+                let name: String = row.get("name");
+                (agent_id, name)
+            })
+            .collect()
+    };
 
     // 按类型收集，附带戏剧性权重（content 长度 / 对手关联）
     // 权重高的优先保留，权重相同时 tick_id 升序（确定性）
@@ -484,7 +520,11 @@ async fn collect_highlights(
                         event_type: "dialogue".to_string(),
                         // 放宽截断到 150 字，减少腰斩重要台词
                         description: super::truncate_text(
-                            &format!("{}\u{ff1a}\u{201c}{}\u{201d}", agent_name, content),
+                            &format!(
+                                "{}\u{ff1a}\u{201c}{}\u{201d}",
+                                crate::display::display_agent_name(&agent_name, agent_id),
+                                content
+                            ),
                             150,
                         ),
                         agent_id: Some(agent_id),
@@ -494,21 +534,42 @@ async fn collect_highlights(
                 }
                 Some(HighlightKind::Combat) => {
                     let result_message: Option<String> = row.get("result_message");
-                    // 提取对手 agent_id（让"谁打谁"可还原）
+                    // 对手展示：姓名[短 uuid]，与角色名展示格式一致；
+                    // 对手已不在 agents 表（如死亡清理）时退化为纯短 uuid
                     let target_display = action_data
                         .as_ref()
                         .and_then(|d| d.get("target_agent_id"))
                         .and_then(|v| v.as_str())
-                        .map(|t| format!("（对手：{}）", &t[..t.len().min(8)]))
+                        .and_then(|t| uuid::Uuid::parse_str(t).ok())
+                        .map(|tid| match target_names.get(&tid) {
+                            Some(target_name) => {
+                                format!(
+                                    "（对手：{}）",
+                                    crate::display::display_agent_name(target_name, tid)
+                                )
+                            }
+                            None => format!("（对手：{}）", &tid.to_string()[..8]),
+                        })
                         .unwrap_or_default();
                     let h = Highlight {
                         tick_id,
                         event_type: "combat".to_string(),
                         description: result_message
                             .as_ref()
-                            .map(|m| format!("{}{}: {}", agent_name, target_display, m))
+                            .map(|m| {
+                                format!(
+                                    "{}{}: {}",
+                                    crate::display::display_agent_name(&agent_name, agent_id),
+                                    target_display,
+                                    m
+                                )
+                            })
                             .unwrap_or_else(|| {
-                                format!("{}{} 发起了一场战斗", agent_name, target_display)
+                                format!(
+                                    "{}{} 发起了一场战斗",
+                                    crate::display::display_agent_name(&agent_name, agent_id),
+                                    target_display
+                                )
                             }),
                         agent_id: Some(agent_id),
                         agent_name: Some(agent_name),
@@ -522,8 +583,19 @@ async fn collect_highlights(
                         tick_id,
                         event_type: "social".to_string(),
                         description: result_message
-                            .map(|m| format!("{} 赠出: {}", agent_name, m))
-                            .unwrap_or_else(|| format!("{} 赠出物品", agent_name)),
+                            .map(|m| {
+                                format!(
+                                    "{} 赠出: {}",
+                                    crate::display::display_agent_name(&agent_name, agent_id),
+                                    m
+                                )
+                            })
+                            .unwrap_or_else(|| {
+                                format!(
+                                    "{} 赠出物品",
+                                    crate::display::display_agent_name(&agent_name, agent_id)
+                                )
+                            }),
                         agent_id: Some(agent_id),
                         agent_name: Some(agent_name),
                     };

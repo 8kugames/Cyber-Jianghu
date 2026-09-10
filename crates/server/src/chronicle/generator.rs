@@ -227,7 +227,10 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
         sorted_agents.sort_by_key(|a| std::cmp::Reverse(a.actions_count));
 
         for agent in sorted_agents.iter().take(5) {
-            summary.push_str(&format!("### {}\n\n", agent.name));
+            summary.push_str(&format!(
+                "### {}\n\n",
+                crate::display::display_agent_name(&agent.name, agent.agent_id)
+            ));
             summary.push_str(&format!("- 当前位置: {}\n", agent.location));
             summary.push_str(&format!("- 行动次数: {}\n", agent.actions_count));
 
@@ -274,10 +277,10 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
         summary.push_str(&format!("## 江湖涌现{nl}{nl}"));
         summary.push_str("本周期观测到自发的因果互动链：\n");
         for e in causal_events.iter().take(3) {
-            let names: Vec<&str> = e
+            let names: Vec<String> = e
                 .participants
                 .iter()
-                .map(|id| agent_name_in(id, data).unwrap_or("?"))
+                .map(|id| agent_name_in(id, data).unwrap_or_else(|| "?".to_string()))
                 .collect();
             summary.push_str(&format!(
                 "- {}：{} 共 {} 次互动（{}）\n",
@@ -287,8 +290,10 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
                 e.categories_covered.join("、"),
             ));
             for edge in e.causal_edges.iter().take(2) {
-                let from_name = agent_name_in(&edge.from_agent, data).unwrap_or("?");
-                let to_name = agent_name_in(&edge.to_agent, data).unwrap_or("?");
+                let from_name =
+                    agent_name_in(&edge.from_agent, data).unwrap_or_else(|| "?".to_string());
+                let to_name =
+                    agent_name_in(&edge.to_agent, data).unwrap_or_else(|| "?".to_string());
                 summary.push_str(&format!(
                     "    - {} → {}（{}）\n",
                     from_name, to_name, edge.evidence
@@ -515,7 +520,7 @@ fn build_llm_prompt(data: &CollectedData, previous_summary: Option<&str>) -> Str
         for agent in data.agents.iter().take(5) {
             prompt.push_str(&format!(
                 "- {}（{}）：{}次行动，主要{}，{}\n",
-                agent.name,
+                crate::display::display_agent_name(&agent.name, agent.agent_id),
                 agent.location,
                 agent.actions_count,
                 agent
@@ -563,10 +568,10 @@ fn build_llm_prompt(data: &CollectedData, previous_summary: Option<&str>) -> Str
     if !causal_events.is_empty() {
         prompt.push_str("已观测到的因果涌现事件（机器验证，请融入叙事）：\n");
         for e in causal_events.iter().take(3) {
-            let names: Vec<&str> = e
+            let names: Vec<String> = e
                 .participants
                 .iter()
-                .map(|id| agent_name_in(id, data).unwrap_or("?"))
+                .map(|id| agent_name_in(id, data).unwrap_or_else(|| "?".to_string()))
                 .collect();
             prompt.push_str(&format!(
                 "- {}，{} 之间出现 {} 互动链\n",
@@ -598,12 +603,12 @@ fn build_llm_prompt(data: &CollectedData, previous_summary: Option<&str>) -> Str
     prompt
 }
 
-/// 从采集数据中按 agent_id 查名字（用于涌现事件的参与者名称渲染）
-fn agent_name_in<'a>(agent_id: &uuid::Uuid, data: &'a CollectedData) -> Option<&'a str> {
+/// 从采集数据中查角色展示名（姓名[短 uuid]，用于涌现事件的参与者名称渲染）
+fn agent_name_in(agent_id: &uuid::Uuid, data: &CollectedData) -> Option<String> {
     data.agents
         .iter()
-        .find(|a| &a.agent_id == agent_id)
-        .map(|a| a.name.as_str())
+        .find(|a| a.agent_id == *agent_id)
+        .map(|a| crate::display::display_agent_name(&a.name, a.agent_id))
 }
 
 #[cfg(test)]

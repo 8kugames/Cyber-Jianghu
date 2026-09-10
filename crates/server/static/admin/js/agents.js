@@ -133,15 +133,9 @@ function renderAgents() {
   var rowsHtml = pageAgents
     .map(function (agent) {
       var deviceIdShort = agent.device_id
-        ? agent.device_id.substring(0, 4) +
-          ".." +
-          agent.device_id.substring(agent.device_id.length - 4)
+        ? agent.device_id.substring(0, 8)
         : "-";
-      var agentIdShort = agent.id
-        ? agent.id.substring(0, 4) +
-          ".." +
-          agent.id.substring(agent.id.length - 4)
-        : "-";
+      var agentIdShort = agent.id ? agent.id.substring(0, 8) : "-";
 
       // 数据驱动：格式化属性为 pretty JSON（排序、中文 display_name、curr/max 配对）
       function formatAttrsPretty(attrs, categoryFilter) {
@@ -506,10 +500,15 @@ async function renderInventoryManage(agent) {
       : '<div class="inventory-grid">' +
         agent.inventory
           .map(function (item) {
+            // 物品展示统一 名称[短uuid]；uuid 缺失（display-map 未命中）时退化为裸名称
+            var itemUuid = displayMapCache.item_uuids[item.item_id];
+            var itemDisplay = itemUuid
+              ? formatNameId(item.name, itemUuid)
+              : item.name;
             return (
               '<div class="inventory-item">' +
               '<div style="margin-bottom: 2px;">' +
-              escapeHtml(item.name) +
+              escapeHtml(itemDisplay) +
               "</div>" +
               '<div style="font-weight: 600; color: var(--text-secondary);">x' +
               escapeHtml(item.count) +
@@ -519,7 +518,32 @@ async function renderInventoryManage(agent) {
           .join("") +
         "</div>";
 
+  // 已知配方（制造/传授的前提）；名称经 display-map 翻译为 名称[短uuid]
+  var SOURCE_NAMES = { initial: "初始", taught: "传授", observed: "观察习得", admin: "注入" };
+  var recipesHtml =
+    !agent.known_recipes || agent.known_recipes.length === 0
+      ? '<div style="color: var(--text-subtle); font-size: 13px; text-align: center; padding: 10px;">尚未习得任何配方</div>'
+      : '<div style="font-size:13px;">' +
+        agent.known_recipes
+          .map(function (r) {
+            var sourceLabel = SOURCE_NAMES[r.source] || r.source;
+            return (
+              '<div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border-color);">' +
+              "<span>" + escapeHtml(resolveRecipeName(r.recipe_id)) + "</span>" +
+              '<span style="color: var(--text-subtle); font-size:12px;">' +
+              escapeHtml(sourceLabel) +
+              " · T" + escapeHtml(r.learned_at_tick) +
+              "</span></div>"
+            );
+          })
+          .join("") +
+        "</div>";
+
   var html =
+    '<div class="detail-section">' +
+    '<div class="detail-title">持有配方</div>' +
+    recipesHtml +
+    "</div>" +
     '<div class="detail-section">' +
     '<div class="detail-title">当前背包</div>' +
     inventoryHtml +
@@ -569,6 +593,40 @@ async function renderInventoryManage(agent) {
       "</div>" +
       '<div id="grant-items-list" style="margin-top: 10px;"></div>' +
       "</div>";
+
+    // 注入配方：同一注入区域内，选择后直接注入（幂等，无需数量）
+    var recipeIds = Object.keys(displayMapCache.recipes || {});
+    if (recipeIds.length > 0) {
+      var recipeOptionsHtml = recipeIds
+        .map(function (id) {
+          return (
+            '<option value="' +
+            escapeHtml(id) +
+            '">' +
+            escapeHtml(displayMapCache.recipes[id]) +
+            "</option>"
+          );
+        })
+        .join("");
+      html +=
+        '<div class="detail-section">' +
+        '<div class="detail-title">注入配方</div>' +
+        '<div style="display: flex; gap: 10px; align-items: flex-end;">' +
+        '<div style="flex: 1;">' +
+        '<label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">配方</label>' +
+        '<select id="grant-recipe-select" class="form-input" style="width: 100%;">' +
+        recipeOptionsHtml +
+        "</select>" +
+        "</div>" +
+        '<button class="btn btn-success" onclick="grantRecipeToAgent()" id="grant-recipe-btn">注入</button>' +
+        "</div>" +
+        "</div>";
+    } else {
+      html +=
+        '<div class="detail-section">' +
+        '<div style="font-size: 12px; color: var(--text-subtle); text-align: center; padding: 10px;">配方映射未加载，无法注入配方</div>' +
+        "</div>";
+    }
   } else {
     html +=
       '<div class="detail-section">' +
@@ -584,6 +642,57 @@ async function renderInventoryManage(agent) {
 
 // 待注入物品列表
 var grantItemsBuffer = [];
+
+// 注入配方：选择后直接注入（幂等，已学配方自动跳过）
+async function grantRecipeToAgent() {
+  if (!currentModalAgentId) return;
+
+  var select = document.getElementById("grant-recipe-select");
+  if (!select || !select.value) {
+    showToast("请选择配方", "error");
+    return;
+  }
+
+  var btn = document.getElementById("grant-recipe-btn");
+  if (btn) btn.disabled = true;
+
+  try {
+    var res = await apiFetch(API.V1 + "/agent/grant-recipes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agent_id: currentModalAgentId,
+        recipe_ids: [select.value],
+      }),
+    });
+
+    if (res.ok) {
+      var data = await res.json();
+      if (data.success) {
+        showToast("成功注入配方: " + resolveRecipeName(select.value), "success");
+        var agentRes = await apiFetch(API.BASE + "/agent/" + currentModalAgentId);
+        if (agentRes.ok) {
+          var agent = await agentRes.json();
+          document.getElementById("modal-tab-inventory").innerHTML =
+            await renderInventoryManage(agent);
+        }
+      } else {
+        showToast("注入失败: " + data.message, "error");
+      }
+    } else {
+      var errText = "HTTP " + res.status;
+      try {
+        var errData = await res.json();
+        if (errData && errData.message) errText = errData.message;
+      } catch (e) {}
+      showToast("注入失败: " + errText, "error");
+    }
+  } catch (e) {
+    showToast("注入失败: " + e.message, "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
 
 function addGrantItem() {
   var select = document.getElementById("grant-item-select");

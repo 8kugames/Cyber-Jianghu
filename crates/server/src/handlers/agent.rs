@@ -383,10 +383,20 @@ pub struct AutoRebirthResponse {
 ///
 /// 旧 agent 终态：保持 `status='dead'` 死亡标记，`retired_at` 字段作为时间戳记录转世完成事件。
 /// `retired` 状态不被 auto-rebirth 触及（仅 `/api/v1/agent/retire` 端点可设置，专属"玩家主动归隐"语义）。
+/// auto-rebirth 错误响应包装（装箱控制 Result Err 体积，clippy result_large_err；
+/// axum 0.8 未提供 Box<T> 的 IntoResponse blanket impl，需本地 newtype 转发）
+pub struct AutoRebirthErr(Box<(StatusCode, Json<AutoRebirthResponse>)>);
+
+impl axum::response::IntoResponse for AutoRebirthErr {
+    fn into_response(self) -> axum::response::Response {
+        (*self.0).into_response()
+    }
+}
+
 pub async fn agent_auto_rebirth(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<AutoRebirthRequest>,
-) -> Result<Json<AutoRebirthResponse>, (StatusCode, Json<AutoRebirthResponse>)> {
+) -> Result<Json<AutoRebirthResponse>, AutoRebirthErr> {
     info!(
         "自动转世重生请求: old_agent={}, device={}",
         payload.old_agent_id, payload.device_id
@@ -394,7 +404,7 @@ pub async fn agent_auto_rebirth(
 
     // 前置拦截 nil UUID
     if let Err(e) = db::ensure_old_agent_id_not_nil(payload.old_agent_id) {
-        return Err((
+        return Err(AutoRebirthErr(Box::new((
             StatusCode::BAD_REQUEST,
             Json(AutoRebirthResponse {
                 success: false,
@@ -404,7 +414,7 @@ pub async fn agent_auto_rebirth(
                 spawn_location: String::new(),
                 system_prompt: String::new(),
             }),
-        ));
+        ))));
     }
 
     // 验证设备认证
@@ -412,7 +422,7 @@ pub async fn agent_auto_rebirth(
         .await
         .map_err(|e| {
             error!("设备认证失败: device_id={}, error={}", payload.device_id, e);
-            (
+            AutoRebirthErr(Box::new((
                 StatusCode::UNAUTHORIZED,
                 Json(AutoRebirthResponse {
                     success: false,
@@ -422,11 +432,11 @@ pub async fn agent_auto_rebirth(
                     spawn_location: String::new(),
                     system_prompt: String::new(),
                 }),
-            )
+            )))
         })?;
 
     if !valid {
-        return Err((
+        return Err(AutoRebirthErr(Box::new((
             StatusCode::UNAUTHORIZED,
             Json(AutoRebirthResponse {
                 success: false,
@@ -436,7 +446,7 @@ pub async fn agent_auto_rebirth(
                 spawn_location: String::new(),
                 system_prompt: String::new(),
             }),
-        ));
+        ))));
     }
 
     // 从配置读取重生参数
@@ -519,7 +529,7 @@ pub async fn agent_auto_rebirth(
             "转世重生失败: old_agent={}, error={}",
             payload.old_agent_id, e
         );
-        (
+        AutoRebirthErr(Box::new((
             StatusCode::BAD_REQUEST,
             Json(AutoRebirthResponse {
                 success: false,
@@ -529,7 +539,7 @@ pub async fn agent_auto_rebirth(
                 spawn_location: String::new(),
                 system_prompt: String::new(),
             }),
-        )
+        )))
     })?;
 
     // 不在 HTTP handler 中旁路改写内存态。
@@ -792,6 +802,158 @@ pub async fn agent_grant_items(
     Ok(Json(GrantItemsResponse {
         success: granted > 0,
         message: format!("成功注入 {} 个物品", granted),
+        granted_count: granted,
+    }))
+}
+
+/// 配方注入请求
+#[derive(Debug, serde::Deserialize)]
+pub struct GrantRecipesRequest {
+    /// Agent ID
+    pub agent_id: uuid::Uuid,
+    /// 配方 ID 列表
+    pub recipe_ids: Vec<String>,
+}
+
+/// 配方注入响应
+#[derive(Debug, serde::Serialize)]
+pub struct GrantRecipesResponse {
+    pub success: bool,
+    pub message: String,
+    pub granted_count: usize,
+}
+
+/// 管理员配方注入接口
+///
+/// POST /api/v1/agent/grant-recipes
+///
+/// 为指定 Agent 注入已知配方（制造/传授的前提）。
+pub async fn agent_grant_recipes(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
+    Json(payload): Json<GrantRecipesRequest>,
+) -> Result<Json<GrantRecipesResponse>, (StatusCode, Json<GrantRecipesResponse>)> {
+    let audit_ctx = crate::db::build_audit_request_context(&headers, addr);
+    if payload.recipe_ids.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(GrantRecipesResponse {
+                success: false,
+                message: "配方列表为空".to_string(),
+                granted_count: 0,
+            }),
+        ));
+    }
+
+    // 验证每个配方存在性
+    for recipe_id in &payload.recipe_ids {
+        if crate::game_data::registry::RecipeRegistry::get(recipe_id).is_none() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(GrantRecipesResponse {
+                    success: false,
+                    message: format!("配方 '{}' 不存在", recipe_id),
+                    granted_count: 0,
+                }),
+            ));
+        }
+    }
+
+    let current_tick = crate::db::get_current_world_tick_id(&state.db_pool)
+        .await
+        .unwrap_or(0);
+
+    let mut granted = 0usize;
+    for recipe_id in &payload.recipe_ids {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO agent_known_recipes (agent_id, recipe_id, learned_at_tick, source)
+            VALUES ($1, $2, $3, 'admin')
+            ON CONFLICT (agent_id, recipe_id) DO NOTHING
+            "#,
+        )
+        .bind(payload.agent_id)
+        .bind(recipe_id)
+        .bind(current_tick)
+        .execute(&state.db_pool)
+        .await;
+
+        match result {
+            Ok(_) => {
+                info!(
+                    "Grant recipe: agent={}, recipe={}",
+                    payload.agent_id, recipe_id
+                );
+                granted += 1;
+            }
+            Err(e) => {
+                error!(
+                    "Grant recipe failed: agent={}, recipe={}, error={}",
+                    payload.agent_id, recipe_id, e
+                );
+            }
+        }
+    }
+
+    // 全部已习得不算失败；部分已习得在消息中说明（ON CONFLICT DO NOTHING 幂等）
+    let message = if granted == 0 {
+        "所选配方均已习得，无需注入".to_string()
+    } else if granted < payload.recipe_ids.len() {
+        format!("成功注入 {} 个配方（其余已习得）", granted)
+    } else {
+        format!("成功注入 {} 个配方", granted)
+    };
+
+    info!(
+        "管理员配方注入完成: agent={}, granted={}/{}",
+        payload.agent_id,
+        granted,
+        payload.recipe_ids.len()
+    );
+
+    if granted > 0
+        && let Err(e) = crate::db::insert_audit_log(
+            &state.db_pool,
+            crate::db::AuditLogEntry {
+                event_type: "agent.grant_recipes",
+                actor_type: "admin",
+                token_type: Some("write"),
+                resource_type: "agent_known_recipes",
+                resource_id: Some(payload.agent_id.to_string()),
+                endpoint: "/api/v1/agent/grant-recipes",
+                method: "POST",
+                result: "success",
+                reason: None,
+                payload: serde_json::json!({
+                    "agent_id": payload.agent_id,
+                    "granted_count": granted,
+                    "recipe_ids": payload.recipe_ids,
+                }),
+                request_id: Some(audit_ctx.request_id),
+                ip: audit_ctx.ip,
+                user_agent: audit_ctx.user_agent,
+                before_state: None,
+                after_state: Some(serde_json::json!(
+                    payload
+                        .recipe_ids
+                        .iter()
+                        .map(|id| serde_json::json!({
+                            "recipe_id": id,
+                            "source": "admin",
+                        }))
+                        .collect::<Vec<_>>()
+                )),
+            },
+        )
+        .await
+    {
+        error!("audit_log 写入失败(agent.grant_recipes): {}", e);
+    }
+
+    Ok(Json(GrantRecipesResponse {
+        success: true,
+        message,
         granted_count: granted,
     }))
 }

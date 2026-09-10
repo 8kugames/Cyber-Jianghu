@@ -42,7 +42,10 @@ pub async fn apply_state_change(
                 let event = WorldEvent {
                     event_type: WorldEventType::ActionResult,
                     tick_id,
-                    description: format!("转移失败，你没有足够的 {}", item_id),
+                    description: format!(
+                        "转移失败，你没有足够的 {}",
+                        crate::display::display_item_name(item_id)
+                    ),
                     metadata: serde_json::json!({
                         "action": "transfer_failed",
                         "item_id": item_id,
@@ -55,18 +58,23 @@ pub async fn apply_state_change(
                 let to_name = all_states
                     .iter()
                     .find(|s| s.agent_id == *to)
-                    .map(|s| format!("{}（{}）", s.name, to))
-                    .unwrap_or_else(|| format!("未知（{}）", to));
+                    .map(|s| crate::display::display_agent_name(&s.name, *to))
+                    .unwrap_or_else(|| format!("未知[{}]", &to.to_string()[..8]));
                 let from_name = all_states
                     .iter()
                     .find(|s| s.agent_id == *from)
-                    .map(|s| format!("{}（{}）", s.name, from))
-                    .unwrap_or_else(|| format!("未知（{}）", from));
+                    .map(|s| crate::display::display_agent_name(&s.name, *from))
+                    .unwrap_or_else(|| format!("未知[{}]", &from.to_string()[..8]));
 
                 let event = WorldEvent {
                     event_type: WorldEventType::SocialInteraction,
                     tick_id,
-                    description: format!("你给 {} 转移了 {} 个 {}", to_name, quantity, item_id),
+                    description: format!(
+                        "你给 {} 转移了 {} 个 {}",
+                        to_name,
+                        quantity,
+                        crate::display::display_item_name(item_id)
+                    ),
                     metadata: serde_json::json!({
                         "action": "转移",
                         "target": to.to_string(),
@@ -79,7 +87,12 @@ pub async fn apply_state_change(
                 let event = WorldEvent {
                     event_type: WorldEventType::SocialInteraction,
                     tick_id,
-                    description: format!("{} 给你转移了 {} 个 {}", from_name, quantity, item_id),
+                    description: format!(
+                        "{} 给你转移了 {} 个 {}",
+                        from_name,
+                        quantity,
+                        crate::display::display_item_name(item_id)
+                    ),
                     metadata: serde_json::json!({
                         "action": "receive",
                         "from": from.to_string(),
@@ -107,7 +120,10 @@ pub async fn apply_state_change(
                 let event = WorldEvent {
                     event_type: WorldEventType::ActionResult,
                     tick_id,
-                    description: format!("使用失败，你没有 {}", item_id),
+                    description: format!(
+                        "使用失败，你没有 {}",
+                        crate::display::display_item_name(item_id)
+                    ),
                     metadata: serde_json::json!({
                         "action": "使用",
                         "item_id": item_id,
@@ -177,7 +193,7 @@ pub async fn apply_state_change(
                 let event = WorldEvent {
                     event_type: WorldEventType::ActionResult,
                     tick_id,
-                    description: format!("你使用了 {}", item_id),
+                    description: format!("你使用了 {}", crate::display::display_item_name(item_id)),
                     metadata: serde_json::json!({
                         "action": "使用",
                         "item_id": item_id,
@@ -239,7 +255,8 @@ pub async fn apply_state_change(
                                         tick_id,
                                         description: format!(
                                             "你拾取了 {} 个 {}",
-                                            quantity, item_id
+                                            quantity,
+                                            crate::display::display_item_name(item_id)
                                         ),
                                         metadata: serde_json::json!({
                                             "action": "取(ground)",
@@ -256,7 +273,10 @@ pub async fn apply_state_change(
                                 let event = WorldEvent {
                                     event_type: WorldEventType::ActionResult,
                                     tick_id,
-                                    description: format!("拾取失败，地面没有 {}", item_id),
+                                    description: format!(
+                                        "拾取失败，地面没有 {}",
+                                        crate::display::display_item_name(item_id)
+                                    ),
                                     metadata: serde_json::json!({
                                         "action": "acquire_failed",
                                         "item_id": item_id,
@@ -282,7 +302,11 @@ pub async fn apply_state_change(
                         let event = WorldEvent {
                             event_type: WorldEventType::ActionResult,
                             tick_id,
-                            description: format!("你采集了 {} 个 {}", quantity, item_id),
+                            description: format!(
+                                "你采集了 {} 个 {}",
+                                quantity,
+                                crate::display::display_item_name(item_id)
+                            ),
                             metadata: serde_json::json!({
                                 "action": "取(resource)",
                                 "item_id": item_id,
@@ -345,7 +369,11 @@ pub async fn apply_state_change(
                 let event = WorldEvent {
                     event_type: WorldEventType::ActionResult,
                     tick_id,
-                    description: format!("你丢弃了 {} 个 {}", quantity, item_id),
+                    description: format!(
+                        "你丢弃了 {} 个 {}",
+                        quantity,
+                        crate::display::display_item_name(item_id)
+                    ),
                     metadata: serde_json::json!({
                         "action": "予(ground)",
                         "item_id": item_id,
@@ -394,7 +422,9 @@ pub async fn apply_state_change(
                         if count < mat.quantity {
                             return Err(format!(
                                 "材料不足: {} (需要 {}, 拥有 {})",
-                                mat.item_id, mat.quantity, count
+                                crate::display::display_item_name(&mat.item_id),
+                                mat.quantity,
+                                count
                             ));
                         }
                     }
@@ -492,7 +522,11 @@ pub async fn apply_state_change(
                         let event = WorldEvent {
                             event_type: WorldEventType::ActionResult,
                             tick_id,
-                            description: format!("你制造了 {} 个 {}", quantity, item_id),
+                            description: format!(
+                                "你制造了 {} 个 {}",
+                                quantity,
+                                crate::display::display_item_name(item_id)
+                            ),
                             metadata: serde_json::json!({
                                 "action": "制造",
                                 "item_id": item_id,
@@ -521,7 +555,10 @@ pub async fn apply_state_change(
                 let event = WorldEvent {
                     event_type: WorldEventType::ActionResult,
                     tick_id,
-                    description: format!("制造失败: 找不到 {} 的配方", item_id),
+                    description: format!(
+                        "制造失败: 找不到 {} 的配方",
+                        crate::display::display_item_name(item_id)
+                    ),
                     metadata: serde_json::json!({
                         "action": "craft_failed",
                         "reason": "recipe_not_found",

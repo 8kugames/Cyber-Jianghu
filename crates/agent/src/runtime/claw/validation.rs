@@ -88,7 +88,7 @@ pub fn spawn_validation_task(params: ValidationTaskParams) -> tokio::task::JoinH
     tokio::spawn(async move {
         debug!("Validation task started");
 
-        while let Some(req) = validation_rx.recv().await {
+        while let Some(mut req) = validation_rx.recv().await {
             let current_tick_value = current_tick.load(Ordering::Relaxed);
 
             // 1. 检查验证期间 tick 是否推进
@@ -185,6 +185,7 @@ pub fn spawn_validation_task(params: ValidationTaskParams) -> tokio::task::JoinH
                         runtime: ValidationRuntimeConfig {
                             graded_config,
                             recent_same_type_decisions: vec![],
+                            acquired_item_ids: vec![],
                         },
                     };
 
@@ -195,8 +196,16 @@ pub fn spawn_validation_task(params: ValidationTaskParams) -> tokio::task::JoinH
                     )
                     .await
                     {
-                        Ok(Ok(PipelineValidationResult::Approved { narrative, .. })) => {
+                        // 发送审查通过的 intent（Approved 携带的 action_data 可能已被天魂
+                        // layer0 规范化回写，如剥离 `名称[短uuid]` 后缀），写回后发原件
+                        //（保留 WsIntent 其余字段，如 route_type / speech_content）
+                        Ok(Ok(PipelineValidationResult::Approved {
+                            intent: approved_intent,
+                            narrative,
+                            ..
+                        })) => {
                             // submitted_tick 已通过 CAS 设置
+                            req.intent.action_data = approved_intent.action_data;
                             if let Err(e) = intent_tx.send(req.intent).await {
                                 error!("Failed to send intent: {}", e);
                                 submitted_tick.store(-1, Ordering::Release);

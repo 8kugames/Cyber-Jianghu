@@ -70,8 +70,7 @@ async function fetchAndPopulateAgents(selectIds) {
         agents.forEach((a) => {
             const opt = document.createElement("option");
             opt.value = a.id;
-            const shortId = a.id ? a.id.substring(0, 8) : "";
-            opt.textContent = `${a.name} (${shortId}...)`;
+            opt.textContent = formatNameId(a.name, a.id);
             frag.appendChild(opt);
             if (a.location && a.location !== "unknown") locSet.add(a.location);
         });
@@ -255,8 +254,8 @@ function showChrModal(c) {
                 const label = isCausal ? "因果涌现" : "共现（存疑）";
                 const cls = isCausal ? "emergence-causal" : "emergence-cooccur";
                 const edges = (e.causal_edges || []).map((ed) => {
-                    const fn = (ed.from_agent || "").substring(0, 8);
-                    const tn = (ed.to_agent || "").substring(0, 8);
+                    const fn = resolveTargetName(ed.from_agent || "");
+                    const tn = resolveTargetName(ed.to_agent || "");
                     return `<div class="emergence-edge">${escapeHtml(fn)} → ${escapeHtml(tn)}（${escapeHtml(ed.evidence || "")}）</div>`;
                 }).join("");
                 return `<div class="emergence-item ${cls}">
@@ -463,7 +462,7 @@ function renderExpCards() {
                 `<div class="exp-card-header">` +
                 `<span class="tick-badge">T${escapeHtml(e.tick_id || "-")}</span>` +
                 `<span class="exp-card-time">${escapeHtml(timeStr)}</span>` +
-                `<span class="exp-card-agent">${escapeHtml(e.agent_name || "-")}</span>` +
+                `<span class="exp-card-agent">${escapeHtml(e.agent_name ? formatNameId(e.agent_name, e.agent_id) : "-")}</span>` +
                 `<span class="exp-card-loc">@ ${escapeHtml(getLocationName(e.location || "-"))}</span>` +
                 resultBadge +
                 `</div>` +
@@ -664,8 +663,7 @@ function filterAgentDropdown() {
     dropdown.innerHTML = matched
         .slice(0, 50)
         .map((a) => {
-            const short = a.id ? a.id.substring(0, 8) : "";
-            return `<div class="combobox-option" data-agent-id="${escapeHtml(a.id)}">${escapeHtml(a.name)} <span class="timeline-agent-id">(${short}...)</span></div>`;
+            return `<div class="combobox-option" data-agent-id="${escapeHtml(a.id)}">${escapeHtml(formatNameId(a.name, a.id))}</div>`;
         })
         .join("");
     dropdown.classList.add("open");
@@ -674,7 +672,7 @@ function filterAgentDropdown() {
 function selectAgentOption(el) {
     const id = el.dataset.agentId;
     const agent = allAgentsMap[id];
-    const name = agent ? agent.name : el.textContent.trim().split(" (")[0];
+    const name = agent ? agent.name : el.textContent.trim().split("[")[0];
     document.getElementById("sum-agent-input").value = name;
     document.getElementById("sum-agent-id").value = id;
     _selectedSumAgentId = id;
@@ -764,9 +762,9 @@ function resetSumFilters() {
 
 function getAgentName(agentId) {
     if (!agentId) return "未知角色";
-    if (allAgentsMap && allAgentsMap[agentId])
-        return allAgentsMap[agentId].name || `Agent ${agentId.substring(0, 8)}`;
-    return `Agent ${agentId.substring(0, 8)}`;
+    if (allAgentsMap && allAgentsMap[agentId] && allAgentsMap[agentId].name)
+        return formatNameId(allAgentsMap[agentId].name, agentId);
+    return `未知角色[${agentId.substring(0, 8)}]`;
 }
 
 function renderSummaries(list) {
@@ -789,7 +787,6 @@ function renderSummaries(list) {
                 year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
             });
             const agentName = getAgentName(s.agent_id);
-            const agentShortId = s.agent_id ? s.agent_id.substring(0, 8) : "";
             const calTime = s.formatted_time || "-";
             return `
         <div class="timeline-item">
@@ -799,7 +796,6 @@ function renderSummaries(list) {
                     <span class="timeline-calendar">${escapeHtml(calTime)}</span>
                     <span class="timeline-agent">
                         ${escapeHtml(agentName)}
-                        <span class="timeline-agent-id">(${escapeHtml(agentShortId)}...)</span>
                     </span>
                 </div>
                 <div class="timeline-meta">存档时间: ${escapeHtml(dateStr)}</div>

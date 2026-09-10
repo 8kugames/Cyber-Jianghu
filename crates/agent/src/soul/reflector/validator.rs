@@ -15,7 +15,7 @@ use crate::component::llm::LlmClientExt;
 use crate::infra::api::thinking_log;
 use crate::runtime::claw::LlmClientContainer;
 use crate::soul::actor::prompt_template::PromptTemplateConfig;
-use cyber_jianghu_protocol::{GradedValidationConfig, WorldBuildingRules};
+use cyber_jianghu_protocol::{GradedValidationConfig, WorldBuildingRules, WorldState};
 
 use super::prompt::ReflectorPrompt;
 use super::rule_engine::{RuleEngine, RuleValidationContext, types::extract_ids_from_world_state};
@@ -113,6 +113,7 @@ impl ReflectorSoul {
     pub fn should_skip_llm_validation(
         intent: &crate::models::Intent,
         config: Option<&GradedValidationConfig>,
+        world_state: Option<&WorldState>,
     ) -> bool {
         let Some(config) = config else {
             return false;
@@ -126,13 +127,17 @@ impl ReflectorSoul {
             return false;
         }
         if config.adaptive_types.contains(&action_str) {
-            return !Self::adaptive_needs_llm(intent, config);
+            return !Self::adaptive_needs_llm(intent, config, world_state);
         }
 
         true
     }
 
-    fn adaptive_needs_llm(intent: &crate::models::Intent, config: &GradedValidationConfig) -> bool {
+    fn adaptive_needs_llm(
+        intent: &crate::models::Intent,
+        config: &GradedValidationConfig,
+        world_state: Option<&WorldState>,
+    ) -> bool {
         let action_data = match &intent.action_data {
             Some(d) => d,
             None => return false,
@@ -153,16 +158,43 @@ impl ReflectorSoul {
                             .any(|k| loc.contains(k.as_str()))
                     })
                     .unwrap_or(false),
-                "item_id" => action_data
-                    .get(field_name)
-                    .and_then(|v| v.as_str())
-                    .map(|id| {
-                        config
+                "item_id" => {
+                    // 全面 uuid 化后 item_id 为完整 uuid，关键词改对物品名匹配：
+                    // 按 uuid 反查 WorldState（背包/附近/采集点）中的名称；
+                    // 反查不到（链内新获得物/未知引用）→ 保守升级 LLM 审查
+                    let item_ref = action_data
+                        .get(field_name)
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let item_name = world_state.and_then(|ws| {
+                        ws.self_state
+                            .inventory
+                            .iter()
+                            .find(|i| i.item_id == item_ref)
+                            .map(|i| i.name.clone())
+                            .or_else(|| {
+                                ws.nearby_items
+                                    .iter()
+                                    .find(|i| i.item_id == item_ref)
+                                    .map(|i| i.name.clone())
+                            })
+                            .or_else(|| {
+                                ws.location
+                                    .gatherable_items
+                                    .iter()
+                                    .find(|g| g.item_id == item_ref)
+                                    .map(|g| g.name.clone())
+                            })
+                    });
+                    match item_name {
+                        Some(name) => config
                             .high_value_item_keywords
                             .iter()
-                            .any(|k| id.contains(k.as_str()))
-                    })
-                    .unwrap_or(false),
+                            .any(|k| name.contains(k.as_str())),
+                        // 不可见引用：交由 layer0 拒绝；此处保守升级 LLM
+                        None => true,
+                    }
+                }
                 _ => true,
             }
         } else {
@@ -255,6 +287,8 @@ impl ReflectorSoul {
     }
 
     /// Layer 2：RuleEngine 规则校验
+    ///
+    /// 目标可见性硬性校验已前置到 Layer 0（validate_hard_logic）
     async fn validate_with_rule_engine(
         &self,
         request: &ValidationRequest,
@@ -262,140 +296,6 @@ impl ReflectorSoul {
         let Some(world_state) = request.world_state.as_ref() else {
             return Ok(());
         };
-
-        if let Some(target_id) = request
-            .intent
-            .action_data
-            .as_ref()
-            .and_then(|d| d.get("target_agent_id"))
-            .and_then(|v| v.as_str())
-        {
-            let nearby_ids: Vec<uuid::Uuid> = world_state.entities.iter().map(|e| e.id).collect();
-            let resolved = cyber_jianghu_protocol::resolve_agent_id(target_id, &nearby_ids);
-            match resolved {
-                Ok(_) => {}
-                Err(cyber_jianghu_protocol::ResolveAgentIdError::Ambiguous { matched, .. }) => {
-                    let nearby_names: Vec<String> = world_state
-                        .entities
-                        .iter()
-                        .map(|e| {
-                            format!("{} ({})", e.name, cyber_jianghu_protocol::short_id(&e.id))
-                        })
-                        .collect();
-                    return Err(format!(
-                        "目标 ID '{}' 匹配到多个角色，请使用更长的 ID。匹配结果: [{}]。当前附近的角色: [{}]",
-                        target_id,
-                        matched
-                            .iter()
-                            .map(cyber_jianghu_protocol::short_id)
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        nearby_names.join(", ")
-                    ));
-                }
-                Err(_) => {
-                    let nearby_names: Vec<String> = world_state
-                        .entities
-                        .iter()
-                        .map(|e| {
-                            format!("{} ({})", e.name, cyber_jianghu_protocol::short_id(&e.id))
-                        })
-                        .collect();
-                    return Err(format!(
-                        "目标 {} 不在附近实体中。当前附近的角色: [{}]",
-                        target_id,
-                        nearby_names.join(", ")
-                    ));
-                }
-            }
-        }
-
-        // === 存在性校验（维度A）===
-        // 物品存在性：拦截 LLM 幻觉产生的不存在 item_id
-        // 人员存在性：取-agent 的 source_id / 予-agent 的 recipient_id 必须在附近
-        // 注意：不做物品可见性（背包/地面），因 subsequent_intents 链内 WorldState
-        // 快照不更新，可见性校验会误拦"取后即用"等合法连续动作。
-        let action_type = request.intent.action_type.as_str();
-        let action_data = request.intent.action_data.as_ref();
-        let item_actions = ["用", "吃", "喝", "取", "予"];
-
-        // 块1：物品存在性（item_id ∈ known_item_ids，空集跳过保证向后兼容）
-        if item_actions.contains(&action_type)
-            && let Some(item_id) = action_data
-                .and_then(|d| d.get("item_id"))
-                .and_then(|v| v.as_str())
-        {
-            let known = self.rules.read().await.known_item_ids.clone();
-            if !known.is_empty() && !known.iter().any(|k| k == item_id) {
-                let preview = known.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
-                return Err(format!(
-                    "物品「{}」不存在于世界物品定义中。合法物品: [{}]",
-                    item_id, preview
-                ));
-            }
-        }
-
-        // 块2：来源人/接收人存在性（resolve_agent_id 前缀匹配 entities）
-        let nearby_ids: Vec<uuid::Uuid> = world_state.entities.iter().map(|e| e.id).collect();
-        let nearby_names: Vec<String> = world_state
-            .entities
-            .iter()
-            .map(|e| format!("{} ({})", e.name, cyber_jianghu_protocol::short_id(&e.id)))
-            .collect::<Vec<_>>();
-
-        // 取-agent：source_id 必须在附近
-        if action_type == "取" {
-            let source_type = action_data
-                .and_then(|d| d.get("source_type"))
-                .and_then(|v| v.as_str());
-            if source_type == Some("agent") {
-                let source_id = action_data
-                    .and_then(|d| d.get("source_id"))
-                    .and_then(|v| v.as_str());
-                match source_id {
-                    None => {
-                        return Err("取(从角色获取)必须指定 source_id".to_string());
-                    }
-                    Some(id) => {
-                        if let Err(e) = cyber_jianghu_protocol::resolve_agent_id(id, &nearby_ids) {
-                            return Err(Self::format_target_rejection(
-                                id,
-                                e,
-                                &nearby_names,
-                                "来源角色",
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-
-        // 予-agent：recipient_id 必须在附近
-        if action_type == "予" {
-            let recipient_type = action_data
-                .and_then(|d| d.get("recipient_type"))
-                .and_then(|v| v.as_str());
-            if recipient_type == Some("agent") {
-                let recipient_id = action_data
-                    .and_then(|d| d.get("recipient_id"))
-                    .and_then(|v| v.as_str());
-                match recipient_id {
-                    None => {
-                        return Err("予(给角色)必须指定 recipient_id".to_string());
-                    }
-                    Some(id) => {
-                        if let Err(e) = cyber_jianghu_protocol::resolve_agent_id(id, &nearby_ids) {
-                            return Err(Self::format_target_rejection(
-                                id,
-                                e,
-                                &nearby_names,
-                                "目标角色",
-                            ));
-                        }
-                    }
-                }
-            }
-        }
 
         let (available_item_ids, reachable_node_ids) = extract_ids_from_world_state(world_state);
         let context = RuleValidationContext {
@@ -418,46 +318,31 @@ impl ReflectorSoul {
         }
     }
 
-    /// 格式化目标存在性校验的拒绝消息（复用现有 target_agent_id 校验的三分支格式）
-    fn format_target_rejection(
-        target_id: &str,
-        err: cyber_jianghu_protocol::ResolveAgentIdError,
-        nearby_names: &[String],
-        label: &str,
-    ) -> String {
-        use cyber_jianghu_protocol::ResolveAgentIdError;
-        match err {
-            ResolveAgentIdError::Ambiguous { matched, .. } => {
-                format!(
-                    "{} ID '{}' 匹配到多个角色，请使用更长的 ID。匹配结果: [{}]。当前附近的角色: [{}]",
-                    label,
-                    target_id,
-                    matched
-                        .iter()
-                        .map(cyber_jianghu_protocol::short_id)
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    nearby_names.join(", ")
-                )
-            }
-            _ => {
-                format!(
-                    "{} {} 不在附近实体中。当前附近的角色: [{}]",
-                    label,
-                    target_id,
-                    nearby_names.join(", ")
-                )
-            }
-        }
-    }
-
     /// Layer 1/2/3 统一出口
     pub async fn validate_pipeline(
         &self,
         request: ValidationRequest,
     ) -> Result<PipelineValidationResult> {
+        let mut request = request;
         let graded_config = request.runtime.graded_config.clone();
-        let mut layers = Vec::with_capacity(3);
+        let mut layers = Vec::with_capacity(4);
+
+        // Layer 0：硬性逻辑审查（目标可见性，拦截 LLM 臆测目标）
+        match super::hard_logic::validate_hard_targets(&mut request, &self.rules).await {
+            Ok(()) => layers.push(LayerResult {
+                layer: "layer0",
+                passed: true,
+                detail: None,
+            }),
+            Err(reason) => {
+                layers.push(LayerResult {
+                    layer: "layer0",
+                    passed: false,
+                    detail: Some(reason.clone()),
+                });
+                return Ok(PipelineValidationResult::Rejected { reason, layers });
+            }
+        }
 
         match self.validate_action_type(&request.intent) {
             Ok(()) => layers.push(LayerResult {
@@ -492,7 +377,11 @@ impl ReflectorSoul {
         }
 
         if request.intent.chaos_marker.is_some()
-            || Self::should_skip_llm_validation(&request.intent, graded_config.as_ref())
+            || Self::should_skip_llm_validation(
+                &request.intent,
+                graded_config.as_ref(),
+                request.world_state.as_ref(),
+            )
         {
             layers.push(LayerResult {
                 layer: "layer3",
@@ -800,293 +689,9 @@ impl LlmValidationResponse {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::component::llm::MockLlmClient;
-    use crate::soul::reflector::types::ValidationRuntimeConfig;
-    use cyber_jianghu_protocol::{
-        AdjacentNode, AgentSelfState, Entity, GradedValidationConfig, InventoryItem, Location,
-        SceneItem, WorldState, WorldTime,
-    };
-    use std::collections::HashMap;
-    use std::sync::Arc;
-    use tokio::sync::RwLock;
-    use uuid::Uuid;
+#[path = "validator_tests.rs"]
+mod tests;
 
-    fn mock_container(client: MockLlmClient) -> LlmClientContainer {
-        Arc::new(RwLock::new(Arc::new(client)))
-    }
-
-    fn test_world_building_rules() -> WorldBuildingRules {
-        use cyber_jianghu_protocol::EraSettings;
-        WorldBuildingRules {
-            version: "0.0.1-test".to_string(),
-            era: EraSettings {
-                name: "武侠架空世界".to_string(),
-                tech_level: "冷兵器时代".to_string(),
-                social_structure: "封建帝制".to_string(),
-            },
-            allowed_concepts: vec!["内力".to_string(), "轻功".to_string()],
-            forbidden_concepts: vec!["魔法".to_string()],
-            narrative_rules: "测试叙事规则".to_string(),
-            last_updated: "2026-01-01T00:00:00Z".to_string(),
-            rules_json: None,
-            known_item_ids: Vec::new(),
-        }
-    }
-
-    fn test_world_state() -> WorldState {
-        let mut attributes = HashMap::new();
-        attributes.insert("satiation".to_string(), 80);
-        attributes.insert("hydration".to_string(), 80);
-
-        WorldState {
-            event_type: "world_state".to_string(),
-            tick_id: 1,
-            agent_id: Some(Uuid::new_v4()),
-            world_time: WorldTime {
-                year: 1,
-                month: 1,
-                day: 1,
-                hour: 8,
-                minute: 0,
-                second: 0,
-                weather: "晴".to_string(),
-            },
-            location: Location {
-                node_id: "loc_a".to_string(),
-                name: "地点A".to_string(),
-                node_type: "inn".to_string(),
-                adjacent_nodes: vec![AdjacentNode {
-                    node_id: "loc_b".to_string(),
-                    name: "地点B".to_string(),
-                    travel_cost: 1,
-                }],
-                gatherable_items: vec![],
-            },
-            self_state: AgentSelfState {
-                attributes,
-                derived_attributes: HashMap::new(),
-                attribute_descriptions: HashMap::new(),
-                survival_drives: vec![],
-                status_effects: vec![],
-                inventory: vec![InventoryItem {
-                    item_id: "馒头".to_string(),
-                    name: "馒头".to_string(),
-                    item_type: "food".to_string(),
-                    quantity: 1,
-                    is_equipped: false,
-                }],
-                skills: vec![],
-                age_years: None,
-                max_age: None,
-                recipe_details: vec![],
-            },
-            entities: vec![Entity {
-                id: Uuid::new_v4(),
-                name: "路人甲".to_string(),
-                distance: 0,
-                state: "alive".to_string(),
-                hostile: false,
-                recent_actions: vec![],
-            }],
-            nearby_items: vec![SceneItem {
-                item_id: "木棍".to_string(),
-                name: "木棍".to_string(),
-                item_type: "weapon".to_string(),
-                quantity: 1,
-            }],
-            events_log: vec![],
-            private_dialogue_log: vec![],
-            last_execution_summary: None,
-            lessons_learned: vec![],
-        }
-    }
-
-    #[tokio::test]
-    async fn test_validate_approved() {
-        let mock_client = MockLlmClient::with_response(
-            r#"{
-            "result": "approved",
-            "reason": "行为符合武侠世界观",
-            "narrative": "李四决定在客栈休息"
-        }"#,
-        );
-
-        let validator =
-            ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
-
-        let request = ValidationRequest {
-            intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "休整", None),
-            persona: PersonaInfo::default(),
-            world_context: "龙门客栈".to_string(),
-            world_state: None,
-            runtime: ValidationRuntimeConfig::default(),
-        };
-
-        let result = validator.validate(request).await.unwrap();
-
-        match result {
-            PipelineValidationResult::Approved { narrative, .. } => {
-                assert_eq!(narrative, Some("李四决定在客栈休息".to_string()));
-            }
-            _ => panic!("Expected Approved"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_validate_rejected() {
-        let mock_client = MockLlmClient::with_response(
-            r#"{
-            "result": "rejected",
-            "reason": "使用了魔法，违反力量体系",
-            "rejection_type": "power_system_violation"
-        }"#,
-        );
-
-        let validator =
-            ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
-
-        let request = ValidationRequest {
-            intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "休整", None),
-            persona: PersonaInfo::default(),
-            world_context: "龙门客栈".to_string(),
-            world_state: None,
-            runtime: ValidationRuntimeConfig::default(),
-        };
-
-        let result = validator.validate(request).await.unwrap();
-
-        match result {
-            PipelineValidationResult::Rejected { reason, .. } => {
-                assert_eq!(reason, "使用了魔法，违反力量体系");
-            }
-            _ => panic!("Expected Rejected"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_update_rules() {
-        let mock_client = MockLlmClient::with_response(
-            r#"{"result": "approved", "reason": "", "narrative": ""}"#,
-        );
-
-        let validator =
-            ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
-
-        // Test that update_rules doesn't panic
-        let new_rules = test_world_building_rules();
-        validator.update_rules(new_rules).await;
-    }
-
-    #[tokio::test]
-    async fn test_validator_trait_runs_full_pipeline() {
-        let mock_client =
-            MockLlmClient::with_response(r#"{"result":"approved","reason":"","narrative":"通过"}"#);
-        let validator: Arc<dyn Validator> = Arc::new(ReflectorSoul::new(
-            test_world_building_rules(),
-            mock_container(mock_client),
-        ));
-        let world_state = test_world_state();
-        let request = ValidationRequest {
-            intent: crate::models::Intent::new(
-                world_state.agent_id.unwrap_or_default(),
-                world_state.tick_id,
-                "说话",
-                Some(serde_json::json!({"content": "你好"})),
-            ),
-            persona: PersonaInfo::default(),
-            world_context: "测试地点".to_string(),
-            world_state: Some(world_state),
-            runtime: ValidationRuntimeConfig {
-                graded_config: Some(GradedValidationConfig::default()),
-                recent_same_type_decisions: vec![],
-            },
-        };
-
-        match validator.validate(request).await.unwrap() {
-            PipelineValidationResult::Approved { layers, .. } => {
-                assert!(layers.iter().all(|l| l.passed), "all layers should pass");
-            }
-            PipelineValidationResult::Rejected { reason, .. } => {
-                panic!("valid intent should be approved, got: {}", reason);
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn test_layer3_rejects_semantic_repeat() {
-        let mock_client = MockLlmClient::with_response(
-            r#"{"result":"rejected","reason":"重复自我介绍","rejection_type":"semantic_repeat"}"#,
-        );
-        let validator =
-            ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
-        let world_state = test_world_state();
-
-        let request = ValidationRequest {
-            intent: crate::models::Intent::new(
-                world_state.agent_id.unwrap_or_default(),
-                world_state.tick_id,
-                "说话",
-                Some(serde_json::json!({"content": "在下张三，行走江湖"})),
-            ),
-            persona: PersonaInfo::default(),
-            world_context: "测试地点".to_string(),
-            world_state: Some(world_state),
-            runtime: ValidationRuntimeConfig {
-                graded_config: None,
-                recent_same_type_decisions: vec![
-                    "说话：你好，我叫张三".to_string(),
-                    "说话：在下张三".to_string(),
-                ],
-            },
-        };
-
-        match validator.validate_pipeline(request).await.unwrap() {
-            PipelineValidationResult::Rejected { reason, layers } => {
-                assert_eq!(reason, "重复自我介绍");
-                let layer3 = layers.last().expect("should have layer3");
-                assert_eq!(layer3.layer, "layer3");
-                assert!(!layer3.passed);
-            }
-            PipelineValidationResult::Approved { .. } => {
-                panic!("semantic repeat should be rejected");
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn test_no_dedup_section_when_empty_history() {
-        let mock_client =
-            MockLlmClient::with_response(r#"{"result":"approved","reason":"","narrative":"通过"}"#);
-        let validator =
-            ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
-        let world_state = test_world_state();
-
-        // 无历史数据时，prompt 不含去重指令，正常通过
-        let request = ValidationRequest {
-            intent: crate::models::Intent::new(
-                world_state.agent_id.unwrap_or_default(),
-                world_state.tick_id,
-                "说话",
-                Some(serde_json::json!({"content": "初次见面"})),
-            ),
-            persona: PersonaInfo::default(),
-            world_context: "测试地点".to_string(),
-            world_state: Some(world_state),
-            runtime: ValidationRuntimeConfig {
-                graded_config: None,
-                recent_same_type_decisions: vec![],
-            },
-        };
-
-        match validator.validate_pipeline(request).await.unwrap() {
-            PipelineValidationResult::Approved { layers, .. } => {
-                assert!(layers.iter().all(|l| l.passed));
-            }
-            PipelineValidationResult::Rejected { reason, .. } => {
-                panic!("no history should not trigger dedup rejection: {}", reason);
-            }
-        }
-    }
-}
+#[cfg(test)]
+#[path = "hard_logic_tests.rs"]
+mod tests_layer0;

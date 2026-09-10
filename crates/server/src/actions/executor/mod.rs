@@ -26,12 +26,17 @@ impl ActionExecutor {
     /// 执行动作
     ///
     /// 接收验证层已解析的 [`ParsedActionData`]，消除执行层的重复反序列化。
+    ///
+    /// `observe_target_inventory`：观察目标时由调用方预取的对方背包清单
+    /// （None = 非观察动作或背包查询失败，此时观察结果不含物品信息）。
+    #[allow(clippy::too_many_arguments)]
     pub fn execute(
         &self,
         intent: &Intent,
         parsed_data: &ParsedActionData,
         agent_state: &mut AgentState,
         all_states: &[AgentState],
+        observe_target_inventory: Option<&[crate::inventory::InventoryItem]>,
     ) -> ActionExecutionResult {
         if !agent_state.is_alive {
             return ActionExecutionResult::failure(
@@ -62,13 +67,18 @@ impl ActionExecutor {
                 BasicActionExecutor::execute_qu(intent, data, &current_loc)
             }
             ParsedActionData::Yong(data) => BasicActionExecutor::execute_yong(intent, data),
-            ParsedActionData::Speak(data) => BasicActionExecutor::execute_speak(intent, data),
+            ParsedActionData::Speak(data) => {
+                BasicActionExecutor::execute_speak(intent, data, &agent_state.name)
+            }
             ParsedActionData::Move(data) => {
                 BasicActionExecutor::execute_move(intent, data, &current_loc)
             }
-            ParsedActionData::Observe(data) => {
-                BasicActionExecutor::execute_observe(intent, data, all_states)
-            }
+            ParsedActionData::Observe(data) => BasicActionExecutor::execute_observe(
+                intent,
+                data,
+                all_states,
+                observe_target_inventory,
+            ),
             ParsedActionData::Attack(data) => {
                 CombatActionExecutor::execute_attack(intent, data, agent_state)
             }

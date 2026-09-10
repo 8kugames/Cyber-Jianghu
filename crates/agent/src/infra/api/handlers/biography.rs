@@ -20,7 +20,7 @@ pub(crate) async fn get_biography_handler(
 ) -> axum::response::Response {
     let agent_id = match resolve_biography_agent_id(&state, &params).await {
         Ok(id) => id,
-        Err(resp) => return resp,
+        Err(resp) => return *resp,
     };
 
     let character_dir = state.character_dir.read().await.clone();
@@ -94,7 +94,7 @@ pub(crate) async fn generate_biography_handler(
 ) -> axum::response::Response {
     let agent_id = match resolve_biography_agent_id(&state, &params).await {
         Ok(id) => id,
-        Err(resp) => return resp,
+        Err(resp) => return *resp,
     };
 
     match generate_biography_for_agent(&state, agent_id).await {
@@ -115,17 +115,20 @@ pub(crate) async fn generate_biography_handler(
 }
 
 /// 从 query params 解析 agent_id（优先取参数，否则取当前角色）
+/// （Err 装箱控制 Result 体积，clippy result_large_err）
 async fn resolve_biography_agent_id(
     state: &HttpApiState,
     params: &std::collections::HashMap<String, String>,
-) -> Result<Uuid, axum::response::Response> {
+) -> Result<Uuid, Box<axum::response::Response>> {
     if let Some(id_str) = params.get("agent_id") {
         uuid::Uuid::parse_str(id_str).map_err(|_| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": "Invalid agent_id"})),
+            Box::new(
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": "Invalid agent_id"})),
+                )
+                    .into_response(),
             )
-                .into_response()
         })
     } else {
         Ok(*state.agent_id.read().await)

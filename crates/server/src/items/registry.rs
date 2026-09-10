@@ -103,6 +103,38 @@ pub fn get_item_definition(item_id: &str) -> Option<ItemDefinition> {
     }
 }
 
+/// 获取物品的稳定 uuid（UUID v5，从 item_id 确定性派生）。
+///
+/// 单一真源在 [`cyber_jianghu_protocol::item_uuid`]（Server/Agent 共享同一派生算法），
+/// 此处转发保持 server 内 API 稳定。
+pub fn item_uuid(item_id: &str) -> uuid::Uuid {
+    cyber_jianghu_protocol::item_uuid(item_id)
+}
+
+/// 物品展示名：名称[短 uuid 前 8 位]。
+///
+/// 与角色展示名（姓名[短 uuid]）同构：既可读（名称），又可还原（短 uuid）。
+/// 未注册物品理论上不可达（入口全量校验）；
+/// 一旦出现（配置漂移/LLM 幻觉穿透），大声标注而非静默退化。
+pub fn display_item_name(item_id: &str) -> String {
+    match get_item_definition(item_id) {
+        Some(def) => format!("{}[{}]", def.name, &item_uuid(item_id).to_string()[..8]),
+        None => format!("未知物品[{}]", &item_uuid(item_id).to_string()[..8]),
+    }
+}
+
+/// 从物品 uuid 反查内部 item_id（uuid → item_id，严格模式）。
+///
+/// v5 为单向派生，反查靠枚举注册表（items.yaml 数量有限，开销可忽略）。
+/// 仅接受完整 uuid；裸 item_id 一律返回 None（强制全链路 uuid 引用）。
+pub fn resolve_item_id(uuid_str: &str) -> Option<String> {
+    let target = uuid::Uuid::parse_str(uuid_str).ok()?;
+    crate::game_data::registry::ItemRegistry::all_item_ids()
+        .iter()
+        .find(|id| item_uuid(id) == target)
+        .cloned()
+}
+
 /// 获取货币物品 ID（数据驱动）
 ///
 /// 从缓存中查找 item_type 为 Currency 的物品，返回其 item_id。
@@ -140,4 +172,18 @@ pub(crate) fn reset_item_cache() {
         Err(e) => e.into_inner(),
     };
     *init_flag = false;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_item_uuid_deterministic() {
+        let a = item_uuid("mantou");
+        let b = item_uuid("mantou");
+        assert_eq!(a, b, "同一 item_id 必须派生出同一 uuid");
+        assert_ne!(a, item_uuid("knife"), "不同 item_id 必须派生出不同 uuid");
+        assert_eq!(a.get_version_num(), 5, "必须是 v5 uuid");
+    }
 }

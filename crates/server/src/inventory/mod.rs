@@ -18,4 +18,5 @@ mod manager;
 mod types;
 
 pub use manager::InventoryManager;
+pub use types::InventoryItem;
 pub use types::get_max_slots;

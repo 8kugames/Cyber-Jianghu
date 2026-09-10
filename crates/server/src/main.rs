@@ -740,6 +740,13 @@ async fn main() -> Result<()> {
                 handlers::auth::require_write_token,
             )),
         )
+        .route(
+            "/api/v1/agent/grant-recipes",
+            post(handlers::agent::agent_grant_recipes).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_write_token,
+            )),
+        )
         // 传记回传 - Agent 端死亡/归隐时将纪传体传记回传 server
         .route(
             "/api/v1/agent/biography",

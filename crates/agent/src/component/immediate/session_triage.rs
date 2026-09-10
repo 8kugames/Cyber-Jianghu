@@ -314,7 +314,15 @@ impl SessionTriageEngine {
             .iter()
             .enumerate()
             .map(|(i, e)| {
-                let sender = e.from_agent_name.as_deref().unwrap_or("某人");
+                // 发送者展示统一 姓名[短 uuid]；id 缺失时退化为裸姓名/某人
+                let sender = match (&e.from_agent_name, &e.from_agent_id) {
+                    (Some(name), Some(id)) if !name.is_empty() => match uuid::Uuid::parse_str(id) {
+                        Ok(uid) => crate::core::utils::display_agent_name(name, uid),
+                        Err(_) => name.clone(),
+                    },
+                    (Some(name), None) if !name.is_empty() => name.clone(),
+                    _ => "某人".to_string(),
+                };
                 format!(
                     "{}. [{}] {}「{}」",
                     i + 1,

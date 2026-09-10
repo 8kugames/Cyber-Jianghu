@@ -860,7 +860,8 @@ impl IntentWorker {
                         .map(|item| {
                             let config = ItemRegistry::get(&item.item_id);
                             crate::models::InventoryItem {
-                                item_id: item.item_id.clone(),
+                                // 协议层携带物品 uuid（v5 派生），动作边界反解
+                                item_id: crate::items::item_uuid(&item.item_id).to_string(),
                                 name: config
                                     .as_ref()
                                     .map(|c| c.name.clone())
@@ -885,7 +886,7 @@ impl IntentWorker {
                         .map(|gi| {
                             let config = ItemRegistry::get(&gi.item_id);
                             cyber_jianghu_protocol::SceneItem {
-                                item_id: gi.item_id.clone(),
+                                item_id: crate::items::item_uuid(&gi.item_id).to_string(),
                                 name: config
                                     .as_ref()
                                     .map(|c| c.name.clone())

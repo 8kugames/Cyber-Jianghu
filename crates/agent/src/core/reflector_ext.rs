@@ -34,6 +34,7 @@ impl super::Agent {
         intent: cyber_jianghu_protocol::Intent,
         world_state: &WorldState,
         graded_config: Option<&cyber_jianghu_protocol::GradedValidationConfig>,
+        acquired_item_ids: Vec<String>,
     ) -> Result<crate::soul::reflector::PipelineValidationResult> {
         let Some(validator) = &self.validator else {
             return Ok(crate::soul::reflector::PipelineValidationResult::Approved {
@@ -62,6 +63,7 @@ impl super::Agent {
             runtime: crate::soul::reflector::ValidationRuntimeConfig {
                 graded_config: graded_config.cloned(),
                 recent_same_type_decisions,
+                acquired_item_ids,
             },
         };
 
