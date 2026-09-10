@@ -1,5 +1,5 @@
 # Cyber-Jianghu CI/CD
-# 流程: build -> docker-build -> release (tag only)
+# 流程: quality + build (并行) -> docker-build -> release (tag only)
 # 触发: PR合并 | v* tag | 手动触发
 
 name: CI
@@ -20,9 +20,43 @@ env:
 
 jobs:
   # ==========================================================================
-  # Job 1: 跨平台构建 (5 targets)
+  # Job 1: 质量门 (fmt / clippy / test)
+  # 与 build 并行；任一失败阻断 docker-build 与 release——发布不允许带病
+  # ==========================================================================
+  quality:
+    name: Quality Gate
+    if: |
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      startsWith(github.ref, 'refs/tags/') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Install deps
+        run: sudo apt-get install -y libssl-dev libpq-dev pkg-config
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo nextest run --workspace
+
+  # ==========================================================================
+  # Job 2: 跨平台构建 (4 targets)
   # Linux x86_64/arm64 (musl): cargo-zigbuild 交叉编译
-  # macOS x86_64/arm64: 原生构建
+  # macOS arm64: 原生构建
   # Windows x86_64: 原生构建
   # ==========================================================================
   build:
@@ -132,13 +166,13 @@ jobs:
           grep "^version" crates/*/Cargo.toml >> $GITHUB_STEP_SUMMARY || true
 
   # ==========================================================================
-  # Job 2: Docker 镜像
+  # Job 3: Docker 镜像
   # ==========================================================================
   docker-build:
     name: Docker Image
-    needs: [build]
+    needs: [build, quality]
     if: |
-      always() && needs.build.result == 'success' &&
+      always() && needs.build.result == 'success' && needs.quality.result == 'success' &&
       ((github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
       startsWith(github.ref, 'refs/tags/') ||
       github.event_name == 'workflow_dispatch')
@@ -194,12 +228,12 @@ jobs:
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
   # ==========================================================================
-  # Job 3: GitHub Release (tag only)
+  # Job 4: GitHub Release (tag only)
   # ==========================================================================
   release:
     name: GitHub Release
-    needs: [build, docker-build]
-    if: always() && needs.build.result == 'success' && needs.docker-build.result == 'success' && startsWith(github.ref, 'refs/tags/')
+    needs: [build, quality, docker-build]
+    if: always() && needs.build.result == 'success' && needs.quality.result == 'success' && needs.docker-build.result == 'success' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
