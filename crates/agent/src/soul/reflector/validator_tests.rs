@@ -101,7 +101,6 @@ pub(super) fn test_world_state() -> WorldState {
         events_log: vec![],
         private_dialogue_log: vec![],
         last_execution_summary: None,
-        lessons_learned: vec![],
     }
 }
 

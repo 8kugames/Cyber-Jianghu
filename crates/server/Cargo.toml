@@ -1,6 +1,6 @@
 [package]
 name = "cyber-jianghu-server"
-version = "0.1.296"
+version = "0.1.297"
 edition = "2024"
 authors = ["Cyber-Jianghu Community"]
 license = "MIT OR Apache-2.0"
@@ -9,19 +9,19 @@ publish = false
 
 [dependencies]
 # 内部 crates
-cyber-jianghu-protocol = { version = "0.1.91", path = "../protocol", features = ["sqlx-support"] }
+cyber-jianghu-protocol = { version = "0.1.92", path = "../protocol", features = ["sqlx-support"] }
 
 # Web 框架
-axum = { version = "0.8.8", features = ["ws"] }
+axum = { version = "0.8.9", features = ["ws"] }
 tokio = { workspace = true }
 tower = "0.5.3"
-tower-http = { version = "0.6.8", features = ["cors", "trace", "fs"] }
+tower-http = { version = "0.6.11", features = ["cors", "trace", "fs"] }
 futures-util = { workspace = true }
 
 # 序列化
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = "0.9"
+serde_yaml = "0.9.34"
 
 # 数据库
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros", "chrono", "uuid", "json"] }
@@ -29,7 +29,7 @@ sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio
 # 错误处理
 anyhow = { workspace = true }
 thiserror = { workspace = true }
-async-trait = "0.1"
+async-trait = "0.1.92"
 
 # 日志
 tracing = { workspace = true }
@@ -38,18 +38,18 @@ tracing-subscriber = { workspace = true }
 # 工具库
 chrono = { workspace = true }
 uuid = { workspace = true }
-config = "0.15.21"
-dotenv = "0.15"
+config = "0.15.25"
+dotenv = "0.15.0"
 rand = { workspace = true }
 evalexpr = "13.1.0"
-dashmap = "6.1"
-mime_guess = "2.0"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-sha2 = "0.10"
+dashmap = "6.2.1"
+mime_guess = "2.0.5"
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }
+sha2 = "0.10.9"
 
 # 训练数据导出（spec 2026-07-25）
-ulid = { version = "1.1", features = ["serde"] }
-tokio-util = { version = "0.7", features = ["io"] }
+ulid = { version = "1.2.1", features = ["serde"] }
+tokio-util = { version = "0.7.19", features = ["io"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

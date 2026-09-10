@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 use cyber_jianghu_protocol::{
     ClientMessage, ConfigType, DialogueMessage, GameRules, Intent, ServerMessage, SkillContent,
-    WorldBuildingRules, WorldState,
+    WorldBuildingRules, WorldEvent, WorldState,
 };
 
 // 重导出 config 中的 ServerConfig
@@ -196,6 +196,13 @@ struct ConnectionState {
     execution_result_rx: Option<
         std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<ExecutionResultData>>>,
     >,
+    /// 事件流通道（后台任务 → 主循环）。watch 只保最新 WorldState（快照语义，
+    /// latest-wins）；events_log 是 append-only 流，随快照覆盖会永久丢失
+    /// （死亡等不可重复事件），故单独走有界队列，由主循环 drain 后合并。
+    events_tx: Option<tokio::sync::mpsc::Sender<Vec<WorldEvent>>>,
+    /// 事件流接收端（Arc<Mutex> 允许 &self 下异步访问）
+    events_rx:
+        Option<std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<Vec<WorldEvent>>>>>,
 }
 
 impl WebSocketClient {
@@ -227,6 +234,8 @@ impl WebSocketClient {
                 registered_tx: None,
                 execution_result_tx: None,
                 execution_result_rx: None,
+                events_tx: None,
+                events_rx: None,
             })),
         }
     }
@@ -271,6 +280,7 @@ impl WebSocketClient {
                 let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
                 let (registered_tx, _) = tokio::sync::watch::channel(None);
                 let (execution_result_tx, execution_result_rx) = tokio::sync::mpsc::channel(16);
+                let (events_tx, events_rx) = tokio::sync::mpsc::channel(64);
 
                 // 启动后台 WebSocket 任务（独占 ws）
                 let state_arc = self.state.clone();
@@ -292,6 +302,8 @@ impl WebSocketClient {
                 state.execution_result_rx = Some(std::sync::Arc::new(tokio::sync::Mutex::new(
                     execution_result_rx,
                 )));
+                state.events_tx = Some(events_tx);
+                state.events_rx = Some(std::sync::Arc::new(tokio::sync::Mutex::new(events_rx)));
 
                 info!("Connected to server (background task started)");
                 Ok(())
@@ -552,6 +564,26 @@ impl WebSocketClient {
             .context("WorldState channel produced None")
     }
 
+    /// 非阻塞 drain 事件流队列（被覆盖 WorldState 快照中的 events_log 在此找回）。
+    ///
+    /// 与 receive_world_state 配套：watch 通道只保留最新快照，主循环每轮在
+    /// 消费最新 WorldState 后调用本方法，把期间被覆盖快照的事件合并回当轮处理。
+    pub async fn try_drain_pending_events(&self) -> Vec<WorldEvent> {
+        let rx_arc = {
+            let state = self.state.read().await;
+            state.events_rx.clone()
+        };
+        let Some(rx) = rx_arc else {
+            return Vec::new();
+        };
+        let mut guard = rx.lock().await;
+        let mut out = Vec::new();
+        while let Ok(batch) = guard.try_recv() {
+            out.extend(batch);
+        }
+        out
+    }
+
     /// 接收 ExecutionResult（非阻塞，返回所有已缓存结果）
     ///
     /// mpsc channel 保留全部结果。非阻塞 drain，返回空 Vec 表示无结果。
@@ -757,6 +789,8 @@ impl WebSocketClient {
             state.registered_tx = None;
             state.execution_result_tx = None;
             state.execution_result_rx = None;
+            state.events_tx = None;
+            state.events_rx = None;
 
             handle
         };
@@ -844,7 +878,7 @@ async fn websocket_background_task(
                 match msg_result {
                     Some(Ok(Message::Text(text))) => {
                         // 克隆回调（避免在处理中持有锁）
-                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, skill_update_cb, prompt_template_cb, persona_event_rules_cb, narrative_config_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
+                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, skill_update_cb, prompt_template_cb, persona_event_rules_cb, narrative_config_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx, events_tx) = {
                             let state_guard = state.read().await;
                             (
                                 state_guard.game_rules_callback.clone(),
@@ -859,12 +893,29 @@ async fn websocket_background_task(
                                 state_guard.worldstate_tx.clone(),
                                 state_guard.registered_tx.clone(),
                                 state_guard.execution_result_tx.clone(),
+                                state_guard.events_tx.clone(),
                             )
                         };
 
                         match serde_json::from_str::<ServerMessage>(&text) {
                             Ok(ServerMessage::WorldState { data }) => {
                                 debug!("Background: WorldState tick={}", data.tick_id);
+                                // 事件流先行入队：watch 只保最新快照，若本快照被后续
+                                // 广播覆盖，其 events_log（含不可重复的死亡等事件）
+                                // 由主循环 drain 合并找回，不再随快照丢失
+                                if let Some(ref etx) = events_tx
+                                    && let Err(e) = etx.try_send(data.events_log.clone())
+                                {
+                                    if etx.is_closed() {
+                                        debug!(
+                                            "events_tx.try_send 失败：主循环未订阅，保留 sender: {e:?}"
+                                        );
+                                    } else {
+                                        warn!(
+                                            "events_tx.try_send 失败（队列满，事件批次被丢弃）: {e:?}"
+                                        );
+                                    }
+                                }
                                 if let Some(ref tx) = ws_tx
                                     && let Err(e) = tx.send(Some(data)) {
                                         handle_worldstate_send_failure(tx, "world-state-msg", e);
@@ -1242,6 +1293,12 @@ impl AgentClient {
     pub async fn receive_world_state(&self) -> Result<WorldState> {
         let client = self.client.read().await;
         client.receive_world_state().await
+    }
+
+    /// 非阻塞 drain 事件流队列（与 WebSocketClient::try_drain_pending_events 同语义）
+    pub async fn try_drain_pending_events(&self) -> Vec<WorldEvent> {
+        let client = self.client.read().await;
+        client.try_drain_pending_events().await
     }
 
     pub async fn try_receive_execution_result(&self) -> Result<Vec<ExecutionResultData>> {

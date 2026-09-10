@@ -25,7 +25,7 @@ use crate::game_data::GameDataCache;
 use crate::game_data::registry::{ActionRegistry, ItemRegistry};
 use crate::game_data::types::actions::Transmission;
 use crate::governance::ServerGovernanceMapper;
-use crate::models::{AgentState, WorldEvent, WorldEventType};
+use crate::models::{AgentState, WorldEvent};
 use crate::state::AgentStateCache;
 use crate::tick::decay;
 use crate::tick::persistence;
@@ -210,7 +210,7 @@ impl IntentWorker {
         let tick_id = agent_state.tick_id; // 使用当前 tick_id
         let pre_node_id = agent_state.node_id.clone();
         let pre_skills = agent_state.skills.clone();
-        let result = match self
+        let mut result = match self
             .state_processor
             .process_single_intent(tick_id, agent_state, &intent, &all_states, 0)
             .await
@@ -270,6 +270,49 @@ impl IntentWorker {
         let mut persisted_state = result.updated_state.clone();
         persisted_state.state_version = persisted_version;
         self.state_cache.insert(agent_id, persisted_state.clone());
+
+        // 6.15 跨 Agent 效果 write-through：目标状态回写 DashMap + 死亡善后
+        // （战斗击杀在此路径触发 handle_deaths：目击广播 / AgentDied / 物品掉落）
+        if !result.collateral_states.is_empty() {
+            let mut dead_notifs = Vec::new();
+            for (mut c_state, c_version) in result.collateral_states.drain(..) {
+                let dead = !c_state.is_alive;
+                c_state.state_version = c_version;
+                info!(
+                    "[combat] collateral write-through: agent={}, node={}, alive={}",
+                    c_state.agent_id, c_state.node_id, c_state.is_alive
+                );
+                self.state_cache.insert(c_state.agent_id, c_state.clone());
+                if dead {
+                    dead_notifs.push(decay::DeathNotification::new(
+                        c_state.agent_id,
+                        "combat".to_string(),
+                        "在战斗中被杀害".to_string(),
+                        c_state.node_id.clone(),
+                        tick_id,
+                    ));
+                }
+            }
+            if !dead_notifs.is_empty() {
+                info!(
+                    "Tick {}: {} 个 Agent 被击杀，触发善后",
+                    tick_id,
+                    dead_notifs.len()
+                );
+                self.handle_deaths(dead_notifs.clone(), tick_id).await;
+                // 生存 Reward 一生结算（与 tick 边界自然死亡同构，幂等）
+                for notif in &dead_notifs {
+                    if let Err(e) =
+                        crate::reward::settle_lifetime(&self.db_pool, notif.agent_id).await
+                    {
+                        warn!(
+                            "[reward] 一生结算失败 (agent={}, tick={}): {}",
+                            notif.agent_id, tick_id, e
+                        );
+                    }
+                }
+            }
+        }
 
         // 6.5 技能习得推送：检测新增技能，推送 SkillContent 给 Agent
         let new_skills: Vec<String> = result
@@ -402,6 +445,13 @@ impl IntentWorker {
                 agent_id, action_type, tick_id, persisted_state.node_id
             );
             self.handle_deaths(vec![death_notif], tick_id).await;
+            // 生存 Reward 一生结算（与 tick 边界/tick 击杀同构，幂等）
+            if let Err(e) = crate::reward::settle_lifetime(&self.db_pool, agent_id).await {
+                warn!(
+                    "[reward] 一生结算失败 (agent={}, tick={}): {}",
+                    agent_id, tick_id, e
+                );
+            }
         }
 
         // 12. Whisper 执行后立即释放 session（避免同 tick 内 AlreadyInDialogue）
@@ -445,8 +495,13 @@ impl IntentWorker {
             .process_single_intent(tick_id, agent_state, intent, &all_states, pipe_seq)
             .await;
 
-        let (updated_state, event_tuples, persisted_version) = match result {
-            Ok(r) => (r.updated_state, r.events, r.persisted_version),
+        let (updated_state, event_tuples, persisted_version, mut collateral_states) = match result {
+            Ok(r) => (
+                r.updated_state,
+                r.events,
+                r.persisted_version,
+                r.collateral_states,
+            ),
             Err(e) => {
                 // 执行失败 → 发 failure notification + 清理 whisper session
                 self.send_error_to_agent(
@@ -488,6 +543,47 @@ impl IntentWorker {
         let mut persisted_state = updated_state.clone();
         persisted_state.state_version = persisted_version;
         self.state_cache.insert(agent_id, persisted_state.clone());
+
+        // 跨 Agent 效果 write-through（与主 intent step 6.15 同构）
+        if !collateral_states.is_empty() {
+            let mut dead_notifs = Vec::new();
+            for (mut c_state, c_version) in collateral_states.drain(..) {
+                let dead = !c_state.is_alive;
+                c_state.state_version = c_version;
+                info!(
+                    "[combat] collateral write-through (subsequent): agent={}, node={}, alive={}",
+                    c_state.agent_id, c_state.node_id, c_state.is_alive
+                );
+                self.state_cache.insert(c_state.agent_id, c_state.clone());
+                if dead {
+                    dead_notifs.push(decay::DeathNotification::new(
+                        c_state.agent_id,
+                        "combat".to_string(),
+                        "在战斗中被杀害".to_string(),
+                        c_state.node_id.clone(),
+                        tick_id,
+                    ));
+                }
+            }
+            if !dead_notifs.is_empty() {
+                info!(
+                    "Tick {}: {} 个 Agent 被击杀（subsequent），触发善后",
+                    tick_id,
+                    dead_notifs.len()
+                );
+                self.handle_deaths(dead_notifs.clone(), tick_id).await;
+                for notif in &dead_notifs {
+                    if let Err(e) =
+                        crate::reward::settle_lifetime(&self.db_pool, notif.agent_id).await
+                    {
+                        warn!(
+                            "[reward] 一生结算失败 (agent={}, tick={}): {}",
+                            notif.agent_id, tick_id, e
+                        );
+                    }
+                }
+            }
+        }
 
         // 发成功通知
         self.send_execution_result(
@@ -532,6 +628,13 @@ impl IntentWorker {
                 agent_id, intent.action_type, pipe_seq, tick_id, persisted_state.node_id
             );
             self.handle_deaths(vec![death_notif], tick_id).await;
+            // 生存 Reward 一生结算（与主 intent 同构，幂等）
+            if let Err(e) = crate::reward::settle_lifetime(&self.db_pool, agent_id).await {
+                warn!(
+                    "[reward] 一生结算失败 (agent={}, tick={}): {}",
+                    agent_id, tick_id, e
+                );
+            }
         }
 
         Ok(())
@@ -1011,31 +1114,9 @@ impl IntentWorker {
                 None
             };
 
-            // 0. 跨 Agent 传承 Layer 2: 记录教训
-            {
-                let survival = death_metadata
-                    .as_ref()
-                    .and_then(|m| m.get("survival_ticks"))
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(-1);
-                let gd = self.game_data_cache.snapshot();
-                let lesson_cfg = gd.game_rules.data.lesson.as_ref();
-                let threshold = lesson_cfg.map(|c| c.threshold).unwrap_or(
-                    crate::game_data::types::unified_config::LessonConfig::DEFAULT_THRESHOLD,
-                );
-                let cause_map = lesson_cfg
-                    .map(|c| c.cause_advice_map.clone())
-                    .unwrap_or_default();
-                super::lessons::record_death_lesson(
-                    &self.db_pool,
-                    &notif.cause,
-                    survival,
-                    tick_id,
-                    threshold,
-                    &cause_map,
-                )
-                .await;
-            }
+            // 0. （已移除）跨 Agent 传承 Layer 2 聚合教训：服务器不再聚合/广播
+            //    死亡知识——传播为纯涌现：目击 → 记忆 → 目击者自主"说" → 扩散。
+            //    死因/存活统计仍由 death_metadata 日志与 reward 结算保留（引擎侧）。
 
             // 1. 开启事务：物品掉落 + 标记死亡
             let mut tx = match self.db_pool.begin().await {
@@ -1089,24 +1170,16 @@ impl IntentWorker {
 
             // 4. 广播死亡事件给同位置 Agent（不含死者自身）
             {
-                let same_location_agents: Vec<uuid::Uuid> = self
+                // 目击者筛选 + 事件构造（纯函数，不变量由 decay 模块单测覆盖）
+                let co_states: Vec<AgentState> = self
                     .state_cache
                     .iter()
-                    .filter(|r| r.value().node_id == *location && r.key() != &agent_id)
-                    .map(|r| *r.key())
+                    .filter(|r| r.value().node_id == *location)
+                    .map(|r| r.value().clone())
                     .collect();
+                let same_location_agents = decay::select_witnesses(&co_states, location, agent_id);
 
-                let event = WorldEvent {
-                    event_type: WorldEventType::DeathNotification,
-                    tick_id,
-                    description: notif.witness_description(deceased_name.as_deref()),
-                    metadata: serde_json::json!({
-                        "agent_id": agent_id.to_string(),
-                        "agent_name": deceased_name,
-                        "cause": notif.cause,
-                        "location": location,
-                    }),
-                };
+                let event = decay::build_witness_death_event(notif, deceased_name.as_deref());
 
                 for target_id in same_location_agents {
                     if let Err(e) = self.broadcast_event(target_id, event.clone()).await {

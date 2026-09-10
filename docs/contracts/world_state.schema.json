@@ -11,7 +11,15 @@
     "agent_id": { "type": ["string", "null"], "format": "uuid" },
     "world_time": {
       "type": "object",
-      "required": ["year", "month", "day", "hour", "minute", "second", "weather"],
+      "required": [
+        "year",
+        "month",
+        "day",
+        "hour",
+        "minute",
+        "second",
+        "weather"
+      ],
       "properties": {
         "year": { "type": "integer" },
         "month": { "type": "integer" },
@@ -28,7 +36,10 @@
       "properties": {
         "node_id": { "type": "string" },
         "name": { "type": "string" },
-        "type": { "type": "string", "description": "节点类型,如 shrine/inn/street" },
+        "type": {
+          "type": "string",
+          "description": "节点类型,如 shrine/inn/street"
+        },
         "adjacent_nodes": { "type": "array" },
         "gatherable_items": { "type": "array" }
       }
@@ -37,7 +48,10 @@
       "type": "object",
       "description": "Agent 自身状态(片段)。attributes 为 string->int 映射,键由 attributes.yaml 数据驱动(如 hp/stamina/satiation/hydration);另含 derived_attributes/attribute_descriptions/survival_drives/status_effects/inventory/skills/recipe_details/age_years/max_age。",
       "properties": {
-        "attributes": { "type": "object", "additionalProperties": { "type": "integer" } }
+        "attributes": {
+          "type": "object",
+          "additionalProperties": { "type": "integer" }
+        }
       }
     },
     "entities": {
@@ -112,7 +126,6 @@
     "last_execution_summary": {
       "type": ["object", "null"],
       "description": "上一次 Pipeline 执行汇总 {total,succeeded,partial,failed,skipped}"
-    },
-    "lessons_learned": { "type": "array" }
+    }
   }
 }

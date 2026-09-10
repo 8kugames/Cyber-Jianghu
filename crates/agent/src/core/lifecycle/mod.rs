@@ -15,7 +15,7 @@ mod soul_cycle;
 mod tick;
 
 use anyhow::Result;
-use cyber_jianghu_protocol::ServerMessage;
+use cyber_jianghu_protocol::{ServerMessage, WorldEvent};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -542,6 +542,20 @@ impl super::Agent {
                         }
                     };
 
+                    // 事件流合并：watch 只保最新快照，认知循环（LLM 推理秒级）期间
+                    // 到达的后续 WorldState 会覆盖本快照，其 events_log（含不可重复的
+                    // 死亡/攻击等事件）从事件队列 drain 回来，去重后并入当轮处理，
+                    // 进入记忆与特质演化通道（否则目击事件永久丢失）
+                    let pending = self.client.try_drain_pending_events().await;
+                    let world_state = if pending.is_empty() {
+                        world_state
+                    } else {
+                        let mut merged = world_state.clone();
+                        merged.events_log =
+                            merge_events_log(std::mem::take(&mut merged.events_log), pending);
+                        merged
+                    };
+
                     self.update_tick_state(&world_state).await;
 
                     // 1.5 检查是否死亡（只报告一次）
@@ -679,13 +693,10 @@ impl super::Agent {
                         None
                     };
 
-                    // 4.4b 跨 Agent 传承教训注入
-                    if !world_state.lessons_learned.is_empty() {
-                        memory_context.push_str("\n### 前人教训\n");
-                        for lesson in &world_state.lessons_learned {
-                            memory_context.push_str(&format!("- {}\n", lesson.lesson));
-                        }
-                    }
+                    // 4.4b 跨 Agent 死亡知识传播：不注入任何服务器聚合的"教训/传言"。
+                    // 传播链路为纯涌现：目击者轻出死亡事件（death_notification，
+                    // 已进记忆与特质演化）→ 目击者自主选择"说"（speak 动作）→
+                    // 同位置者听见 → 随行走扩散。天道无为，不替众生传话。
 
                     // 4.5 决策上下文快照写入（供 /api/v1/context enrichment 使用）
                     if let Some(ref api_state) = self.http_api_state {
@@ -1246,5 +1257,79 @@ impl super::Agent {
 
         // 调度自动重生
         death::maybe_schedule_auto_rebirth(self, dead_agent_id, death_tick_id, "").await;
+    }
+}
+
+/// 合并事件流：当前快照的 events_log 在前，队列找回的事件去重后追加。
+///
+/// 去重键 = 事件整体 JSON 序列化：同一事件可能同时出现在最新快照与队列中
+/// （例如携带死亡事件的快照未被覆盖时）；同名不同 metadata 的事件不去重。
+fn merge_events_log(base: Vec<WorldEvent>, pending: Vec<WorldEvent>) -> Vec<WorldEvent> {
+    let mut seen: std::collections::HashSet<String> = base
+        .iter()
+        .filter_map(|e| serde_json::to_string(e).ok())
+        .collect();
+    let mut merged = base;
+    for event in pending {
+        let key = serde_json::to_string(&event).unwrap_or_default();
+        if !key.is_empty() && seen.insert(key) {
+            merged.push(event);
+        }
+    }
+    merged
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cyber_jianghu_protocol::WorldEventType;
+
+    fn event(tick: i64, desc: &str) -> WorldEvent {
+        WorldEvent {
+            event_type: WorldEventType::DeathNotification,
+            tick_id: tick,
+            description: desc.to_string(),
+            metadata: serde_json::json!({}),
+        }
+    }
+
+    #[test]
+    fn merge_events_log_appends_unseen_and_dedups() {
+        let base = vec![event(1, "张三在 龙门大堂 亡故"), event(1, "有人说: 你好")];
+        // 队列含一个重复事件（最新快照已携带）+ 一个被覆盖快照独有的事件
+        let pending = vec![
+            event(1, "有人说: 你好"),
+            event(1, "你被 李四 攻击，损失 5 点气血"),
+        ];
+
+        let merged = merge_events_log(base, pending);
+
+        assert_eq!(merged.len(), 3, "重复事件去重，独有事件保留");
+        assert_eq!(merged[0].description, "张三在 龙门大堂 亡故");
+        assert_eq!(merged[2].description, "你被 李四 攻击，损失 5 点气血");
+    }
+
+    #[test]
+    fn merge_events_log_empty_pending_is_noop() {
+        let base = vec![event(1, "a")];
+        let merged = merge_events_log(base, vec![]);
+        assert_eq!(merged.len(), 1);
+    }
+
+    #[test]
+    fn merge_events_log_keeps_same_description_different_metadata() {
+        // 同描述不同 metadata（如同名不同死者）不得误去重
+        let e1 = WorldEvent {
+            event_type: WorldEventType::DeathNotification,
+            tick_id: 1,
+            description: "有人亡故".to_string(),
+            metadata: serde_json::json!({"agent_id": "a"}),
+        };
+        let e2 = WorldEvent {
+            metadata: serde_json::json!({"agent_id": "b"}),
+            ..e1.clone()
+        };
+        let merged = merge_events_log(vec![e1], vec![e2]);
+        assert_eq!(merged.len(), 2, "metadata 不同即不同事件");
     }
 }

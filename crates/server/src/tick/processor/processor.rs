@@ -14,7 +14,9 @@ use crate::actions::StateChange;
 use crate::actions::{ActionExecutionResult, ActionExecutor};
 use crate::db::DbPool;
 use crate::game_data::registry::ActionRegistry;
-use crate::models::{ActionResult, ActionType, AgentAction, AgentState, Intent, WorldEvent};
+use crate::models::{
+    ActionResult, ActionType, AgentAction, AgentState, Intent, WorldEvent, WorldEventType,
+};
 
 /// 单条 Intent 处理结果
 pub struct SingleProcessingResult {
@@ -32,6 +34,12 @@ pub struct SingleProcessingResult {
     /// 全部 rollback，此字段为 `None`；realtime.rs 视为 persist 失败，发
     /// `persist_failed` 并保持 DashMap 不变。
     pub persisted_version: Option<i64>,
+    /// 受本次 Intent 波及的第三方状态（跨 Agent 效果，如攻击目标）。
+    ///
+    /// 元素为 (更新后状态, 持久化版本)，仅 commit 成功才有值（与 actor 的
+    /// persisted_version 同一事务，Saga 原子性覆盖双方）；realtime.rs 据此
+    /// write-through DashMap 并对死亡目标触发 handle_deaths。
+    pub collateral_states: Vec<(AgentState, i64)>,
 }
 
 /// 状态处理器
@@ -156,6 +164,9 @@ impl StateProcessor {
         };
 
         let mut execution_failed = !result.success;
+        // 跨 Agent 效果目标状态（如攻击目标）：在 success 块内累积，
+        // 在下方 upsert 段与行动者同事务持久化
+        let mut collateral_states: Vec<AgentState> = Vec::new();
 
         if result.success {
             // 经验阈值：按 action category 递增计数 + 检查技能习得
@@ -171,8 +182,23 @@ impl StateProcessor {
             let acquired_skills = check_skill_acquisition(&agent_state);
 
             let mut all_applied = true;
+            // 跨 Agent 效果（如攻击目标）：把目标状态从 all_states 快照纳入切片，
+            // 与行动者同过 mutator，随同一事务持久化（Saga 原子性覆盖双方）。
+            // 历史 bug：切片只含行动者，HpChanged 永远找不到目标 → all_applied=false
+            // → 整个攻击 Intent 回滚，跨 Agent 战斗完全失效。
             for change in &result.state_changes {
+                let target_id = change.affected_agent().filter(|id| *id != intent.agent_id);
                 let mut single_states = vec![agent_state.clone()];
+                if let Some(tid) = target_id
+                    && single_states.len() == 1
+                {
+                    if let Some(existing) = collateral_states.iter().find(|s| s.agent_id == tid) {
+                        single_states.push(existing.clone());
+                    } else if let Some(target) = all_states.iter().find(|s| s.agent_id == tid) {
+                        single_states.push(target.clone());
+                    }
+                    // 目标不在快照中：切片保持仅行动者 → mutator 返回 false → 失败路径
+                }
                 let mut applied = false;
                 {
                     let mut ctx =
@@ -181,7 +207,6 @@ impl StateProcessor {
                         if let Ok(true) = mutator.mutate(change, &mut single_states, &mut ctx).await
                         {
                             applied = true;
-                            agent_state = single_states.into_iter().next().unwrap_or(agent_state);
                             break;
                         }
                     }
@@ -201,6 +226,82 @@ impl StateProcessor {
                     .await;
                     if applied {
                         agent_state = single_states.into_iter().next().unwrap_or(agent_state);
+                    }
+                } else {
+                    // 写回：行动者归位，目标归还 collateral_states
+                    for s in single_states {
+                        if s.agent_id == intent.agent_id {
+                            agent_state = s;
+                        } else if let Some(slot) = collateral_states
+                            .iter_mut()
+                            .find(|c| c.agent_id == s.agent_id)
+                        {
+                            *slot = s;
+                        } else {
+                            collateral_states.push(s);
+                        }
+                    }
+                    // 攻击反馈事件（攻防双方）：目标受损/死亡必须具名告知双方，
+                    // 否则被攻击方对伤害来源无感知（event_mapper 靠“被+攻击”分类）
+                    if let StateChange::HpChanged { agent_id, delta } = change
+                        && *agent_id != intent.agent_id
+                    {
+                        let damage = (*delta).max(0);
+                        let attacker_name =
+                            crate::display::display_agent_name(&agent_state.name, intent.agent_id);
+                        let target_name = collateral_states
+                            .iter()
+                            .find(|s| s.agent_id == *agent_id)
+                            .map(|s| crate::display::display_agent_name(&s.name, s.agent_id))
+                            .unwrap_or_else(|| "未知".to_string());
+                        let target_died = collateral_states
+                            .iter()
+                            .any(|s| s.agent_id == *agent_id && !s.is_alive);
+                        let location = agent_state.node_id.clone();
+                        let (attacker_desc, target_desc) = if target_died {
+                            (
+                                format!("攻击成功：你击杀了 {}", target_name),
+                                format!("你被 {} 攻击致死", attacker_name),
+                            )
+                        } else {
+                            (
+                                format!(
+                                    "攻击成功：你重创了 {}，造成 {} 点伤害",
+                                    target_name, damage
+                                ),
+                                format!("你被 {} 攻击，损失 {} 点气血", attacker_name, damage),
+                            )
+                        };
+                        events.push((
+                            intent.agent_id,
+                            WorldEvent {
+                                event_type: WorldEventType::ActionResult,
+                                tick_id,
+                                description: attacker_desc,
+                                metadata: serde_json::json!({
+                                    "action": "攻击",
+                                    "target": agent_id.to_string(),
+                                    "target_name": target_name,
+                                    "damage": damage,
+                                    "location": location,
+                                }),
+                            },
+                        ));
+                        events.push((
+                            *agent_id,
+                            WorldEvent {
+                                event_type: WorldEventType::ActionResult,
+                                tick_id,
+                                description: target_desc,
+                                metadata: serde_json::json!({
+                                    "action": "被攻击",
+                                    "attacker": intent.agent_id.to_string(),
+                                    "attacker_name": attacker_name,
+                                    "damage": damage,
+                                    "location": location,
+                                }),
+                            },
+                        ));
                     }
                 }
 
@@ -313,6 +414,7 @@ impl StateProcessor {
         // 成功路径：返回新 state_version，与 inventory/ground_items/action_log 在
         // 同一事务一起 commit。realtime.rs 据此直接更新 DashMap，不再用 pool 二次 upsert。
         let mut persisted_version: Option<i64> = None;
+        let mut collateral_versions: Vec<(AgentState, i64)> = Vec::new();
         if !execution_failed {
             match crate::db::upsert_agent_state_in_tx(&mut tx, &agent_state).await {
                 Ok(version) => {
@@ -327,6 +429,24 @@ impl StateProcessor {
                 }
             }
         }
+        // collateral（跨 Agent 目标）同样纳入 tx：与行动者同生共死，
+        // 任一失败 → 整体 rollback，双方状态均不落库
+        if !execution_failed {
+            for mut collateral in collateral_states {
+                collateral.tick_id = tick_id;
+                match crate::db::upsert_agent_state_in_tx(&mut tx, &collateral).await {
+                    Ok(version) => collateral_versions.push((collateral, version)),
+                    Err(e) => {
+                        warn!(
+                            "collateral agent_states UPSERT(tx) 失败（将回滚整个 Saga）: agent={}, {:#}",
+                            collateral.agent_id, e
+                        );
+                        execution_failed = true;
+                        break;
+                    }
+                }
+            }
+        }
 
         // Sagas: 回滚/提交（action_log + agent_states 均已纳入 tx，
         // commit/rollback 对 inventory / ground_items / action_log / agent_states 同时生效）
@@ -334,6 +454,7 @@ impl StateProcessor {
             agent_state = agent_state_snapshot;
             events.truncate(events_len_before);
             persisted_version = None;
+            collateral_versions.clear();
             if let Err(e) = tx.rollback().await {
                 warn!("Saga tx 回滚失败: {}", e);
             }
@@ -342,6 +463,7 @@ impl StateProcessor {
                 warn!("Saga tx 提交失败: {}", e);
                 // commit 失败：DB 未持久化任何内容，DashMap 不应更新
                 persisted_version = None;
+                collateral_versions.clear();
             }
         }
 
@@ -349,6 +471,7 @@ impl StateProcessor {
             updated_state: agent_state,
             events,
             persisted_version,
+            collateral_states: collateral_versions,
         })
     }
 
