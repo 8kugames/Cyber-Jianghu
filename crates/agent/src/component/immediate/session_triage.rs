@@ -493,7 +493,12 @@ event_id 必须是以下值之一：{event_ids}"#,
             enable_thinking: None,
         };
         let extracted = llm_ref
-            .complete_json_with_system_and_retry_extracted(&prompt, "", chat_config, 2)
+            .complete_json_with_system_and_retry_extracted(
+                &prompt,
+                "请依据上述系统指令输出今日江湖日记 JSON。",
+                chat_config,
+                2,
+            )
             .await
             .map_err(|e| anyhow::anyhow!("LLM 日记生成失败: {}", e))?;
         let result: serde_json::Value = extracted.value;

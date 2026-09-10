@@ -1934,7 +1934,7 @@ mod tests {
         let (client, breaker) = make_test_client_with_breaker();
         // 禁用该 client 对应的 key
         let key = client.breaker_key();
-        breaker.disable(key.clone());
+        breaker.disable(key.clone(), 60);
 
         // check_breaker 必须返回 Err，且错误信息包含 "cooldown"
         let result = client.check_breaker();
@@ -1970,7 +1970,7 @@ mod tests {
             .with_breaker(breaker.clone());
 
         // 禁用 model-a
-        breaker.disable(client_a.breaker_key());
+        breaker.disable(client_a.breaker_key(), 60);
 
         // model-a 被拒，model-b 仍可用
         assert!(client_a.check_breaker().is_err());
@@ -1984,7 +1984,7 @@ mod tests {
         let cloned = client.clone();
 
         // 在原 breaker 上禁用
-        breaker.disable(client.breaker_key());
+        breaker.disable(client.breaker_key(), 60);
 
         // 克隆体也应命中
         assert!(cloned.check_breaker().is_err());

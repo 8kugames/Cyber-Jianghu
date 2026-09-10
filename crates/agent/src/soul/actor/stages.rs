@@ -84,14 +84,20 @@ pub struct PerceptionMotivationResponse {
     pub self_status: String,
     /// 环境观察
     pub environment: String,
-    /// 识别到的关键信息
+    /// 识别到的关键信息（模型偶发省略；仅用于 trace 展示，容忍缺失）
+    #[serde(default)]
     pub key_observations: Vec<String>,
-    /// 当前主要驱动力
+    /// 当前主要驱动力（模型偶发省略；仅用于 trace 展示，容忍缺失）
+    #[serde(default = "default_primary_drive")]
     pub primary_drive: String,
     /// 驱动强度 (1-10)
     pub drive_intensity: u8,
     /// 为什么有这个动机
     pub reasoning: String,
+}
+
+pub(crate) fn default_primary_drive() -> String {
+    "未明示".to_string()
 }
 
 #[cfg(test)]

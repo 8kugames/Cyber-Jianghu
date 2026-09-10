@@ -1093,8 +1093,21 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
 // Fallback LLM 客户端（403/超时自动降级）
 // ============================================================================
 
-/// 429 disable 的恢复间隔（1 小时）
-const RATE_LIMIT_BACKOFF_SECS: u64 = 3600;
+/// 禁用恢复冷却（按原因区分）。
+/// - `rate_limit`（429 TPM/RPM）：按分钟窗口限流，60s 足够窗口翻转；
+///   长冷却会让单模型 agent 在一次瞬时 429 后长时间无法工作。
+/// - 其他原因（internal_server_error / empty_response 等）：维持保守长冷却。
+const RATE_LIMIT_COOLDOWN_SECS: u64 = 60;
+const MODEL_DISABLE_COOLDOWN_SECS: u64 = 3600;
+
+/// 根据禁用原因返回冷却秒数
+fn cooldown_secs_for_reason(reason: &str) -> u64 {
+    if reason == "rate_limit" {
+        RATE_LIMIT_COOLDOWN_SECS
+    } else {
+        MODEL_DISABLE_COOLDOWN_SECS
+    }
+}
 
 // ============================================================================
 // 共享 Circuit-Breaker
@@ -1112,8 +1125,8 @@ const RATE_LIMIT_BACKOFF_SECS: u64 = 3600;
 /// 共享 circuit-breaker 状态。
 #[derive(Default)]
 pub struct SharedBreaker {
-    /// key: `"{provider}/{model}"`; value: 禁用开始时间
-    disabled: std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    /// key: `"{provider}/{model}"`; value: (禁用开始时间, 冷却秒数)
+    disabled: std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, u64)>>,
 }
 
 impl std::fmt::Debug for SharedBreaker {
@@ -1134,19 +1147,19 @@ impl SharedBreaker {
     /// `None` 表示可用（不在表内或已过期）。
     pub fn is_disabled(&self, key: &str) -> Option<u64> {
         let mut disabled = self.disabled.lock().expect("lock poisoned");
-        // 清理过期项
+        // 清理过期项（按各条目自身冷却时长）
         let now = std::time::Instant::now();
-        disabled.retain(|_, ts| now.duration_since(*ts).as_secs() < RATE_LIMIT_BACKOFF_SECS);
-        disabled.get(key).map(|ts| {
+        disabled.retain(|_, (ts, cooldown)| now.duration_since(*ts).as_secs() < *cooldown);
+        disabled.get(key).map(|(ts, cooldown)| {
             let elapsed = now.duration_since(*ts).as_secs();
-            RATE_LIMIT_BACKOFF_SECS.saturating_sub(elapsed)
+            cooldown.saturating_sub(elapsed)
         })
     }
 
-    /// 标记 key 禁用
-    pub fn disable(&self, key: String) {
+    /// 标记 key 禁用（携带本次冷却时长）
+    pub fn disable(&self, key: String, cooldown_secs: u64) {
         let mut disabled = self.disabled.lock().expect("lock poisoned");
-        disabled.insert(key, std::time::Instant::now());
+        disabled.insert(key, (std::time::Instant::now(), cooldown_secs));
     }
 }
 
@@ -1201,7 +1214,7 @@ pub fn classify_llm_error(error: &anyhow::Error) -> (ErrorAction, &'static str) 
         return (ErrorAction::Fallback, "forbidden_or_quota");
     }
 
-    // ── Rate limit: 禁用模型（1h 冷却），避免 OOM ──────────────
+    // ── Rate limit: 禁用模型（rate_limit 60s 冷却，覆盖分钟窗口）────────────
     if msg.contains("429")
         || msg.contains("rate_limit")
         || msg.contains("Too Many Requests")
@@ -1258,8 +1271,9 @@ pub struct FallbackLlmClient {
     idle_counts: Arc<std::sync::Mutex<Vec<usize>>>,
     /// 旋转阈值
     idle_threshold: usize,
-    /// 标记为不可用的模型索引 + disable 时间戳
-    disabled_models: Arc<std::sync::Mutex<std::collections::HashMap<usize, std::time::Instant>>>,
+    /// 标记为不可用的模型索引 + (disable 时间戳, 冷却秒数)
+    disabled_models:
+        Arc<std::sync::Mutex<std::collections::HashMap<usize, (std::time::Instant, u64)>>>,
     /// 共享 circuit-breaker：写入时同步到下层 DirectLlmClient，
     /// 使 `run_tool_loop` 内部 `send_chat_exchange` 也能命中。
     shared_breaker: Arc<SharedBreaker>,
@@ -1327,8 +1341,11 @@ impl FallbackLlmClient {
         let count = idle_counts[current_idx];
 
         if count >= self.idle_threshold {
-            // 标记当前模型为不可用
-            disabled.insert(current_idx, std::time::Instant::now());
+            // 标记当前模型为不可用（idle 非限流原因，走保守长冷却）
+            disabled.insert(
+                current_idx,
+                (std::time::Instant::now(), MODEL_DISABLE_COOLDOWN_SECS),
+            );
             tracing::warn!(
                 "LLM 模型 #{} 连续 idle {} 次，达到阈值 {}，标记为不可用",
                 current_idx,
@@ -1365,10 +1382,14 @@ impl FallbackLlmClient {
         tracing::error!("所有 LLM 模型都已标记为不可用，保持当前模型");
     }
 
-    /// 标记指定模型为不可用（429 circuit breaker 等）
+    /// 标记指定模型为不可用（429 circuit breaker 等），冷却时长按原因区分
     fn disable_model(&self, idx: usize, reason: &str) {
+        let cooldown_secs = cooldown_secs_for_reason(reason);
         let mut disabled = self.disabled_models.lock().expect("lock poisoned");
-        if disabled.insert(idx, std::time::Instant::now()).is_none() {
+        if disabled
+            .insert(idx, (std::time::Instant::now(), cooldown_secs))
+            .is_none()
+        {
             // 同步写入共享 breaker：key = "{provider}/{model}"，
             // 使下层 DirectLlmClient 在 tool_loop 内部 send_chat_exchange 时也能命中。
             let key = format!(
@@ -1376,12 +1397,13 @@ impl FallbackLlmClient {
                 self.clients[idx].provider_name(),
                 self.clients[idx].model_name()
             );
-            self.shared_breaker.disable(key);
+            self.shared_breaker.disable(key, cooldown_secs);
 
             tracing::warn!(
-                "LLM 模型 #{} 标记为不可用 (原因: {})，已禁用模型: {:?}",
+                "LLM 模型 #{} 标记为不可用 (原因: {}，冷却 {}s)，已禁用模型: {:?}",
                 idx,
                 reason,
+                cooldown_secs,
                 disabled.keys().collect::<Vec<_>>()
             );
             drop(disabled);
@@ -1394,7 +1416,7 @@ impl FallbackLlmClient {
         let now = std::time::Instant::now();
         let expired: Vec<usize> = disabled
             .iter()
-            .filter(|&(_, ts)| now.duration_since(*ts).as_secs() >= RATE_LIMIT_BACKOFF_SECS)
+            .filter(|&(_, (ts, cooldown))| now.duration_since(*ts).as_secs() >= *cooldown)
             .map(|(&idx, _)| idx)
             .collect();
 
@@ -1405,9 +1427,8 @@ impl FallbackLlmClient {
 
         if !expired.is_empty() {
             tracing::info!(
-                "429 circuit breaker 恢复: 模型 {:?} 已重新激活 (冷却期 {}s 已过)",
-                expired,
-                RATE_LIMIT_BACKOFF_SECS
+                "429 circuit breaker 恢复: 模型 {:?} 已重新激活（冷却期已过）",
+                expired
             );
         }
     }
@@ -2096,15 +2117,14 @@ mod tests {
         );
 
         // 禁用后：返回剩余秒数
-        breaker.disable("openai_compatible/sensenova-6.7-flash-lite".to_string());
+        breaker.disable(
+            "openai_compatible/sensenova-6.7-flash-lite".to_string(),
+            3600,
+        );
         let remaining = breaker.is_disabled("openai_compatible/sensenova-6.7-flash-lite");
         assert!(remaining.is_some(), "禁用后应返回 Some(remaining)");
         let secs = remaining.unwrap();
-        assert!(
-            secs > 0 && secs <= RATE_LIMIT_BACKOFF_SECS,
-            "剩余秒数应在 (0, {}] 区间",
-            RATE_LIMIT_BACKOFF_SECS
-        );
+        assert!(secs > 0 && secs <= 3600, "剩余秒数应在 (0, 3600] 区间");
 
         // 其他 key 不受影响
         assert!(
@@ -2118,9 +2138,9 @@ mod tests {
     fn test_shared_breaker_overwrite_disable() {
         let breaker = SharedBreaker::new();
         let key = "openai_compatible/x".to_string();
-        breaker.disable(key.clone());
+        breaker.disable(key.clone(), 60);
         // 二次 disable 不应 panic
-        breaker.disable(key);
+        breaker.disable(key, 60);
         assert!(breaker.is_disabled("openai_compatible/x").is_some());
     }
 
@@ -2128,6 +2148,25 @@ mod tests {
     fn test_shared_breaker_default() {
         let breaker = SharedBreaker::default();
         assert!(breaker.is_disabled("any/key").is_none());
+    }
+
+    #[test]
+    fn test_cooldown_secs_for_reason() {
+        // rate_limit：分钟窗口限流 → 短冷却
+        assert_eq!(
+            cooldown_secs_for_reason("rate_limit"),
+            RATE_LIMIT_COOLDOWN_SECS
+        );
+        // 其他原因：维持保守长冷却
+        assert_eq!(
+            cooldown_secs_for_reason("internal_server_error"),
+            MODEL_DISABLE_COOLDOWN_SECS
+        );
+        assert_eq!(
+            cooldown_secs_for_reason("empty_response"),
+            MODEL_DISABLE_COOLDOWN_SECS
+        );
+        assert_eq!(cooldown_secs_for_reason(""), MODEL_DISABLE_COOLDOWN_SECS);
     }
 
     #[test]
