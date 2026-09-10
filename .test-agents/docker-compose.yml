@@ -74,36 +74,6 @@ services:
       - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
       - ../crates/agent/static/panel:/app/static/panel:ro
 
-  agent-5:
-    <<: *agent-common
-    container_name: agent-5-longcat
-    environment:
-      <<: *agent-env-common
-      # virtiofs 将该目录映射为 root 属主，entrypoint chown 会撞上只读 trace.yaml；
-      # 设 TARGET_UID/GID=0 使权限修复步骤跳过（其余 agent 目录映射为 1000 不受影响）
-      CONTAINER_UID: 0
-      CONTAINER_GID: 0
-    ports:
-      - "23345:23340"
-    volumes:
-      - ./agent-5/config:/app/config
-      - ./agent-5/data:/app/data
-      - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
-      - ../crates/agent/static/panel:/app/static/panel:ro
-
-  agent-ollama:
-    <<: *agent-common
-    container_name: agent-ollama
-    environment:
-      <<: *agent-env-common
-    ports:
-      - "23349:23340"
-    volumes:
-      - ./agent-ollama/config:/app/config
-      - ./agent-ollama/data:/app/data
-      - ../crates/agent/config/trace.yaml:/app/config/trace.yaml:ro
-      - ../crates/agent/static/panel:/app/static/panel:ro
-
 networks:
   cyber-jianghu-network:
     external: true

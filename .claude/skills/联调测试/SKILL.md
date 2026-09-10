@@ -9,13 +9,13 @@ description: "联调测试一键执行：部署验证→角色创建→运行监
 
 ## 参数
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `duration` | 24h | 测试总时长 |
-| `interval` | 10min | 监控检查间隔 |
-| `agents` | 全部 | 指定 agent（如 `agent-1,agent-2`） |
-| `skip-build` | false | 跳过 rebuild（复用现有镜像） |
-| `skip-report` | false | 跳过报告生成 |
+| 参数          | 默认值 | 说明                               |
+| ------------- | ------ | ---------------------------------- |
+| `duration`    | 24h    | 测试总时长                         |
+| `interval`    | 10min  | 监控检查间隔                       |
+| `agents`      | 全部   | 指定 agent（如 `agent-1,agent-2`） |
+| `skip-build`  | false  | 跳过 rebuild（复用现有镜像）       |
+| `skip-report` | false  | 跳过报告生成                       |
 
 ## 并行执行（最短提示）
 
@@ -92,6 +92,7 @@ fi
 ```
 
 **仅在 NEED BUILD 时**执行 Phase 1.4 的构建流程，构建完成后：
+
 ```bash
 docker tag agent-agent:latest "agent-agent:${COMMIT}"
 ```
@@ -217,15 +218,15 @@ check_image_freshness agent-agent:latest
 
 ### 0.4 Pre-flight 决策表
 
-| 检测项 | 已就绪 | 未就绪 |
-|--------|--------|--------|
-| 镜像 (Phase 0.1) | 跳过 Phase 1.4 | 执行构建 + tag |
-| Server 镜像陈旧 (Phase 0.6) | - | 强制 Phase 1.3 重建 |
-| Agent 镜像陈旧 (Phase 0.6) | - | 强制 Phase 1.4 重建 |
-| Server (Phase 0.2) | 跳过 Phase 1.3 | 执行启动 |
-| Agent 容器 (Phase 0.2) | 跳过 Phase 1.5-1.6 | 执行清理 + 启动 |
-| API 协议 (Phase 0.5) | 走 Bearer token 路径 | 走裸调路径（兼容老版本） |
-| 角色 (Phase 0.3) | 跳过 Phase 2 全部 | 执行角色创建 |
+| 检测项                      | 已就绪               | 未就绪                   |
+| --------------------------- | -------------------- | ------------------------ |
+| 镜像 (Phase 0.1)            | 跳过 Phase 1.4       | 执行构建 + tag           |
+| Server 镜像陈旧 (Phase 0.6) | -                    | 强制 Phase 1.3 重建      |
+| Agent 镜像陈旧 (Phase 0.6)  | -                    | 强制 Phase 1.4 重建      |
+| Server (Phase 0.2)          | 跳过 Phase 1.3       | 执行启动                 |
+| Agent 容器 (Phase 0.2)      | 跳过 Phase 1.5-1.6   | 执行清理 + 启动          |
+| API 协议 (Phase 0.5)        | 走 Bearer token 路径 | 走裸调路径（兼容老版本） |
+| 角色 (Phase 0.3)            | 跳过 Phase 2 全部    | 执行角色创建             |
 
 **全部就绪 → 直接跳到 Phase 3（监控）或 Phase 4（报告）。**
 
@@ -411,7 +412,7 @@ done
 ### 2.4 记录角色信息表
 
 | Agent | 角色 | 年龄 | 性别 | Agent ID |
-|-------|------|------|------|----------|
+| ----- | ---- | ---- | ---- | -------- |
 
 从 `$TMPDIR/$p/char` 解析填充。
 
@@ -465,8 +466,8 @@ rm -f "$TOKEN_MAP"
 
 记录到监控日志表：
 
-| Agent | Hunger | HP | Sanity | 状态 | 备注 |
-|-------|--------|-----|--------|------|------|
+| Agent | Hunger | HP  | Sanity | 状态 | 备注 |
+| ----- | ------ | --- | ------ | ---- | ---- |
 
 ### 3.2 Token 数据采集（每轮）
 
@@ -602,15 +603,15 @@ docker exec $c curl -s -H "Authorization: Bearer $TOKEN" \
   http://127.0.0.1:23340<path>
 ```
 
-| 用途 | 方法 | Agent 路径（容器内） | Server 路径（宿主机） |
-|------|------|---------------------|----------------------|
-| 健康检查 | GET | `/api/v1/health`（公开，无须 Bearer） | `localhost:23333/health` |
-| 生成角色 | POST | `/api/v1/character/generate` | - |
-| 注册角色 | POST | `/api/v1/character/register` | - |
-| 角色信息 | GET | `/api/v1/character` | - |
-| 世界状态 | GET | `/api/v1/state` | - |
-| 转生 | POST | `/api/v1/character/rebirth` | - |
-| 属性 | GET | `/api/v1/attributes` | - |
+| 用途     | 方法 | Agent 路径（容器内）                  | Server 路径（宿主机）    |
+| -------- | ---- | ------------------------------------- | ------------------------ |
+| 健康检查 | GET  | `/api/v1/health`（公开，无须 Bearer） | `localhost:23333/health` |
+| 生成角色 | POST | `/api/v1/character/generate`          | -                        |
+| 注册角色 | POST | `/api/v1/character/register`          | -                        |
+| 角色信息 | GET  | `/api/v1/character`                   | -                        |
+| 世界状态 | GET  | `/api/v1/state`                       | -                        |
+| 转生     | POST | `/api/v1/character/rebirth`           | -                        |
+| 属性     | GET  | `/api/v1/attributes`                  | -                        |
 
 ---
 
