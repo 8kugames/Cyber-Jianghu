@@ -3,7 +3,7 @@
 #
 # 用途：本地 Mac ARM 编译 linux/amd64 二进制，绕过小内存服务器 cargo OOM。
 # 流程：zigbuild → scp → 远端 patch Dockerfile 用 COPY 替代 cargo →
-#       docker compose build → up -d → health check → 还原 Dockerfile。
+#       docker compose build → up -d → health check → 还原 Dockerfile → 输出 Admin 凭证。
 #
 # 用法：
 #   SERVER=user@host ./scripts/ship-server-binary.sh
@@ -14,6 +14,7 @@
 #   COMPOSE_DIR       远端 docker-compose 目录，默认 $REMOTE_PROJECT/crates/server
 #   HEALTH_TIMEOUT    健康检查超时秒数，默认 60
 #   SKIP_VERIFY       非空则跳过 health 校验
+#   MIN_FREE_MB       远端磁盘可用空间警告阈值 MB，默认 1024；清理缓存后仍低于此值则告警
 
 set -euo pipefail
 
@@ -23,6 +24,7 @@ SERVER="${SERVER:?必须设置 SERVER，例如 admin@47.102.120.116}"
 REMOTE_PROJECT="${REMOTE_PROJECT:-/home/admin/Cyber-Jianghu}"
 COMPOSE_DIR="${COMPOSE_DIR:-$REMOTE_PROJECT/crates/server}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-60}"
+MIN_FREE_MB="${MIN_FREE_MB:-1024}"
 
 command -v cargo-zigbuild >/dev/null || { echo "[错误] 缺 cargo-zigbuild"; exit 1; }
 command -v zig >/dev/null || { echo "[错误] 缺 zig"; exit 1; }
@@ -70,11 +72,24 @@ echo "[上传] scp + 远端 patch + build + up + verify"
 scp -q "$BIN" "$SERVER:~/cyber-jianghu-server"
 sync_dirty_to_server
 ssh -o BatchMode=yes "$SERVER" bash -s -- "$REMOTE_PROJECT" "$COMPOSE_DIR" \
-    "$BIN_HASH" "$HEALTH_TIMEOUT" "${SKIP_VERIFY:-}" <<'REMOTE'
+    "$BIN_HASH" "$HEALTH_TIMEOUT" "${SKIP_VERIFY:-}" "$MIN_FREE_MB" <<'REMOTE'
 set -e
-RP="$1"; CD="$2"; MD5="$3"; TIMEOUT="$4"; SKIP="$5"
+RP="$1"; CD="$2"; MD5="$3"; TIMEOUT="$4"; SKIP="$5"; MINFREE="$6"
 BACKUP="$CD/Dockerfile.bak"
 trap '[ -f "$BACKUP" ] && mv "$BACKUP" "$CD/Dockerfile"' EXIT
+
+# 磁盘水位检查 + 可再生缓存清理（防 VM 磁盘满导致 build 失败）：
+# 只清 dangling images 与 build cache（旧版 server 镜像 up -d 后变 dangling，主体垃圾源），
+# 不碰 named volumes（postgres 数据卷）与在用镜像，均可再生。
+free_mb() { df -Pm / | awk 'NR==2{print $4}'; }
+FREE_BEFORE="$(free_mb)"
+docker image prune -f >/dev/null 2>&1 || true
+docker builder prune -f 2>&1 | tail -n 1 || true
+FREE_AFTER="$(free_mb)"
+echo "[磁盘] 清理前 ${FREE_BEFORE}MB → 清理后可用 ${FREE_AFTER}MB"
+if [ "${FREE_AFTER:-0}" -lt "$MINFREE" ]; then
+    echo "[警告] 磁盘可用 ${FREE_AFTER}MB 低于阈值 ${MINFREE}MB，build 可能失败（可调 MIN_FREE_MB 或手动清理）"
+fi
 
 cp -f "$CD/Dockerfile" "$BACKUP"
 mkdir -p "$RP/.bin"
@@ -111,4 +126,46 @@ done
 [ "$pass" = "1" ] || { echo "[失败] health 未通过"; exit 1; }
 REMOTE
 
+# 读取并展示服务端 Admin 访问凭证（token 文件由 server 启动时写入）
+print_admin_credentials() {
+    local creds read_key write_key host_part
+    host_part="${SERVER##*@}"
+    echo "[凭证] 读取 Admin token (logs/cyber_jianghu_admin.tmp)"
+    # 等待窗口覆盖 SKIP_VERIFY 场景：容器启动后才会刷新 token 文件
+    if ! creds="$(ssh -o BatchMode=yes "$SERVER" bash -s -- "$COMPOSE_DIR" <<'TOKENS'
+set -e
+F="$1/logs/cyber_jianghu_admin.tmp"
+for i in $(seq 1 15); do
+    [ -f "$F" ] && grep -q 'Read Token' "$F" 2>/dev/null && break
+    sleep 1
+done
+if [ ! -f "$F" ] || ! grep -q 'Read Token' "$F" 2>/dev/null; then
+    echo "token 文件未就绪: $F (服务完全启动后重跑或上服务器查看)" >&2
+    exit 1
+fi
+awk '/Read Token/{getline; gsub(/^[ \t]+/,""); print "READ_TOKEN=" $0; exit}' "$F"
+awk '/Write Token/{getline; gsub(/^[ \t]+/,""); print "WRITE_TOKEN=" $0; exit}' "$F"
+TOKENS
+)"; then
+        echo "[警告] token 读取失败,不影响部署结果;可稍后查看服务器 $COMPOSE_DIR/logs/cyber_jianghu_admin.tmp"
+        return 0
+    fi
+    read_key="$(printf '%s\n' "$creds" | sed -n 's/^READ_TOKEN=//p' | head -1)"
+    write_key="$(printf '%s\n' "$creds" | sed -n 's/^WRITE_TOKEN=//p' | head -1)"
+
+    echo
+    echo "============================================================"
+    echo " Admin 访问凭证"
+    echo "============================================================"
+    echo " 只读 Key (read) : ${read_key:-<解析失败>}"
+    echo " 读写 Key (write): ${write_key:-<解析失败>}"
+    if [ -n "$read_key" ]; then
+        echo
+        echo " 只读直达链接(#token= 不进服务器日志):"
+        echo " http://${host_part}:23333/admin/index.html#token=${read_key}"
+    fi
+    echo "============================================================"
+}
+
 echo "[完成] 部署成功 (md5=${BIN_HASH:-unknown})"
+print_admin_credentials

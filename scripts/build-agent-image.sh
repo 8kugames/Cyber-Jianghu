@@ -34,6 +34,15 @@ case "${1:-}" in
     *) echo "usage: $0 [--fresh]"; exit 1 ;;
 esac
 
+# -- 0. reclaim disposable docker garbage (dangling images + build cache)
+# 只清可再生缓存：每次 assemble 都会产生新 dangling 层，旧层无复用价值。
+# 不碰 named volumes (cyj-agent-cargo/cyj-agent-target) 与有 tag 镜像，
+# 增量 cargo 缓存不受影响（首次 10-20min 重建的成本只在 --fresh 时支付）。
+echo "[cache] prune dangling images + build cache"
+docker image prune -f 2>/dev/null | tail -n 1 || true
+docker builder prune -f 2>/dev/null | tail -n 1 || true
+docker system df 2>/dev/null | head -n 5 || true
+
 if [ -n "$(git -C "$PROJECT_ROOT" status --porcelain 2>/dev/null)" ]; then
     echo "[warn] dirty workspace, these files go into the image:"
     git -C "$PROJECT_ROOT" status --short
