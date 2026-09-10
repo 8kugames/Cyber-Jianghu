@@ -73,6 +73,10 @@ fn build_in_placeholders(count: usize) -> String {
         .join(",")
 }
 
+/// IN 查询单批 tick 上限（SQLite 默认变量数上限 999 的安全余量），
+/// 超过时由 get_by_ticks / get_immediate_by_ticks 内部自动分批。
+const TICK_BATCH_SIZE: usize = 100;
+
 /// 三魂循环记录器（SQLite 持久化）
 ///
 /// 按 agent_id 隔离，使用独立的 SQLite 文件。
@@ -585,9 +589,12 @@ impl SoulCycleRecorder {
         Ok((tick_ids, total))
     }
 
-    /// 批量获取多个 tick 的三魂循环记录（单次 SQL，消除 N+1）
+    /// 批量获取多个 tick 的三魂循环记录（分批查询消除 N+1 与 SQLite IN 变量数限制）
+    ///
+    /// tick_ids 超过单批上限时自动分批查询并合并，结果按 tick_id 降序、attempt 升序排列
+    ///（与单批 SQL 的 ORDER BY tick_id DESC, attempt ASC 语义一致）。
     pub async fn get_by_ticks(&self, tick_ids: &[i64]) -> anyhow::Result<Vec<SoulCycleRecord>> {
-        if tick_ids.is_empty() || tick_ids.len() > 100 {
+        if tick_ids.is_empty() {
             return Ok(vec![]);
         }
         let conn = self
@@ -595,36 +602,44 @@ impl SoulCycleRecorder {
             .lock()
             .map_err(|e| anyhow::anyhow!("soul_cycle_record lock poisoned: {e}"))?;
 
-        let sql = format!(
-            "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
-                    tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
-                    tianhun_layer3_result, tianhun_reason,
-                    final_intent_id, final_action_type, final_action_data, final_pipeline_json,
-                    route_type, world_time, earth_tool_calls, model_id,
-                    tianhun_layers, server_execution_results, created_at
-             FROM soul_cycle_record WHERE tick_id IN ({}) ORDER BY tick_id DESC, attempt ASC",
-            build_in_placeholders(tick_ids.len())
-        );
+        let mut all: Vec<SoulCycleRecord> = Vec::new();
+        for batch in tick_ids.chunks(TICK_BATCH_SIZE) {
+            let sql = format!(
+                "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
+                        tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
+                        tianhun_layer3_result, tianhun_reason,
+                        final_intent_id, final_action_type, final_action_data, final_pipeline_json,
+                        route_type, world_time, earth_tool_calls, model_id,
+                        tianhun_layers, server_execution_results, created_at
+                 FROM soul_cycle_record WHERE tick_id IN ({}) ORDER BY tick_id DESC, attempt ASC",
+                build_in_placeholders(batch.len())
+            );
 
-        let mut stmt = conn.prepare(&sql).context("get_by_ticks prepare 失败")?;
+            let mut stmt = conn.prepare(&sql).context("get_by_ticks prepare 失败")?;
 
-        let params: Vec<&dyn rusqlite::ToSql> = tick_ids
-            .iter()
-            .map(|id| id as &dyn rusqlite::ToSql)
-            .collect();
-        let rows = stmt
-            .query_map(params.as_slice(), |row| Ok(Self::row_to_record(row)))
-            .context("get_by_ticks query_map 失败")?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .context("get_by_ticks collect rows 失败")
+            let params: Vec<&dyn rusqlite::ToSql> =
+                batch.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+            let rows = stmt
+                .query_map(params.as_slice(), |row| Ok(Self::row_to_record(row)))
+                .context("get_by_ticks query_map 失败")?;
+            all.extend(
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+                    .context("get_by_ticks collect rows 失败")?,
+            );
+        }
+
+        all.sort_by(|a, b| b.tick_id.cmp(&a.tick_id).then(a.attempt.cmp(&b.attempt)));
+        Ok(all)
     }
 
-    /// 批量获取多个 tick 的即时意图记录
+    /// 批量获取多个 tick 的即时意图记录（分批查询，超过单批上限自动分批并合并）
+    ///
+    /// 结果按 id 升序排列（与单批 SQL 的 ORDER BY id ASC 语义一致）。
     pub async fn get_immediate_by_ticks(
         &self,
         tick_ids: &[i64],
     ) -> anyhow::Result<Vec<ImmediateIntentRecord>> {
-        if tick_ids.is_empty() || tick_ids.len() > 100 {
+        if tick_ids.is_empty() {
             return Ok(vec![]);
         }
         let conn = self
@@ -632,29 +647,34 @@ impl SoulCycleRecorder {
             .lock()
             .map_err(|e| anyhow::anyhow!("soul_cycle_record lock poisoned: {e}"))?;
 
-        let sql = format!(
-            "SELECT id, tick_id, intent_id, source_narrative, route_type,
-                    action_type, action_data, speech_content, send_status, send_error, created_at
-             FROM immediate_intent_record WHERE tick_id IN ({}) ORDER BY id ASC",
-            build_in_placeholders(tick_ids.len())
-        );
+        let mut all: Vec<ImmediateIntentRecord> = Vec::new();
+        for batch in tick_ids.chunks(TICK_BATCH_SIZE) {
+            let sql = format!(
+                "SELECT id, tick_id, intent_id, source_narrative, route_type,
+                        action_type, action_data, speech_content, send_status, send_error, created_at
+                 FROM immediate_intent_record WHERE tick_id IN ({}) ORDER BY id ASC",
+                build_in_placeholders(batch.len())
+            );
 
-        let mut stmt = conn
-            .prepare(&sql)
-            .context("get_immediate_by_ticks prepare 失败")?;
+            let mut stmt = conn
+                .prepare(&sql)
+                .context("get_immediate_by_ticks prepare 失败")?;
 
-        // 绑定参数
-        let params: Vec<&dyn rusqlite::ToSql> = tick_ids
-            .iter()
-            .map(|id| id as &dyn rusqlite::ToSql)
-            .collect();
-        let rows = stmt
-            .query_map(params.as_slice(), |row| {
-                Ok(Self::row_to_immediate_record(row))
-            })
-            .context("get_immediate_by_ticks query_map 失败")?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .context("get_immediate_by_ticks collect rows 失败")
+            let params: Vec<&dyn rusqlite::ToSql> =
+                batch.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+            let rows = stmt
+                .query_map(params.as_slice(), |row| {
+                    Ok(Self::row_to_immediate_record(row))
+                })
+                .context("get_immediate_by_ticks query_map 失败")?;
+            all.extend(
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+                    .context("get_immediate_by_ticks collect rows 失败")?,
+            );
+        }
+
+        all.sort_by_key(|r| r.id);
+        Ok(all)
     }
 
     /// 获取即时意图记录
@@ -1021,6 +1041,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_get_by_ticks_batches_over_batch_size() {
+        let (_dir, recorder) = make_recorder();
+        // 250 个 tick（跨 3 批）：超批量不得静默返空（传记经历日志失效根因回归）
+        for t in 1..=250i64 {
+            recorder
+                .record_renhun(t, 0, &format!("n{t}"), "...", "test-model")
+                .await;
+        }
+
+        let tick_ids: Vec<i64> = (1..=250).collect();
+        let records = recorder
+            .get_by_ticks(&tick_ids)
+            .await
+            .expect("get_by_ticks over batch size in test");
+        assert_eq!(records.len(), 250);
+        // 合并后保持 tick_id 降序
+        assert_eq!(records[0].tick_id, 250);
+        assert_eq!(records[249].tick_id, 1);
+    }
+
+    #[tokio::test]
     async fn test_get_immediate_by_ticks_batch() {
         let (_dir, recorder) = make_recorder();
         recorder
@@ -1071,6 +1112,35 @@ mod tests {
         assert_eq!(records[0].tick_id, 1);
         assert_eq!(records[1].tick_id, 3);
         assert_eq!(records[2].tick_id, 3);
+    }
+
+    #[tokio::test]
+    async fn test_get_immediate_by_ticks_batches_over_batch_size() {
+        let (_dir, recorder) = make_recorder();
+        // 250 个 tick（跨 3 批）：超批量不得静默返空，合并后按 id 升序
+        for t in 1..=250i64 {
+            recorder
+                .record_immediate(
+                    t,
+                    &format!("id{t}"),
+                    None,
+                    "pure",
+                    "说话",
+                    None,
+                    Some("hi"),
+                    "sent",
+                    None,
+                )
+                .await;
+        }
+
+        let tick_ids: Vec<i64> = (1..=250).collect();
+        let records = recorder
+            .get_immediate_by_ticks(&tick_ids)
+            .await
+            .expect("get_immediate_by_ticks over batch size in test");
+        assert_eq!(records.len(), 250);
+        assert!(records.windows(2).all(|w| w[0].id <= w[1].id));
     }
 
     // ========================================================================

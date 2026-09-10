@@ -244,24 +244,8 @@ async function mountBiography(container, ctx) {
             container.innerHTML = `
                 <div class="empty-state">
                     <p class="text-muted">暂无传记</p>
-                    <button class="btn btn-primary" id="gen-bio-btn" style="margin-top:12px">生成传记</button>
+                    <p class="text-muted" style="margin-top:8px;font-size:12px">传记将在角色死亡或归隐时自动生成</p>
                 </div>`;
-            document.getElementById('gen-bio-btn')?.addEventListener('click', async () => {
-                const btn = document.getElementById('gen-bio-btn');
-                btn.disabled = true;
-                btn.textContent = '生成中...';
-                try {
-                    const result = await post(`${API.BIOGRAPHY}${param}`);
-                    if (result.biography) {
-                        mountBiography(container, ctx);
-                        showSuccess('传记生成成功');
-                    }
-                } catch (e) {
-                    showError('生成失败: ' + e.message);
-                    btn.disabled = false;
-                    btn.textContent = '生成传记';
-                }
-            });
             return;
         }
 
