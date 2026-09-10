@@ -3,7 +3,7 @@
 # pre-commit: 版本号控制
 #   · 暂存区含 crates/<crate>/ 的 .rs/.toml/.yaml 变更时, 该 crate 版本 patch +1
 #   · 同步更新依赖方 Cargo.toml 中的 path 依赖版本引用
-#   · 同步刷新 Cargo.lock (cargo update -w) 并随本次 commit 提交
+#   · 同步刷新 Cargo.lock (cargo update -w)，按 untrack 决策(f0834eb7)仅本地维护，不入库
 #   · 被修改的 Cargo.toml 自动 git add 并入本次 commit
 #   · 无相关变更时直接放行
 # 依赖: perl (跨平台行内替换, 规避 BSD/GNU sed -i 差异)
@@ -133,10 +133,9 @@ for crate in "${CRATES[@]}"; do
     update_dependencies "$crate" "$new_version"
 done
 
-# 版本文件自动并入本次 commit (含 Cargo.lock 同步)
+# 版本文件自动并入本次 commit (Cargo.lock 不同步：已 untrack 且被 .gitignore 忽略，仅本地刷新)
 if [ ${#MODIFIED_FILES[@]} -gt 0 ]; then
     cargo update -w
-    MODIFIED_FILES+=("Cargo.lock")
     git add "${MODIFIED_FILES[@]}"
     echo "[pre-commit] 版本文件已并入本次 commit:"
     for f in "${MODIFIED_FILES[@]}"; do
