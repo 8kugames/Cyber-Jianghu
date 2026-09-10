@@ -377,7 +377,6 @@ data:
                     vendors: Vec::new(),
                     chronicle: None,
                     lifespan: None,
-                    lesson: None,
                     skill_acquisition: std::collections::HashMap::new(),
                     recipe_learning: Default::default(),
                     dialogue_context: None,

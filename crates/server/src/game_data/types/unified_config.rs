@@ -123,10 +123,6 @@ pub struct GameRulesData {
     #[serde(default)]
     pub lifespan: Option<cyber_jianghu_protocol::LifespanRules>,
 
-    /// 跨 Agent 传承教训配置
-    #[serde(default)]
-    pub lesson: Option<LessonConfig>,
-
     /// 技能习得阈值配置（数据驱动）
     /// key: skill_id, value: 触发条件（action categories + 最小成功次数）
     #[serde(default)]
@@ -139,53 +135,6 @@ pub struct GameRulesData {
     /// 对话上下文配置
     #[serde(default)]
     pub dialogue_context: Option<cyber_jianghu_protocol::DialogueContextConfig>,
-}
-
-/// 死因到建议文本的映射（数据驱动，来自 game_rules.yaml）
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct CauseAdvice {
-    /// 死因中文名
-    pub label: String,
-    /// 建议文本
-    pub advice: String,
-}
-
-/// 教训提取配置
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct LessonConfig {
-    /// 同一死因累计多少次死亡后生成教训
-    #[serde(default = "default_lesson_threshold")]
-    pub threshold: u32,
-
-    /// WorldState 下发最多几条教训
-    #[serde(default = "default_lesson_max_broadcast")]
-    pub max_broadcast: u32,
-
-    /// 死因 → 建议 映射（数据驱动，替代硬编码 cause_to_advice）
-    #[serde(default)]
-    pub cause_advice_map: std::collections::HashMap<String, CauseAdvice>,
-}
-
-impl LessonConfig {
-    pub const DEFAULT_THRESHOLD: u32 = 3;
-    pub const DEFAULT_MAX_BROADCAST: u32 = 5;
-}
-
-fn default_lesson_threshold() -> u32 {
-    LessonConfig::DEFAULT_THRESHOLD
-}
-fn default_lesson_max_broadcast() -> u32 {
-    LessonConfig::DEFAULT_MAX_BROADCAST
-}
-
-impl Default for LessonConfig {
-    fn default() -> Self {
-        Self {
-            threshold: default_lesson_threshold(),
-            max_broadcast: default_lesson_max_broadcast(),
-            cause_advice_map: std::collections::HashMap::new(),
-        }
-    }
 }
 
 /// Vendor 自动补货配置

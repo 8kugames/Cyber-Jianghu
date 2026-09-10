@@ -19,7 +19,6 @@
 mod broadcaster;
 pub mod decay;
 pub mod event_manager;
-mod lessons;
 mod persistence;
 mod processor;
 mod realtime;
@@ -30,7 +29,6 @@ pub use broadcaster::{
     build_initial_world_state, build_reactive_world_state, build_recipe_details, send_to_agent,
 };
 pub use event_manager::SharedEventManager;
-pub use lessons::{fetch_lessons_for_broadcast, record_death_lesson};
 pub use processor::StateProcessor;
 pub use realtime::{IntentWorker, WorkerMessage, create_worker_channel};
 pub use scheduler::TickScheduler;

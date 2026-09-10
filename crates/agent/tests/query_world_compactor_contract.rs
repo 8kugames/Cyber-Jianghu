@@ -83,7 +83,6 @@ fn make_world_with_n_entities(n: usize) -> WorldState {
             .collect(),
         private_dialogue_log: vec![],
         last_execution_summary: None,
-        lessons_learned: vec![],
     }
 }
 
@@ -133,7 +132,6 @@ fn make_world_with_n_inventory(n: usize) -> WorldState {
         events_log: vec![],
         private_dialogue_log: vec![],
         last_execution_summary: None,
-        lessons_learned: vec![],
     }
 }
 

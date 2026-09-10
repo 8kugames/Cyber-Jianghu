@@ -139,3 +139,83 @@ pub enum StateChange {
         detected: bool,
     },
 }
+
+impl StateChange {
+    /// 属性族变更的目标 Agent（AttributeMutator 按 agent_id 在状态切片中定位）。
+    /// 物品/位置/技能等变更不经此路径（DB 直写或行动者自身），返回 None。
+    /// 跨 Agent 效果（如攻击目标）由 processor 据此把目标状态纳入切片。
+    pub fn affected_agent(&self) -> Option<Uuid> {
+        match self {
+            Self::AttributeChanged { agent_id, .. }
+            | Self::HpChanged { agent_id, .. }
+            | Self::StaminaChanged { agent_id, .. }
+            | Self::AttributeMaxChanged { agent_id, .. }
+            | Self::AgentDied { agent_id, .. } => Some(*agent_id),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 路由正确性直接决定跨 Agent 效果能否命中目标（历史 bug：HpChanged
+    /// 找不到目标导致攻击整体回滚），属性族四个变体 + AgentDied 必须路由
+    #[test]
+    fn affected_agent_routes_attribute_family() {
+        let id = Uuid::new_v4();
+        assert_eq!(
+            StateChange::HpChanged {
+                agent_id: id,
+                delta: -5
+            }
+            .affected_agent(),
+            Some(id)
+        );
+        assert_eq!(
+            StateChange::AttributeChanged {
+                agent_id: id,
+                attribute: "sanity".to_string(),
+                delta: AttributeValue::Delta { value: -1 },
+            }
+            .affected_agent(),
+            Some(id)
+        );
+        assert_eq!(
+            StateChange::StaminaChanged {
+                agent_id: id,
+                delta: -3
+            }
+            .affected_agent(),
+            Some(id)
+        );
+        assert_eq!(
+            StateChange::AttributeMaxChanged {
+                agent_id: id,
+                attribute: "hp".to_string(),
+                delta: 10
+            }
+            .affected_agent(),
+            Some(id)
+        );
+        assert_eq!(
+            StateChange::AgentDied {
+                agent_id: id,
+                cause: "combat".to_string()
+            }
+            .affected_agent(),
+            Some(id)
+        );
+        // 物品/位置/技能族不经此路径
+        assert_eq!(
+            StateChange::LocationChanged {
+                agent_id: id,
+                old_location: "a".to_string(),
+                new_location: "b".to_string(),
+            }
+            .affected_agent(),
+            None
+        );
+    }
+}

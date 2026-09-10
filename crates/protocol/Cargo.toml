@@ -1,6 +1,6 @@
 [package]
 name = "cyber-jianghu-protocol"
-version = "0.1.91"
+version = "0.1.92"
 edition = "2024"
 authors = ["Cyber-Jianghu Community"]
 license = "MIT OR Apache-2.0"
@@ -16,11 +16,11 @@ anyhow = { workspace = true }
 rand = { workspace = true }
 
 # 可选的 sqlx 支持 (用于服务端)
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "macros"], optional = true }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "macros"], optional = true }
 
 [features]
 default = []
 sqlx-support = ["sqlx"]
 
 [dev-dependencies]
-serde_json = "1.0"
+serde_json = "1.0.151"

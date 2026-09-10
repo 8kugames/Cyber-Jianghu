@@ -14,7 +14,7 @@
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::models::{AgentState, WorldEventType};
+use crate::models::{AgentState, WorldEvent, WorldEventType};
 
 use crate::game_data::registry_or_error;
 use cyber_jianghu_protocol::DeathInfo;
@@ -72,6 +72,39 @@ impl DeathNotification {
     }
 }
 
+/// 目击者筛选：同节点 + 存活 + 排除死者。
+///
+/// 与 broadcast_speak_to_location / send_reactive_world_state 的筛选条件对称；
+/// is_alive 是对 DashMap 中可能残留的死亡状态的防御性过滤。
+pub fn select_witnesses(states: &[AgentState], location: &str, deceased_id: Uuid) -> Vec<Uuid> {
+    states
+        .iter()
+        .filter(|s| s.node_id == location && s.is_alive && s.agent_id != deceased_id)
+        .map(|s| s.agent_id)
+        .collect()
+}
+
+/// 构建目击者死亡事件（具名）。
+///
+/// 涌现行为（哀悼/记仇/避讳）依赖目击者记住"谁"死了，metadata.agent_id
+/// 同时是 Agent 端 find_self_death 区分"目击"与"自身死亡"的唯一依据。
+pub fn build_witness_death_event(
+    notif: &DeathNotification,
+    deceased_name: Option<&str>,
+) -> WorldEvent {
+    WorldEvent {
+        event_type: WorldEventType::DeathNotification,
+        tick_id: notif.tick_id,
+        description: notif.witness_description(deceased_name),
+        metadata: serde_json::json!({
+            "agent_id": notif.agent_id.to_string(),
+            "agent_name": deceased_name,
+            "cause": notif.cause,
+            "location": notif.location,
+        }),
+    }
+}
+
 #[cfg(test)]
 mod death_notification_tests {
     use super::*;
@@ -84,6 +117,105 @@ mod death_notification_tests {
             "龙门大堂".to_string(),
             42,
         )
+    }
+
+    // ---- select_witnesses ----
+
+    fn make_agent(id: Uuid, node: &str, alive: bool) -> AgentState {
+        crate::game_data::init_test_registry();
+        let mut s = AgentState::new(id, 1);
+        s.node_id = node.to_string();
+        s.is_alive = alive;
+        s
+    }
+
+    #[test]
+    fn select_witnesses_keeps_same_node_alive_and_excludes_deceased() {
+        let deceased = Uuid::new_v4();
+        let witness_a = Uuid::new_v4();
+        let witness_b = Uuid::new_v4();
+        let other_node = Uuid::new_v4();
+        let dead_linger = Uuid::new_v4();
+        let states = vec![
+            make_agent(deceased, "龙门大堂", true),
+            make_agent(witness_a, "龙门大堂", true),
+            make_agent(witness_b, "龙门大堂", true),
+            make_agent(other_node, "后山小径", true),
+            make_agent(dead_linger, "龙门大堂", false),
+        ];
+
+        let witnesses = select_witnesses(&states, "龙门大堂", deceased);
+
+        assert_eq!(witnesses.len(), 2, "只有同节点存活者（排除死者与死亡残留）");
+        assert!(witnesses.contains(&witness_a));
+        assert!(witnesses.contains(&witness_b));
+        assert!(!witnesses.contains(&deceased), "死者自身不得成为目击者");
+        assert!(
+            !witnesses.contains(&dead_linger),
+            "死亡状态残留者不得成为目击者"
+        );
+    }
+
+    #[test]
+    fn select_witnesses_excludes_deceased_even_with_stale_alive_flag() {
+        // 防御性场景：死者已被移出 DashMap 的时序被破坏，快照里仍是 alive=true
+        let deceased = Uuid::new_v4();
+        let states = vec![make_agent(deceased, "龙门大堂", true)];
+
+        let witnesses = select_witnesses(&states, "龙门大堂", deceased);
+
+        assert!(witnesses.is_empty(), "显式排除死者优先于 is_alive 标记");
+    }
+
+    #[test]
+    fn select_witnesses_empty_when_no_states() {
+        assert!(select_witnesses(&[], "龙门大堂", Uuid::new_v4()).is_empty());
+    }
+
+    // ---- build_witness_death_event ----
+
+    #[test]
+    fn witness_event_metadata_is_complete() {
+        let deceased = Uuid::new_v4();
+        let notif = DeathNotification::new(
+            deceased,
+            "combat".to_string(),
+            "在战斗中被杀害".to_string(),
+            "龙门大堂".to_string(),
+            42,
+        );
+
+        let event = build_witness_death_event(&notif, Some("李四"));
+
+        assert_eq!(event.event_type, WorldEventType::DeathNotification);
+        assert_eq!(event.tick_id, 42);
+        // agent_id 是 Agent 端 find_self_death 区分目击/自死的唯一依据
+        assert_eq!(
+            event.metadata.get("agent_id").and_then(|v| v.as_str()),
+            Some(deceased.to_string().as_str())
+        );
+        assert_eq!(
+            event.metadata.get("agent_name").and_then(|v| v.as_str()),
+            Some("李四")
+        );
+        assert_eq!(
+            event.metadata.get("cause").and_then(|v| v.as_str()),
+            Some("combat")
+        );
+        assert_eq!(
+            event.metadata.get("location").and_then(|v| v.as_str()),
+            Some("龙门大堂")
+        );
+        assert!(event.description.contains("李四"));
+    }
+
+    #[test]
+    fn witness_event_anonymous_name_serializes_as_null() {
+        let notif = make_notification();
+        let event = build_witness_death_event(&notif, None);
+
+        assert!(event.description.starts_with("有人"));
+        assert!(event.metadata.get("agent_name").unwrap().is_null());
     }
 
     #[test]

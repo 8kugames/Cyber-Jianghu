@@ -55,7 +55,6 @@ pub(super) fn empty_world_state() -> cyber_jianghu_protocol::WorldState {
         events_log: vec![],
         private_dialogue_log: vec![],
         last_execution_summary: None,
-        lessons_learned: vec![],
     }
 }
 

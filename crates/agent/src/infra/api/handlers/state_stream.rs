@@ -275,7 +275,6 @@ mod tests {
             }],
             private_dialogue_log: vec![],
             last_execution_summary: None,
-            lessons_learned: vec![],
         }
     }
 

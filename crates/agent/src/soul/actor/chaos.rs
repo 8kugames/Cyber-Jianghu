@@ -428,7 +428,6 @@ mod tests {
             events_log: vec![],
             private_dialogue_log: vec![],
             last_execution_summary: None,
-            lessons_learned: vec![],
             world_time: WorldTime {
                 year: 1,
                 month: 1,

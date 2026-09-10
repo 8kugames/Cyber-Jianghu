@@ -148,12 +148,12 @@ data:
       hp:
         name: hp
         display_name: 生命值
-        description: "Agent的生命值，受根骨影响，降为0时死亡"
+        description: "Agent的生命值，受根骨影响，年迈后上限逐年衰退，降为0时死亡"
         type: status
-        formula: "100 + constitution * 2"
+        formula: "100 + constitution * 2 - max(0, age - aging_start_age) * 2"
         default_value: 100
         min_value: 0
-        max_value_formula: "100 + constitution * 2"
+        max_value_formula: "100 + constitution * 2 - max(0, age - aging_start_age) * 2"
         decay_per_tick: 0
         death_condition:
           operator: equals
@@ -167,12 +167,12 @@ data:
       stamina:
         name: stamina
         display_name: 体力
-        description: "Agent的体力值，用于执行动作，受根骨影响"
+        description: "Agent的体力值，用于执行动作，受根骨影响，年迈后上限逐年衰退"
         type: status
-        formula: "100 + constitution * 1"
+        formula: "100 + constitution * 1 - max(0, age - aging_start_age) * 2"
         default_value: 100
         min_value: 0
-        max_value_formula: "100 + constitution * 1"
+        max_value_formula: "100 + constitution * 1 - max(0, age - aging_start_age) * 2"
         decay_per_tick: 0
         recovery_formula: "5 + constitution * 0.1"
         primary_attribute_deps:
