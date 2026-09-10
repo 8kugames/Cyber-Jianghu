@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::db::DbPool;
 use crate::game_data::GameDataCache;
@@ -29,7 +29,7 @@ use crate::state::AgentStateCache;
 use crate::websocket::{AgentToDeviceMap, ConnectionManager};
 
 use super::WorkerMessage;
-use super::broadcaster::{Broadcaster, send_to_agent};
+use super::broadcaster::Broadcaster;
 use super::event_manager::SharedEventManager;
 
 use crate::game_data::loaders::load_actions;
@@ -911,7 +911,6 @@ impl TickScheduler {
                     ticks_per_game_day,
                     game_day
                 );
-                self.broadcast_daily_summaries(game_day).await;
                 // 生存 Reward 每日结算（旁路，失败只 error 不阻断 tick）
                 // 数据源：agent_state_cache（DashMap，与 broadcast 同源，消除时序竞态）
                 if let Err(e) = crate::reward::settle_daily(
@@ -1020,65 +1019,6 @@ impl TickScheduler {
 
         info!("Tick {} 广播完成: {}个Agent", tick_id, agent_states.len(),);
         Ok(())
-    }
-
-    /// 游戏日边界：向所有在线 Agent 推送上一游戏日的动作统计
-    ///
-    /// 在 game_day 结束时（tick_id % ticks_per_day_real_secs == 0）调用，
-    /// 从 agent_action_logs 聚合数据，通过 WebSocket 发送给各 Agent。
-    /// 注意：本方法仅推送数据，不写入 agent_daily_summaries 表。
-    /// agent_daily_summaries 的叙事摘要由 SessionTriageEngine 在游戏日切换时生成。
-    async fn broadcast_daily_summaries(&self, game_day: i64) {
-        use crate::db::{get_agent_daily_action_stats, get_all_alive_agents_latest_states};
-
-        let alive_agents = match get_all_alive_agents_latest_states(&self.db_pool).await {
-            Ok(agents) => agents,
-            Err(e) => {
-                error!("游戏日 {} 每日摘要：查询存活 Agent 失败: {}", game_day, e);
-                return;
-            }
-        };
-
-        for agent_state in alive_agents {
-            let stats =
-                match get_agent_daily_action_stats(&self.db_pool, agent_state.agent_id, game_day)
-                    .await
-                {
-                    Ok(Some(stats)) => stats,
-                    Ok(None) => continue,
-                    Err(e) => {
-                        warn!(
-                            "游戏日 {} Agent {} 动作统计查询失败: {}",
-                            game_day, agent_state.agent_id, e
-                        );
-                        continue;
-                    }
-                };
-
-            // 推送 DailySummaryData 到在线 Agent（供 Agent 侧记忆系统使用）
-            let msg = ServerMessage::DailySummaryData {
-                game_day,
-                action_counts: stats.action_counts.clone(),
-                location_history: stats.location_history.clone(),
-                success_count: stats.success_count,
-                failure_count: stats.failure_count,
-                total_actions: stats.total_actions,
-            };
-
-            if let Err(e) = send_to_agent(
-                agent_state.agent_id,
-                &msg,
-                &self.connection_manager,
-                &self.agent_to_device_map,
-            )
-            .await
-            {
-                debug!(
-                    "游戏日 {} 每日摘要推送 Agent {} 失败（可能已离线）: {}",
-                    game_day, agent_state.agent_id, e
-                );
-            }
-        }
     }
 
     /// 根据真实时间计算 tick ID（秒级秒数）

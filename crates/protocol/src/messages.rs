@@ -12,8 +12,6 @@
 //! - [`DialogueMessage`] - Agent 间直接对话 (请求、接受、内容、结束)
 //! - [`DialogueSession`] - 服务端维护的对话会话状态
 
-use std::collections::HashMap;
-
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -270,26 +268,6 @@ pub enum ServerMessage {
         /// Server 端映射后的治理分类码
         #[serde(skip_serializing_if = "Option::is_none")]
         governance_code: Option<GovernanceCode>,
-    },
-
-    /// 每日动作日志汇总（server → agent）
-    ///
-    /// 游戏日结束时 Server 主动推送给所有在线 Agent，
-    /// 内容聚合自 agent_action_logs，包含该 Agent 全日的动作统计。
-    /// Agent 收到后存入 episodic memory，供决策上下文使用。
-    DailySummaryData {
-        /// 所属游戏日
-        game_day: i64,
-        /// 动作类型统计（action_type → count）
-        action_counts: HashMap<String, i32>,
-        /// 地点变化历史
-        location_history: Vec<String>,
-        /// 成功动作数
-        success_count: i32,
-        /// 失败动作数
-        failure_count: i32,
-        /// 总动作数
-        total_actions: i32,
     },
 }
 

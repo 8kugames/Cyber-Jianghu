@@ -338,7 +338,7 @@ use super::builder::AgentBuilder;
 
 ## Protocol Types
 
-The `crates/protocol` crate also exports `PROTOCOL_VERSION`: an **independent semver** string (currently `1.0.0`) decoupled from the crate version, describing the Server/Agent/Client wire contract. Bump rules: incompatible wire change -> major; additive optional field/endpoint -> minor; no-contract-impact fix -> patch. Contract JSON Schema fragments for external consumers live in `docs/contracts/` (`world_state` / `intent` / `version` / `state_stream`).
+The `crates/protocol` crate also exports `PROTOCOL_VERSION`: an **independent semver** string (currently `3.0.0`) decoupled from the crate version, describing the Server/Agent/Client wire contract. Bump rules: incompatible wire change -> major; additive optional field/endpoint -> minor; no-contract-impact fix -> patch. Contract JSON Schema fragments for external consumers live in `docs/contracts/` (`world_state` / `intent` / `version` / `state_stream`).
 
 The `crates/protocol` crate defines the wire types shared between Server, Agent, and Dashboard/Client. Key enums and contract structs:
 

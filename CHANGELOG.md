@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- **动作统计泄露 Agent 主观记忆**（BREAKING，agent+server+protocol）：移除 `ServerMessage::DailySummaryData` 推送链路（scheduler 广播 → callbacks 写入 episodic）。客观动作统计（计数/成败/足迹）进入主观记忆后以 0.8 重要性霸榜日记取材 top-K，导致日记复读与 OOC 污染（"今日动作统计仅两次"式叙述），并回流决策上下文与 SFT 导出。PROTOCOL_VERSION 2.0.0 → 3.0.0。附带：Agent 启动时幂等清理遗留 `daily_action_stats` 记忆；日记取材排除 `daily_summary`/`daily_action_stats` 元条目，切断"改写昨日日记"复读环。
+
 ## [0.1.297] - 2026-09-10
 
 ### Major Features

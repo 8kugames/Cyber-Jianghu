@@ -5,8 +5,6 @@
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
-use crate::component::memory::backend::MemoryBackend;
-
 impl super::super::Agent {
     /// 设置客户端级回调（game_rules/skill/prompt_template/dialogue/world_building_rules）
     pub(super) async fn setup_client_callbacks(&mut self) {
@@ -162,9 +160,7 @@ impl super::super::Agent {
         let api_state = self.http_api_state.clone();
         let immediate_handler = self.immediate_handler.clone();
         let error_feedback = self.server_error_feedback.clone();
-        let memory_manager = self.memory_manager.clone();
         let dialogue_manager = self.dialogue_manager.clone();
-        let game_rules = self.config.game_rules.clone();
         let current_tick = self.current_tick.clone();
         let callback: Arc<dyn Fn(cyber_jianghu_protocol::ServerMessage) + Send + Sync> =
             Arc::new(move |msg: cyber_jianghu_protocol::ServerMessage| {
@@ -274,69 +270,6 @@ impl super::super::Agent {
                             }
                             DialogueMessage::End { session_id, .. } => {
                                 guard.end_session(&session_id);
-                            }
-                        }
-                    });
-                }
-                if let cyber_jianghu_protocol::ServerMessage::DailySummaryData {
-                    game_day,
-                    action_counts,
-                    location_history,
-                    success_count,
-                    failure_count,
-                    total_actions,
-                } = &msg
-                {
-                    let mm = memory_manager.clone();
-                    let gr = game_rules.clone();
-                    let gd = *game_day;
-                    let ac = action_counts.clone();
-                    let lh = location_history.clone();
-                    let sc = *success_count;
-                    let fc = *failure_count;
-                    let ta = *total_actions;
-                    tokio::spawn(async move {
-                        if let Some(ref mgr) = mm {
-                            let importance = gr
-                                .as_ref()
-                                .and_then(|g| g.immediate_events.as_ref())
-                                .and_then(|ie| ie.event_triage.as_ref())
-                                .map(|et| et.daily_summary_importance as f32)
-                                .unwrap_or(0.8);
-                            let mut sorted: Vec<_> = ac.iter().collect();
-                            sorted.sort_by(|a, b| b.1.cmp(a.1));
-                            let action_parts: Vec<String> = sorted
-                                .iter()
-                                .take(5)
-                                .map(|(k, v)| format!("{}x{}", k, v))
-                                .collect();
-                            let content = format!(
-                                "第{}游戏日动作统计：共{}次（成{}、败{}）。动作：{}{}",
-                                gd,
-                                ta,
-                                sc,
-                                fc,
-                                action_parts.join("、"),
-                                if lh.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!("；足迹：{}", lh.join("→"))
-                                }
-                            );
-                            let entry_agent_id = {
-                                let r = mgr.read().await;
-                                r.agent_id()
-                            };
-                            let mut entry = crate::component::memory::MemoryEntry::new(
-                                entry_agent_id,
-                                gd,
-                                content,
-                            )
-                            .with_event_type("daily_action_stats".to_string())
-                            .with_importance(importance);
-                            let mut guard = mgr.write().await;
-                            if let Err(e) = guard.episodic_mut().add(&mut entry).await {
-                                warn!("游戏日{}动作统计写入 episodic memory 失败: {}", gd, e);
                             }
                         }
                     });

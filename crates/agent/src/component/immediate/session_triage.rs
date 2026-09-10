@@ -14,7 +14,7 @@ use cyber_jianghu_protocol::{EventTriageConfig, EventTriagePreFilter, WorldTime}
 
 use crate::component::llm::LlmClientExt;
 use crate::component::memory::MemoryManager;
-use crate::component::memory::backend::SearchableBackend;
+
 use crate::component::social::RelationshipStore;
 use crate::component::state_store::WorldStateStore;
 use crate::runtime::claw::LlmClientContainer;
@@ -525,14 +525,24 @@ event_id 必须是以下值之一：{event_ids}"#,
         Ok(diary)
     }
 
-    /// 查询当日重要记忆（重要性降序，上限 20 条）
+    /// 日记取材排除的元事件类型：
+    /// - daily_summary：昨日日记（importance 0.8）不剔除会霸榜 top-K，
+    ///   日记 LLM 每天改写昨日日记（复读机）；
+    /// - daily_action_stats：已移除的 Server 统计推送遗留类型（清理兑底）。
+    const DIARY_EXCLUDED_EVENT_TYPES: &[&str] = &["daily_summary", "daily_action_stats"];
+
+    /// 查询重要记忆（重要性降序，排除元条目，上限 20 条）
     async fn query_diary_memories(&self) -> String {
         let mm = match self.memory_manager.as_ref() {
             Some(mm) => mm,
             None => return String::new(),
         };
         let guard = mm.read().await;
-        match guard.episodic().get_top_by_importance(20).await {
+        match guard
+            .episodic()
+            .get_top_by_importance_excluding(20, Self::DIARY_EXCLUDED_EVENT_TYPES)
+            .await
+        {
             Ok(memories) if !memories.is_empty() => memories
                 .iter()
                 .enumerate()

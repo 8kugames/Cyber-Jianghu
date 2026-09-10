@@ -13,7 +13,13 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::path::Path;
 use std::sync::Mutex;
+use tracing::{info, warn};
 use uuid::Uuid;
+
+/// 已移除的 Server 动作统计推送（DailySummaryData）遗留的事件类型。
+/// 该链路将客观遥测写入主观记忆，违反身心分离，已整链路移除；
+/// 启动时清理遗留行（幂等，行数为 0 时无副作用）。
+const LEGACY_DAILY_ACTION_STATS_EVENT_TYPE: &str = "daily_action_stats";
 
 /// 情景记忆后端
 ///
@@ -34,6 +40,12 @@ impl EpisodicMemoryBackend {
     /// 创建新的情景记忆后端（使用自定义阈值）
     pub fn with_threshold(agent_id: Uuid, db_dir: &Path, threshold: f32) -> Result<Self> {
         let store = MemoryStore::new(agent_id, db_dir)?;
+        // 清理已下线链路的遗留数据（幂等；失败不阻断启动，仅告警）
+        match store.delete_memories_by_type(LEGACY_DAILY_ACTION_STATS_EVENT_TYPE) {
+            Ok(0) => {}
+            Ok(n) => info!("清理遗留动作统计记忆 {} 条（daily_action_stats）", n),
+            Err(e) => warn!("清理遗留动作统计记忆失败（不影响启动）: {}", e),
+        }
         Ok(Self {
             store: Mutex::new(store),
             save_threshold: threshold,
@@ -160,6 +172,23 @@ impl EpisodicMemoryBackend {
             .lock()
             .map_err(|_| anyhow::anyhow!("Lock poisoned"))?;
         let memories = store.get_memories_by_type(event_type, offset, limit)?;
+        Ok(memories.iter().map(Self::memory_to_entry).collect())
+    }
+
+    /// 查询重要记忆（Top K，排除指定事件类型）
+    ///
+    /// 供日记生成排除元条目（daily_summary 等），避免昨日日记霸榜
+    /// 导致日记 LLM 每天改写昨日日记。
+    pub async fn get_top_by_importance_excluding(
+        &self,
+        limit: usize,
+        excluded_types: &[&str],
+    ) -> Result<Vec<MemoryEntry>> {
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Lock poisoned"))?;
+        let memories = store.get_top_memories_excluding_types(limit, excluded_types)?;
         Ok(memories.iter().map(Self::memory_to_entry).collect())
     }
 }
@@ -358,5 +387,45 @@ mod tests {
 
         backend.clear().await.unwrap();
         assert_eq!(backend.count().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_purges_legacy_daily_action_stats_on_init() {
+        let temp_dir = TempDir::new().unwrap();
+        let agent_id = Uuid::new_v4();
+
+        // 先用裸 store 播种一条遗留 daily_action_stats 记忆
+        {
+            let store = MemoryStore::new(agent_id, temp_dir.path()).unwrap();
+            let legacy = ClientMemory::new(agent_id, 1, "第1游戏日动作统计：共2次".to_string())
+                .with_importance(0.8)
+                .with_type("daily_action_stats".to_string());
+            store.add_memory(&legacy).unwrap();
+        }
+
+        // 构造 backend 触发启动清理，遗留条目应被删除
+        let backend = EpisodicMemoryBackend::new(agent_id, temp_dir.path()).unwrap();
+        assert_eq!(backend.count().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_top_by_importance_excluding() {
+        let (mut backend, agent_id, _temp) = create_test_backend();
+
+        let mut legacy = MemoryEntry::new(agent_id, 1, "动作统计".to_string())
+            .with_importance(0.9)
+            .with_event_type("daily_action_stats".to_string());
+        backend.add(&mut legacy).await.unwrap();
+        let mut lived = MemoryEntry::new(agent_id, 2, "真实体验".to_string())
+            .with_importance(0.7)
+            .with_event_type("action_result".to_string());
+        backend.add(&mut lived).await.unwrap();
+
+        let top = backend
+            .get_top_by_importance_excluding(20, &["daily_action_stats"])
+            .await
+            .unwrap();
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0].event_type, "action_result");
     }
 }

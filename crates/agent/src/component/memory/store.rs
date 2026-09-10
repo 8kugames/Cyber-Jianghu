@@ -356,6 +356,57 @@ impl MemoryStore {
             .map_err(|e| e.into())
     }
 
+    /// 查询重要记忆（Top K，排除已归档与指定事件类型）
+    ///
+    /// 供日记生成等场景排除元条目（如 daily_summary），避免高重要性的
+    /// 元数据条目霸榜 top-K，挤占真实体验记忆。
+    pub fn get_top_memories_excluding_types(
+        &self,
+        limit: usize,
+        excluded_types: &[&str],
+    ) -> Result<Vec<ClientMemory>> {
+        let not_in = (0..excluded_types.len())
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT * FROM client_memories
+             WHERE agent_id = ? AND is_archived = FALSE AND event_type NOT IN ({not_in})
+             ORDER BY importance_score DESC, created_at DESC
+             LIMIT ?"
+        );
+        let mut bind: Vec<Box<dyn rusqlite::ToSql>> = Vec::with_capacity(excluded_types.len() + 2);
+        bind.push(Box::new(self.agent_id.to_string()));
+        for t in excluded_types {
+            bind.push(Box::new(t.to_string()));
+        }
+        bind.push(Box::new(limit as i64));
+
+        let mut stmt = self.conn.prepare(&sql).context("Failed to prepare query")?;
+        let memories = stmt
+            .query_map(
+                rusqlite::params_from_iter(bind.iter().map(|b| b.as_ref())),
+                Self::row_to_memory,
+            )
+            .context("Failed to execute query")?;
+
+        memories
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
+    }
+
+    /// 按事件类型删除记忆（返回删除行数）
+    pub fn delete_memories_by_type(&self, event_type: &str) -> Result<usize> {
+        let deleted = self
+            .conn
+            .execute(
+                "DELETE FROM client_memories WHERE agent_id = ?1 AND event_type = ?2",
+                params![self.agent_id.to_string(), event_type],
+            )
+            .context("Failed to delete memories by type")?;
+        Ok(deleted)
+    }
+
     /// 查询最近 N 条记忆（排除已归档）
     pub fn get_recent_memories(&self, limit: usize) -> Result<Vec<ClientMemory>> {
         let mut stmt = self
@@ -837,5 +888,62 @@ mod tests {
         let cleaned = store.cleanup_old_memories(5).unwrap();
         assert_eq!(cleaned, 5);
         assert_eq!(store.count().unwrap(), 5);
+    }
+
+    #[test]
+    fn test_get_top_memories_excluding_types() {
+        let temp_dir = TempDir::new().unwrap();
+        let agent_id = Uuid::new_v4();
+        let store = MemoryStore::new(agent_id, temp_dir.path()).unwrap();
+
+        let summary = ClientMemory::new(agent_id, 1, "昨日日记".to_string())
+            .with_importance(0.8)
+            .with_type("daily_summary".to_string());
+        let stats = ClientMemory::new(agent_id, 2, "动作统计".to_string())
+            .with_importance(0.8)
+            .with_type("daily_action_stats".to_string());
+        let lived = ClientMemory::new(agent_id, 3, "真实体验".to_string())
+            .with_importance(0.7)
+            .with_type("action_result".to_string());
+        store.add_memory(&summary).unwrap();
+        store.add_memory(&stats).unwrap();
+        store.add_memory(&lived).unwrap();
+
+        let top = store
+            .get_top_memories_excluding_types(20, &["daily_summary", "daily_action_stats"])
+            .unwrap();
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0].event_type, "action_result");
+
+        // 空排除列表退化为普通 top-K
+        let all = store.get_top_memories_excluding_types(20, &[]).unwrap();
+        assert_eq!(all.len(), 3);
+    }
+
+    #[test]
+    fn test_delete_memories_by_type() {
+        let temp_dir = TempDir::new().unwrap();
+        let agent_id = Uuid::new_v4();
+        let store = MemoryStore::new(agent_id, temp_dir.path()).unwrap();
+
+        for i in 0..2 {
+            let m = ClientMemory::new(agent_id, i, format!("统计 {}", i))
+                .with_importance(0.8)
+                .with_type("daily_action_stats".to_string());
+            store.add_memory(&m).unwrap();
+        }
+        let keep = ClientMemory::new(agent_id, 10, "保留".to_string())
+            .with_importance(0.6)
+            .with_type("action_result".to_string());
+        store.add_memory(&keep).unwrap();
+
+        let deleted = store.delete_memories_by_type("daily_action_stats").unwrap();
+        assert_eq!(deleted, 2);
+        assert_eq!(store.count().unwrap(), 1);
+        // 幂等：再次删除返回 0
+        assert_eq!(
+            store.delete_memories_by_type("daily_action_stats").unwrap(),
+            0
+        );
     }
 }
