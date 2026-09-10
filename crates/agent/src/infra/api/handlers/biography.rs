@@ -315,8 +315,11 @@ pub(crate) async fn generate_biography_for_agent(
         None => anyhow::bail!("character not found: {}", agent_id),
     };
 
-    // 已有传记直接返回
-    if let Some(ref bio) = character.biography
+    // 传记生命周期语义：存活角色已有传记则幂等返回；终态角色（死亡/归隐）强制
+    // 重新生成，覆盖生前可能存在的未完整版本，保证死亡/归隐回调得到的是
+    // "盖棺定论"传记（该规则内聚于本函数，不依赖调用方传参）
+    if character.status == crate::config::CharacterStatus::Alive
+        && let Some(ref bio) = character.biography
         && !bio.is_empty()
     {
         return Ok(bio.clone());
