@@ -309,12 +309,11 @@ pub(crate) async fn switch_character_handler(
         // 4. Dream Store (按需加载，从文件读取)
         if let Some(ref dream_store) = state.dream_store {
             let mut dream = dream_store.write().await;
-            if let Some(new_dream) =
-                super::soul_cycle::DreamState::load_from_file(&data_dir, &agent_id)
+            if let Some(new_dream) = super::dream::DreamState::load_from_file(&data_dir, &agent_id)
             {
                 *dream = new_dream;
             } else {
-                *dream = super::soul_cycle::DreamState::default();
+                *dream = super::dream::DreamState::default();
             }
         }
     }
