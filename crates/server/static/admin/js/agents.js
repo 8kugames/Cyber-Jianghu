@@ -76,7 +76,10 @@ var lastAgentFilterText = "";
 
 function renderAgents() {
   var listEl = document.getElementById("agents-list");
-  var filterText = document.getElementById("agent-filter").value.toLowerCase();
+  var filterEl = document.getElementById("agent-filter");
+  // 共用页（如 history.html）仅消费 allAgentsMap，页面无 agents 面板 DOM，跳过渲染
+  if (!listEl || !filterEl) return;
+  var filterText = filterEl.value.toLowerCase();
   if (filterText !== lastAgentFilterText) {
     agentPage = 1;
     lastAgentFilterText = filterText;
