@@ -1,5 +1,5 @@
 # Cyber-Jianghu Integration Test - 5 Agents (Cognitive Mode, agent-4 excluded due to token exhaustion)
-# Server: local docker (cyber-jianghu-server:23333)
+# Server: remote (http://47.102.120.116:23333)
 # LLM 配置通过各 agent 的 config/agent.yaml 管理，不在此处设置
 
 x-agent-common: &agent-common
@@ -10,11 +10,14 @@ x-agent-common: &agent-common
   environment: &agent-env-common
     PORT: 23340
     RUST_LOG: info
+    # virtiofs 挂载目录为 root 属主，跳过 entrypoint 权限修复，避免撞只读 trace.yaml（见 CHANGELOG 0.1.291）
+    CONTAINER_UID: 0
+    CONTAINER_GID: 0
     CYBER_JIANGHU_WS_ALLOW_EXTERNAL: 1
     CYBER_JIANGHU_CONFIG_DIR: /app/config
     CYBER_JIANGHU_DATA_DIR: /app/data
-    CYBER_JIANGHU_SERVER_WS_URL: ws://cyber-jianghu-server:23333/ws
-    CYBER_JIANGHU_SERVER_HTTP_URL: http://cyber-jianghu-server:23333
+    CYBER_JIANGHU_SERVER_WS_URL: ws://47.102.120.116:23333/ws
+    CYBER_JIANGHU_SERVER_HTTP_URL: http://47.102.120.116:23333
     CYBER_JIANGHU_EMBEDDER_REMOTE_URL: http://cyber-jianghu-embedding:23350
   command: ["sh", "-c", "./agent run --port 23340"]
 

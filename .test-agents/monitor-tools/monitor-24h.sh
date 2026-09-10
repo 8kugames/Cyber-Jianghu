@@ -51,7 +51,7 @@ collect_round() {
   # --- 2. server health ---
   {
     echo "[server_health]"
-    curl -sf --max-time 5 http://localhost:23333/health || echo "FAIL"
+    curl -sf --max-time 5 http://47.102.120.116:23333/health || echo "FAIL"
   } >> "$round_log"
 
   # --- 3. 每 agent 角色状态 + token（容器内 127.0.0.1）---
@@ -61,7 +61,7 @@ collect_round() {
     local cdir="$LOG_BASE/agents/$c"
     mkdir -p "$cdir"
     local token
-    token=$(docker exec "$c" grep '^auth_token:' /app/data/servers/cyber-jianghu-server-23333/device.yaml 2>/dev/null | awk '{print $2}')
+    token=$(docker exec "$c" grep '^auth_token:' /app/data/servers/47-102-120-116-23333/device.yaml 2>/dev/null | awk '{print $2}')
     if [ -z "$token" ]; then
       echo "$c: NO_TOKEN" >> "$round_log"
       continue
@@ -85,9 +85,9 @@ collect_round() {
     local cdir="$LOG_BASE/agents/$c"
     local name hp hunger is_alive age
     name=$(cat "$cdir/character.json" 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); print(d.get('name','?'))" 2>/dev/null)
-    is_alive=$(cat "$cdir/character.json" 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); print(d.get('is_alive','?'))" 2>/dev/null)
+    is_alive=$(cat "$cdir/character.json" 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); print(d.get('status','?'))" 2>/dev/null)
     hp=$(cat "$cdir/state.json" 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); a=d.get('self_state',{}).get('attributes',{}) or {}; print(a.get('hp','?'))" 2>/dev/null)
-    hunger=$(cat "$cdir/state.json" 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); a=d.get('self_state',{}).get('attributes',{}) or {}; print(a.get('satiation','?'))" 2>/dev/null)
+    hunger=$(cat "$cdir/state.json" 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); a=d.get('self_state',{}).get('attributes',{}) or {}; print(a.get('hunger','?'))" 2>/dev/null)
     location=$(cat "$cdir/state.json" 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); print(d.get('location',{}).get('node_id','?'))" 2>/dev/null)
     age=$(cat "$cdir/character.json" 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); print(d.get('age','?'))" 2>/dev/null)
     echo "  $c name=$name age=$age hp=$hp hunger=$hunger loc=$location alive=$is_alive" >> "$round_log"

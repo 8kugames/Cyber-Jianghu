@@ -157,7 +157,7 @@ for entry in "${AGENT_ENDPOINTS[@]}"; do
       --max-time 5 http://127.0.0.1:23340/api/v1/character 2>/dev/null || echo "000")
     echo "$code" > "$PROBE_TMPDIR/$p.code"
     token=$(docker exec $c grep '^auth_token:' \
-      /app/data/servers/cyber-jianghu-server-23333/device.yaml 2>/dev/null \
+      /app/data/servers/47-102-120-116-23333/device.yaml 2>/dev/null \
       | awk '{print $2}')
     echo "$token" > "$PROBE_TMPDIR/$p.token"
   ) &
@@ -378,14 +378,17 @@ for entry in "${AGENT_ENDPOINTS[@]}"; do
     auth_args=()
     [ -n "$token" ] && auth_args=(-H "Authorization: Bearer $token")
 
-    # 2.1 generate（失败重试 1 次）
-    docker exec "$c" curl -fsX POST --max-time 60 "${auth_args[@]}" \
+    # 2.1 generate（失败重试 1 次；agent 端 request_timeout 默认 120s，curl 需留足余量）
+    docker exec "$c" curl -fsX POST --max-time 130 "${auth_args[@]}" \
       http://127.0.0.1:23340/api/v1/character/generate > "$cdir/gen" 2>/dev/null || \
-      { sleep 2; docker exec "$c" curl -fsX POST --max-time 60 "${auth_args[@]}" \
+      { sleep 2; docker exec "$c" curl -fsX POST --max-time 130 "${auth_args[@]}" \
         http://127.0.0.1:23340/api/v1/character/generate > "$cdir/gen" 2>/dev/null \
         || { echo "FAIL generate" > "$cdir/status"; exit 0; }; }
-    # 2.2 register
+    # 2.2 register（当前 API 要求 JSON body = generate 产出；gen 在宿主机，先 docker cp 进容器）
+    docker cp "$cdir/gen" "$c:/tmp/jointest-gen.json" \
+      || { echo "FAIL register (cp)" > "$cdir/status"; exit 0; }
     docker exec "$c" curl -fsX POST --max-time 60 "${auth_args[@]}" \
+      -H "Content-Type: application/json" --data-binary @/tmp/jointest-gen.json \
       http://127.0.0.1:23340/api/v1/character/register > "$cdir/reg" 2>/dev/null \
       || { echo "FAIL register" > "$cdir/status"; exit 0; }
     # 2.3 verify
@@ -618,6 +621,8 @@ docker exec $c curl -s -H "Authorization: Bearer $TOKEN" \
 3. **角色创建必须并行**：端口间用 `&` + `wait` 全并发；每端口内 generate→register→verify 串行（含 1 次重试）。
 4. **BuildKit 缓存**：`--no-cache` 不能清除 BuildKit cache mount；需改 Dockerfile 的 `--mount=type=cache,id=...` 或加 `--build-arg CACHEBUST=$(date +%s)`。
 5. **Tick 时长**：60s（`game_rules.yaml` 的 `real_seconds_per_tick`）。
-6. **agent HTTP 协议（P0-11 a/b）**：容器内 bind `127.0.0.1` + 除公开路径外强制 Bearer token。宿主机 `localhost:$port` 会被 docker-proxy 拒绝，必须 `docker exec $c curl http://127.0.0.1:23340/...`。token 来自容器内 `/app/data/servers/cyber-jianghu-server-23333/device.yaml`。**禁止改回 `0.0.0.0`**。
+6. **agent HTTP 协议（P0-11 a/b）**：容器内 bind `127.0.0.1` + 除公开路径外强制 Bearer token。宿主机 `localhost:$port` 会被 docker-proxy 拒绝，必须 `docker exec $c curl http://127.0.0.1:23340/...`。token 来自容器内 `/app/data/servers/47-102-120-116-23333/device.yaml`。**禁止改回 `0.0.0.0`**。
 7. **AGENT_ENDPOINTS**：由 Phase 0.0 从 compose 自动解析；增删 agent 改 `.test-agents/docker-compose.yml` 即可。
 8. **配置冻结**：测试开始后不得修改任何 agent 或 server 配置；如需调整，记录变更点并重新开始。
+9. **推理型模型必须开流式**：MiniMax M2 系等长 reasoning 模型非流式生成常超 60s，会被 provider 网关无响应切断（agent 客户端 120s 超时也救不了，错误表现为 `LLM 请求发送失败（网络错误）`）。在 agent.yaml `llm:` 段设 `enable_streaming: true`（运行时映射为 `prefer_stream`，`send_request` 统一分流，覆盖 generate/gameplay/tool loop 全部路径）。当前 `.test-agents/agent-*/config/agent.yaml` 已 gitignore，重建环境时需重新设置。
+10. **register 需要 JSON body**：`POST /api/v1/character/register` 的 extractor 强制 `Content-Type: application/json` + body=generate 产出；gen 文件在宿主机时需先 `docker cp` 进容器再 `--data-binary` 引用容器内路径。
