@@ -40,5 +40,3 @@ pub use reward_registry::RewardRegistry;
 pub use skill_registry::SkillRegistry;
 pub use state_registry::StateRegistry;
 pub use time_registry::TimeRegistry;
-
-// Re-export LocationRegistry from cache module

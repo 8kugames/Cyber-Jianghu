@@ -30,6 +30,29 @@ impl fmt::Display for LocationNodeType {
     }
 }
 
+/// 地点时代变体（吸收自传灯录拓扑地图的 time_variants 设计）
+///
+/// 按游戏日闭区间控制地点显隐与描述：`[from_game_day, to_game_day]` 两端含。
+/// 缺省边界 = 无下界/无上界；列表按序首个命中生效；全部未命中回落基础定义。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LocationTimeVariant {
+    /// 生效起始游戏日（含，1-based）；None = 无下界
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_game_day: Option<i64>,
+
+    /// 生效结束游戏日（含，1-based）；None = 无上界
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_game_day: Option<i64>,
+
+    /// 该时段的描述（覆盖节点基础 description；None = 沿用基础描述）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// false = 该时段隐藏（不出现在邻接、不可移动进入）；缺省 = 显示
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible: Option<bool>,
+}
+
 /// 位置节点（三层统一接口）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocationNode {
@@ -65,6 +88,35 @@ pub struct LocationNode {
     /// None 时使用全局 default_implicit_travel_cost
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub implicit_travel_cost: Option<u32>,
+
+    /// 时代变体列表（按游戏日闭区间，首个命中生效；空 = 恒显示基础定义）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub time_variants: Vec<LocationTimeVariant>,
+}
+
+impl LocationNode {
+    /// 解析指定游戏日命中的时代变体（首个命中；None = 无变体或全部未命中）
+    pub fn resolve_time_variant(&self, game_day: i64) -> Option<&LocationTimeVariant> {
+        self.time_variants.iter().find(|v| {
+            let lo_ok = v.from_game_day.is_none_or(|d| game_day >= d);
+            let hi_ok = v.to_game_day.is_none_or(|d| game_day <= d);
+            lo_ok && hi_ok
+        })
+    }
+
+    /// 指定游戏日是否可见（命中的变体 visible=false 隐藏；未命中/无变体恒显示）
+    pub fn is_visible_at(&self, game_day: i64) -> bool {
+        self.resolve_time_variant(game_day)
+            .and_then(|v| v.visible)
+            .unwrap_or(true)
+    }
+
+    /// 指定游戏日的描述（命中的变体 description 优先，回落基础 description）
+    pub fn resolved_description(&self, game_day: i64) -> Option<&str> {
+        self.resolve_time_variant(game_day)
+            .and_then(|v| v.description.as_deref())
+            .or(self.description.as_deref())
+    }
 }
 
 /// 节点连接（边）
@@ -143,6 +195,17 @@ impl LocationGraph {
             return true;
         }
         false
+    }
+
+    /// 检查节点在指定游戏日是否可见（节点不存在 = 不可见）
+    ///
+    /// 时代显隐真源：移动校验与邻接广播均以此为准。
+    /// 语义（与传灯录一致）：终点隐藏 → 不可达；起点不校验（所在地永远允许离开）。
+    pub fn is_visible_at(&self, node_id: &str, game_day: i64) -> bool {
+        self.nodes
+            .get(node_id)
+            .map(|n| n.is_visible_at(game_day))
+            .unwrap_or(false)
     }
 
     /// 获取隐式 parent-child 邻居
@@ -271,4 +334,114 @@ pub struct Location {
     /// 当前位置可采集的资源（含名称，数据驱动）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gatherable_items: Vec<GatherableItem>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn variant(
+        from: Option<i64>,
+        to: Option<i64>,
+        visible: Option<bool>,
+        desc: Option<&str>,
+    ) -> LocationTimeVariant {
+        LocationTimeVariant {
+            from_game_day: from,
+            to_game_day: to,
+            visible,
+            description: desc.map(str::to_string),
+        }
+    }
+
+    fn node_with(variants: Vec<LocationTimeVariant>) -> LocationNode {
+        LocationNode {
+            node_id: "n".to_string(),
+            name: "测试".to_string(),
+            node_type: LocationNodeType::Map,
+            parent_id: None,
+            description: Some("基础".to_string()),
+            environmental_damage: None,
+            gatherable_items: vec![],
+            implicit_travel_cost: None,
+            time_variants: variants,
+        }
+    }
+
+    #[test]
+    fn time_variant_interval_bounds_are_inclusive() {
+        let n = node_with(vec![variant(Some(10), Some(20), None, None)]);
+        assert!(n.resolve_time_variant(9).is_none(), "下界前不可命中");
+        assert!(n.is_visible_at(9), "区间外回落恒显示");
+        assert!(n.resolve_time_variant(10).is_some(), "下界当日命中（含）");
+        assert!(n.resolve_time_variant(20).is_some(), "上界当日命中（含）");
+        assert!(n.resolve_time_variant(21).is_none(), "上界后未命中");
+        assert!(n.is_visible_at(21), "区间外回落恒显示");
+    }
+
+    #[test]
+    fn time_variant_open_bounds_default_visible() {
+        // 仅设 from：无上界
+        let n = node_with(vec![variant(Some(5), None, Some(false), None)]);
+        assert!(n.is_visible_at(4), "无变体命中回落恒显示");
+        assert!(!n.is_visible_at(5), "from 起隐藏");
+        assert!(!n.is_visible_at(i64::MAX), "无上界持续隐藏");
+
+        // 仅设 to：无下界
+        let n2 = node_with(vec![variant(None, Some(5), Some(false), None)]);
+        assert!(!n2.is_visible_at(i64::MIN), "无下界从远古隐藏");
+        assert!(!n2.is_visible_at(5));
+        assert!(n2.is_visible_at(6));
+    }
+
+    #[test]
+    fn time_variant_first_match_wins() {
+        let n = node_with(vec![
+            variant(Some(1), Some(10), Some(true), Some("早期")),
+            variant(Some(1), Some(100), Some(false), Some("后期")),
+        ]);
+        let v = n.resolve_time_variant(5).expect("应命中首个变体");
+        assert_eq!(v.description.as_deref(), Some("早期"));
+        assert!(n.is_visible_at(5), "首个命中 visible=true 生效");
+    }
+
+    #[test]
+    fn time_variant_description_fallback() {
+        let n = node_with(vec![variant(Some(1), Some(10), None, Some("乱世废墟"))]);
+        assert_eq!(n.resolved_description(5), Some("乱世废墟"));
+        assert_eq!(
+            n.resolved_description(11),
+            Some("基础"),
+            "未命中回落基础描述"
+        );
+
+        let no_desc = node_with(vec![variant(Some(1), Some(10), None, None)]);
+        assert_eq!(
+            no_desc.resolved_description(5),
+            Some("基础"),
+            "变体无描述沿用基础"
+        );
+    }
+
+    #[test]
+    fn time_variants_field_is_additive_on_wire() {
+        // 旧客户端/旧配置无 time_variants 字段 → 反序列化为空表（向后兼容的 additive 变更）
+        let legacy = r#"{"node_id":"x","name":"X","type":"map"}"#;
+        let n: LocationNode = serde_json::from_str(legacy).expect("旧格式应可解析");
+        assert!(n.time_variants.is_empty());
+        assert!(n.is_visible_at(1));
+
+        // 新字段序列化 round-trip
+        let n2 = node_with(vec![variant(Some(3), None, Some(false), Some("d"))]);
+        let json = serde_json::to_string(&n2).unwrap();
+        assert!(json.contains("time_variants"));
+        let back: LocationNode = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.time_variants, n2.time_variants);
+    }
+
+    #[test]
+    fn graph_visibility_missing_node_is_false() {
+        let g = LocationGraph::new();
+        assert!(!g.is_visible_at("ghost", 1), "不存在即不可见");
+    }
 }

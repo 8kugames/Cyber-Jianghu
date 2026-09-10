@@ -2,17 +2,22 @@
 // OpenClaw Cyber-Jianghu 位置配置加载器
 // ============================================================================
 //
-// 本模块负责加载位置配置（locations.yaml 或 locations.json）
+// 本模块负责加载位置配置（locations.yaml 或 locations.json），并做
+// 图引用完整性校验（fail-fast：坏图拒绝启动，而非静默带病运行）。
+//
+// 完整图不变量（连通性、非对称边画像、可达性预算）见
+// crates/server/tests/locations_graph_integrity_test.rs（CI 数据画像守卫）。
 // ============================================================================
 
 use crate::game_data::loaders::config_format::load_config;
 use crate::game_data::types::UnifiedLocationsConfig;
 use anyhow::{Context, Result};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 /// 加载位置配置
 ///
-/// 优先加载 YAML 格式，回退到 JSON 格式。
+/// 优先加载 YAML 格式，回退到 JSON 格式；加载后执行图引用完整性校验。
 ///
 /// # 参数
 /// - `config_dir`: 配置文件目录路径
@@ -24,13 +29,105 @@ pub fn load_locations<P: AsRef<Path>>(config_dir: P) -> Result<UnifiedLocationsC
 
     // 优先尝试 YAML 格式
     let yaml_path = config_dir.join("locations.yaml");
-    if yaml_path.exists() {
-        return load_config(&yaml_path).context("加载位置配置 (YAML) 失败");
+    let config = if yaml_path.exists() {
+        load_config(&yaml_path).context("加载位置配置 (YAML) 失败")?
+    } else {
+        // 回退到 JSON 格式
+        let json_path = config_dir.join("locations.json");
+        load_config(&json_path).context("加载位置配置 (JSON) 失败")?
+    };
+
+    validate_locations(&config)?;
+    Ok(config)
+}
+
+/// 图引用完整性校验（fail-fast）
+///
+/// - 边端点必须引用已定义节点（悬空边 = 断头路，直接报错）
+/// - parent_id 必须引用已定义节点（层级引用悬空 = 孤儿子场景）
+/// - time_variants 闭区间必须自洽（from_game_day <= to_game_day）
+/// - 非对称边（A→B 有、B→A 无）是合法特性（如"回程更累"），仅告警提示
+pub fn validate_locations(config: &UnifiedLocationsConfig) -> Result<()> {
+    let node_ids: HashSet<&str> = config
+        .data
+        .nodes
+        .iter()
+        .map(|n| n.node_id.as_str())
+        .collect();
+
+    // 重复 node_id 会让 HashMap 静默覆盖，先拦下
+    if node_ids.len() != config.data.nodes.len() {
+        let mut seen = HashSet::new();
+        let dupes: Vec<&str> = config
+            .data
+            .nodes
+            .iter()
+            .filter(|n| !seen.insert(n.node_id.as_str()))
+            .map(|n| n.node_id.as_str())
+            .collect();
+        anyhow::bail!("位置配置存在重复 node_id: {}", dupes.join(", "));
     }
 
-    // 回退到 JSON 格式
-    let json_path = config_dir.join("locations.json");
-    load_config(&json_path).context("加载位置配置 (JSON) 失败")
+    for node in &config.data.nodes {
+        if let Some(parent) = &node.parent_id
+            && !parent.is_empty()
+            && !node_ids.contains(parent.as_str())
+        {
+            anyhow::bail!(
+                "节点 {} 的 parent_id 引用不存在的节点: {}",
+                node.node_id,
+                parent
+            );
+        }
+        for (i, v) in node.time_variants.iter().enumerate() {
+            if let (Some(from), Some(to)) = (v.from_game_day, v.to_game_day)
+                && from > to
+            {
+                anyhow::bail!(
+                    "节点 {} 的 time_variants[{}] 区间无效: from_game_day={} > to_game_day={}",
+                    node.node_id,
+                    i,
+                    from,
+                    to
+                );
+            }
+        }
+    }
+
+    for edge in &config.data.edges {
+        if !node_ids.contains(edge.from.as_str()) {
+            anyhow::bail!(
+                "边的 from_node_id 引用不存在的节点: {} → {}",
+                edge.from,
+                edge.to
+            );
+        }
+        if !node_ids.contains(edge.to.as_str()) {
+            anyhow::bail!(
+                "边的 to_node_id 引用不存在的节点: {} → {}",
+                edge.from,
+                edge.to
+            );
+        }
+    }
+
+    // 非对称边画像：合法但需显式可见（CI 守卫固化清单，防止手误断头路）
+    let mut declared: HashMap<(&str, &str), i32> = HashMap::new();
+    for edge in &config.data.edges {
+        declared.insert((edge.from.as_str(), edge.to.as_str()), edge.travel_cost);
+    }
+    for ((from, to), cost) in &declared {
+        if !declared.contains_key(&(*to, *from)) {
+            tracing::warn!(
+                "非对称边（无回程边，若非有意请补反方向）: {} → {} (travel_cost={})",
+                from,
+                to,
+                cost
+            );
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -39,6 +136,36 @@ mod tests {
     use crate::game_data::loaders::config_format::{ConfigFormat, parse_config};
     use std::fs;
     use tempfile::TempDir;
+
+    fn base_yaml(extra_nodes: &str, extra_edges: &str) -> String {
+        format!(
+            r#"
+version: "1.0"
+description: "测试"
+meta: {{}}
+data:
+  nodes:
+    - node_id: "inn"
+      name: "客栈"
+      type: "map"
+      parent_id: ""
+    - node_id: "lobby"
+      name: "大堂"
+      type: "sub_scene"
+      parent_id: "inn"
+{extra_nodes}
+  edges:
+    - from_node_id: "inn"
+      to_node_id: "lobby"
+      travel_cost: 1
+{extra_edges}
+"#
+        )
+    }
+
+    fn parse(yaml: &str) -> Result<UnifiedLocationsConfig> {
+        parse_config(yaml, ConfigFormat::Yaml).context("解析失败")
+    }
 
     #[test]
     fn test_load_locations_json() {
@@ -53,6 +180,12 @@ mod tests {
                 "meta": {},
                 "data": {
                     "nodes": [
+                        {
+                            "node_id": "河西走廊",
+                            "name": "河西走廊",
+                            "type": "region",
+                            "parent_id": ""
+                        },
                         {
                             "node_id": "inn",
                             "name": "龙门客栈",
@@ -74,20 +207,34 @@ mod tests {
 
         let config = load_locations(dir.path()).unwrap();
         assert_eq!(config.version, "2.0.0");
-        assert_eq!(config.data.nodes.len(), 2);
-        assert_eq!(config.data.nodes[0].node_id, "inn");
-        assert_eq!(config.data.nodes[0].name, "龙门客栈");
+        assert_eq!(config.data.nodes.len(), 3);
+        assert_eq!(config.data.nodes[1].node_id, "inn");
+        assert_eq!(config.data.nodes[1].name, "龙门客栈");
         assert_eq!(config.data.edges.len(), 0);
     }
 
     #[test]
     fn test_load_locations_yaml() {
-        let yaml = r#"
+        let config = load_locations(valid_config_dir()).unwrap();
+        assert_eq!(config.version, "2.0.0");
+        assert_eq!(config.data.nodes.len(), 3);
+        assert_eq!(config.data.nodes[1].node_id, "inn");
+    }
+
+    fn valid_config_dir() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("locations.yaml"),
+            r#"
 version: "2.0.0"
 description: "位置配置文件"
 meta: {}
 data:
   nodes:
+    - node_id: "河西走廊"
+      name: "河西走廊"
+      type: "region"
+      parent_id: ""
     - node_id: "inn"
       name: "龙门客栈"
       type: "map"
@@ -97,11 +244,110 @@ data:
       type: "sub_scene"
       parent_id: "inn"
   edges: []
-"#;
+"#,
+        )
+        .unwrap();
+        dir
+    }
 
-        let config: UnifiedLocationsConfig = parse_config(yaml, ConfigFormat::Yaml).unwrap();
-        assert_eq!(config.version, "2.0.0");
-        assert_eq!(config.data.nodes.len(), 2);
-        assert_eq!(config.data.nodes[0].node_id, "inn");
+    #[test]
+    fn test_validate_rejects_dangling_edge_endpoint() {
+        let yaml = base_yaml(
+            "",
+            r#"    - from_node_id: "inn"
+      to_node_id: "ghost_town"
+      travel_cost: 3"#,
+        );
+        let config = parse(&yaml).unwrap();
+        let err = validate_locations(&config).unwrap_err();
+        assert!(
+            err.to_string().contains("ghost_town"),
+            "应拒绝悬空边端点: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_rejects_dangling_parent_id() {
+        let yaml = base_yaml(
+            r#"    - node_id: "orphan"
+      name: "孤儿"
+      type: "sub_scene"
+      parent_id: "nowhere""#,
+            "",
+        );
+        let config = parse(&yaml).unwrap();
+        let err = validate_locations(&config).unwrap_err();
+        assert!(
+            err.to_string().contains("nowhere"),
+            "应拒绝悬空 parent_id: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_rejects_duplicate_node_id() {
+        let yaml = base_yaml(
+            r#"    - node_id: "inn"
+      name: "重复客栈"
+      type: "map"
+      parent_id: """#,
+            "",
+        );
+        let config = parse(&yaml).unwrap();
+        let err = validate_locations(&config).unwrap_err();
+        assert!(
+            err.to_string().contains("重复 node_id"),
+            "应拒绝重复 node_id: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_rejects_inverted_time_variant_interval() {
+        let yaml = base_yaml(
+            r#"    - node_id: "ruins"
+      name: "废墟"
+      type: "map"
+      parent_id: ""
+      time_variants:
+        - from_game_day: 100
+          to_game_day: 50
+          visible: false"#,
+            "",
+        );
+        let config = parse(&yaml).unwrap();
+        let err = validate_locations(&config).unwrap_err();
+        assert!(
+            err.to_string().contains("time_variants[0] 区间无效"),
+            "应拒绝倒置区间: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_accepts_asymmetric_edges() {
+        // 非对称边是合法特性（回程更累）：base_yaml 仅声明 inn→lobby 无反向，
+        // 校验应通过（tracing 告警，不报错）
+        let config = parse(&base_yaml("", "")).unwrap();
+        assert!(
+            validate_locations(&config).is_ok(),
+            "单向边不应报错（仅告警）"
+        );
+    }
+
+    #[test]
+    fn test_validate_accepts_well_formed_time_variants() {
+        let yaml = base_yaml(
+            r#"    - node_id: "ruins"
+      name: "废墟"
+      type: "map"
+      parent_id: ""
+      time_variants:
+        - from_game_day: 1
+          to_game_day: 50
+          visible: false
+        - from_game_day: 200
+          description: "后世重建的城镇""#,
+            "",
+        );
+        let config = parse(&yaml).unwrap();
+        assert!(validate_locations(&config).is_ok());
     }
 }

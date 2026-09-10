@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Refactoring
+
+- **地点/时间换算单源化 + 广播器拆分**（server）：新增 `TimeRegistry::game_hours`/`try_game_day` 作为全仓唯一 tick→游戏时/日换算真源，收编 chronicle `calculate_game_days`、broadcaster `compute_game_time`、decay `compute_age_years` 的四处内联公式拷贝（补等价性钉死测试）；修复 `from_config` 丢弃节点级 `implicit_travel_cost` 的既有 bug（shipped 配置无此字段，零行为变更）；`resolved_description` 接线 dashboard `GET /api/dashboard/locations`（additive：`game_day` + `resolved_descriptions`）；947 行基线 `broadcaster.rs` 拆分为 `broadcaster/{mod,world_state,time,recipes}.rs`（对外路径不变），`cache.rs` 同步拆出 `location_registry.rs`（两文件均回落 800 行上限内）。
+
+### Features
+
+- **地点时代显隐 time_variants**（protocol+server）：`LocationNode` 新增可选 `time_variants`（游戏日闭区间，首个命中生效），命中 `visible: false` 时段的地块从 WorldState 邻接中隐去且移动终点校验拒绝（起点豁免，与传灯录同语义）；命中时段 `description` 覆盖基础描述。时间基准统一为 `TimeRegistry::game_day(tick)`（executor 与 broadcaster 同源）。PROTOCOL_VERSION 3.0.0 → 3.1.0（additive optional field）。
+- **地点图数据画像守卫**（server）：新增 `locations_graph_integrity_test`（全图连通/单向边画像/travel_cost>=1/任意两点最短<=6 tick 预算/出生点全域可达/时代变体自洽）；`load_locations` 加载时 fail-fast 校验悬空边端点、悬空 parent_id、重复 node_id、倒置区间，非对称边仅告警。语义唯一事实文档见 `crates/server/docs/architecture/p0_core/locations_graph.md`。（模式吸收自传灯录拓扑地图）
+
 ### Bug Fixes
 
 - **意图失败原因误报"状态持久化失败"**（server）：验证/执行失败经 rollback 后一律误报 persist_failed，掩盖真实拒绝原因（实测"未知的动作类型"被包装成持久化故障，误导诊断且 Agent 无法自纠）。修复：SingleProcessingResult 增加 failure_reason，验证/执行失败走 action_failed 回传具体原因（含治理分类码），仅真实落库失败才报 persist_failed。
@@ -95,7 +104,7 @@
 ### Major Features
 
 - **专用模型训练数据管线（reward + trace + SFT export）**：围绕"将 Agent 产生的 LLM 调用用于专用模型训练"目标，构建完整的数据采集→回传→导出闭环。哲学锚点：天道无为——reward 纯锚定生存因果，声望/关系/心境等主观认知不进 reward。
-  - 生存 Reward 天道账本（server）：每日结算（生存+生理+天魂审查三分量）+ 一生结算（寿数+统一死亡 penalty）+ 周期聚合 + 仪表盘 API（`GET /api/dashboard/reward/trends`、`/reward/lifetime/{id}`）；强制配置 `reward.yaml`（fail-fast），走 game_data 标准管线零硬编码；数据源改用 `agent_state_cache`（DashMap）消除时序竞态
+  - 生存 Reward（server）：每日结算（生存+生理+天魂审查三分量）+ 一生结算（寿数+统一死亡 penalty）+ 周期聚合 + 仪表盘 API（`GET /api/dashboard/reward/trends`、`/reward/lifetime/{id}`）；强制配置 `reward.yaml`（fail-fast），走 game_data 标准管线零硬编码；数据源改用 `agent_state_cache`（DashMap）消除时序竞态
   - 训练 Trace 结构化落盘（agent）：人魂/天魂 LLM 调用 JSONL（含 agent_id+tick_id+prompt/response 全文+soul_stage+persona+wall_clock），persona 字段替代 system_prompt 全文（~200B vs ~15KB），日志滚动覆盖（`max_size_mb` 配置，LRU 删旧）
   - **SFT 导出管线**（`src/training_export/`）：config 加载（复刻 action_evolution 模式 + env 覆盖）+ db 查询（`fetch_soul_cycle_metadata`，DISTINCT ON + UNNEST + SET LOCAL）+ runner（`run_once` 五步数据流）+ scheduler 后台 task（双层 timeout + sweep + shutdown）+ sft_transform 纯函数（对齐 Python `--no-db-filter`）+ checkpoint trace_id 集合与日期分桶 TTL；6 个 HTTP 端点（`/api/v1/training/export|exports|exports/{run_id}|exports/{run_id}/download|checkpoint`，写/读权限按 method 隔离）；cancel-aware 原子写 + 全量 env 覆盖 + per-bucket 容量 + 黄金对照测试基线
 - **关系图谱（C1-C4 数据可达性）**：`agent_relationships` 表（迁移 022）+ Strategy B 全量快照同步（Agent 每游戏日上报，天然幂等）+ 关系/世界快照/地点/对话/死亡 dashboard 端点 + C2 鉴权档（`require_client_read_token`，`CLIENT_READ_TOKEN` 与 admin read 分离）
@@ -135,7 +144,7 @@
 
 围绕"将 Agent 产生的 LLM 调用用于专用模型训练"目标，构建完整的数据采集→回传→导出管线。哲学锚点：天道无为——reward 纯锚定生存因果，声望/关系/心境是众生主观认知不进 reward。
 
-- **生存 Reward 天道账本**（server 侧）：
+- **生存 Reward**（server 侧）：
   - 每日结算（每游戏日=12tick）：生存分量 + 生理分量（satiation/hydration 归一化）+ 天魂审查分量（approved/rejected）
   - 一生结算（死亡时）：寿数 + 统一死亡 penalty（不分死因），不完整日按完整 `compute_daily_reward` 补算（生存按比例+生理死亡真值+天魂真值）
   - 周期聚合（复用 chronicle 7 日周期）+ 仪表盘 API（`GET /api/dashboard/reward/trends`）

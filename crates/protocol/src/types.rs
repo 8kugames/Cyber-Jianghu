@@ -175,6 +175,7 @@ mod tests {
             gatherable_items: vec![],
             description: None,
             implicit_travel_cost: None,
+            time_variants: vec![],
         };
 
         let json = serde_json::to_string(&node).unwrap();
@@ -197,6 +198,7 @@ mod tests {
             gatherable_items: vec![],
             description: None,
             implicit_travel_cost: None,
+            time_variants: vec![],
         });
 
         graph.add_node(LocationNode {
@@ -208,6 +210,7 @@ mod tests {
             gatherable_items: vec![],
             description: None,
             implicit_travel_cost: None,
+            time_variants: vec![],
         });
 
         graph.add_node(LocationNode {
@@ -219,6 +222,7 @@ mod tests {
             gatherable_items: vec![],
             description: None,
             implicit_travel_cost: None,
+            time_variants: vec![],
         });
 
         graph.add_edge(LocationEdge {

@@ -2,11 +2,13 @@
 // OpenClaw Cyber-Jianghu 配置缓存
 // ============================================================================
 //
-// 本模块提供运行时配置缓存，使用 Arc<RwLock>> 实现线程安全
+// 本模块提供运行时配置缓存（GameDataCache），使用 Arc<RwLock>> 实现线程安全。
+// LocationRegistry 已拆分至 location_registry.rs
 // ============================================================================
 
+use super::location_registry::LocationRegistry;
 use super::types::{GameData, UnifiedActionsConfig};
-use cyber_jianghu_protocol::{AdjacentNode, DeathInfo, LocationEdge, LocationGraph, LocationNode};
+use cyber_jianghu_protocol::DeathInfo;
 use std::sync::Arc;
 
 /// 配置缓存
@@ -200,136 +202,10 @@ impl GameDataCache {
     }
 }
 
-// ============================================================================
-// 位置注册表
-// ============================================================================
-
-/// 位置注册表
-#[derive(Debug, Clone)]
-pub struct LocationRegistry {
-    graph: LocationGraph,
-}
-
-impl LocationRegistry {
-    /// 从配置创建位置注册表
-    pub fn from_config(config: &super::types::UnifiedLocationsConfig) -> Self {
-        let mut graph = LocationGraph::new();
-
-        // 添加节点
-        for node in &config.data.nodes {
-            let location_node = LocationNode {
-                node_id: node.node_id.clone(),
-                name: node.name.clone(),
-                node_type: node.node_type,
-                parent_id: node.parent_id.clone(),
-                description: node.description.clone(),
-                environmental_damage: node.environmental_damage,
-                gatherable_items: node.gatherable_items.clone(),
-                implicit_travel_cost: None,
-            };
-            graph.add_node(location_node);
-        }
-
-        // 添加边
-        for edge in &config.data.edges {
-            let location_edge = LocationEdge {
-                from_node_id: edge.from.clone(),
-                to_node_id: edge.to.clone(),
-                travel_cost: edge.travel_cost as u32,
-            };
-            graph.add_edge(location_edge);
-        }
-
-        Self { graph }
-    }
-
-    /// 检查节点是否存在
-    pub fn node_exists(&self, node_id: &str) -> bool {
-        self.graph.nodes.contains_key(node_id)
-    }
-
-    /// 获取节点信息
-    pub fn get_node(&self, node_id: &str) -> Option<&LocationNode> {
-        self.graph.nodes.get(node_id)
-    }
-
-    /// 检查两个节点是否直接相连
-    pub fn is_connected(&self, from: &str, to: &str) -> bool {
-        self.graph.is_connected(from, to)
-    }
-
-    /// 获取移动消耗
-    #[allow(dead_code)]
-    pub fn get_travel_cost(&self, from: &str, to: &str) -> Option<u32> {
-        self.graph
-            .get_neighbors(from)
-            .iter()
-            .find(|e| e.to_node_id == to)
-            .map(|e| e.travel_cost)
-    }
-
-    /// 获取节点的所有相邻边
-    pub fn get_neighbors(&self, node_id: &str) -> Vec<&LocationEdge> {
-        self.graph.get_neighbors(node_id)
-    }
-
-    /// 获取所有邻居（显式边 + 隐式 parent-child），自动去重
-    pub fn get_all_neighbors(
-        &self,
-        node_id: &str,
-        default_implicit_travel_cost: u32,
-    ) -> Vec<AdjacentNode> {
-        self.graph
-            .get_all_neighbors(node_id, default_implicit_travel_cost)
-    }
-
-    /// 导出整个图为 owned 可序列化结构（C4：地点端点用）
-    ///
-    /// 返回 `LocationGraph` 的 owned 克隆（节点+边），前端可以一次性拿到完整
-    /// 地图拓扑，无需逐节点遍历。`LocationGraph` 已实现 Serialize。
-    pub fn export_graph(&self) -> LocationGraph {
-        self.graph.clone()
-    }
-
-    /// 所有节点 id（owned，便于遍历）
-    pub fn all_node_ids(&self) -> Vec<String> {
-        self.graph.nodes.keys().cloned().collect()
-    }
-}
-
-// ============================================================================
-// 测试
-// ============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::game_data::types::*;
-
-    /// 回归测试：locations.yaml 的 region 节点不能被降级为 Map。
-    /// 之前 cache.rs 手写 match 只认 map/sub_scene，region 落默认 Map。
-    #[test]
-    fn test_location_node_type_region_not_swallowed() {
-        let yaml = r#"
-version: "1.0"
-data:
-  nodes:
-    - node_id: test_region
-      name: 测试区域
-      type: "region"
-      parent_id: None
-  edges: []
-"#;
-        let config: UnifiedLocationsConfig = serde_yaml::from_str(yaml).unwrap();
-        let registry = LocationRegistry::from_config(&config);
-        let node = registry.graph.nodes.get("test_region");
-        assert!(node.is_some(), "region 节点应存在");
-        assert_eq!(
-            node.unwrap().node_type,
-            cyber_jianghu_protocol::LocationNodeType::Region,
-            "region 不应被降级为 Map"
-        );
-    }
 
     fn create_test_game_data() -> GameData {
         GameData {
@@ -579,50 +455,6 @@ data:
         // 验证 Arc 可以正常使用
         let guard = arc.read().expect("rwlock poisoned");
         assert_eq!(guard.game_rules.version, "2.0.0");
-    }
-
-    #[test]
-    fn test_location_registry() {
-        let config = UnifiedLocationsConfig {
-            version: "2.0.0".to_string(),
-            description: "".to_string(),
-            meta: Default::default(),
-            data: LocationsData {
-                nodes: vec![
-                    LocationNodeData {
-                        node_id: "lobby".to_string(),
-                        name: "大堂".to_string(),
-                        node_type: cyber_jianghu_protocol::LocationNodeType::SubScene,
-                        parent_id: Some("inn".to_string()),
-                        description: None,
-                        environmental_damage: None,
-                        gatherable_items: vec![],
-                        implicit_travel_cost: None,
-                    },
-                    LocationNodeData {
-                        node_id: "kitchen".to_string(),
-                        name: "厨房".to_string(),
-                        node_type: cyber_jianghu_protocol::LocationNodeType::SubScene,
-                        parent_id: Some("inn".to_string()),
-                        description: None,
-                        environmental_damage: None,
-                        gatherable_items: vec![],
-                        implicit_travel_cost: None,
-                    },
-                ],
-                edges: vec![LocationEdgeData {
-                    from: "lobby".to_string(),
-                    to: "kitchen".to_string(),
-                    travel_cost: 1,
-                }],
-            },
-        };
-
-        let registry = LocationRegistry::from_config(&config);
-
-        assert!(registry.node_exists("lobby"));
-        assert!(registry.is_connected("lobby", "kitchen"));
-        assert_eq!(registry.get_travel_cost("lobby", "kitchen"), Some(1));
     }
 
     // ========================================================================
