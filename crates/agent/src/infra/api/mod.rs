@@ -165,8 +165,8 @@ pub struct HttpApiState {
     pub game_rules: Arc<RwLock<Option<cyber_jianghu_protocol::GameRules>>>,
     /// 叙事生成器（可选，仅在有 LlmClient 时可用）
     pub narrative_generator: Option<Arc<NarrativeGenerator>>,
-    /// 动态人设（可选）
-    pub dynamic_persona: Option<Arc<ThreadSafePersona>>,
+    /// 动态人设（可选；persona 在 api_state 之后创建，事后经 set_dynamic_persona 注入）
+    pub dynamic_persona: std::sync::Arc<std::sync::RwLock<Option<ThreadSafePersona>>>,
     /// 三魂循环记录器注册表，按 agent_id 隔离
     /// 支持多角色：当前角色写入 + 所有角色读取
     pub soul_cycle_registrar:
@@ -875,7 +875,7 @@ pub fn create_http_state(
         intent_validator,
         game_rules: Arc::new(RwLock::new(None)),
         narrative_generator: None,
-        dynamic_persona: None,
+        dynamic_persona: std::sync::Arc::new(std::sync::RwLock::new(None)),
         soul_cycle_registrar: soul_cycle_registrar.clone(),
         data_dir: data_dir_clone.clone(),
         dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
@@ -940,9 +940,10 @@ impl HttpApiState {
     }
 
     /// 设置动态人设
-    pub fn with_dynamic_persona(mut self, persona: Arc<ThreadSafePersona>) -> Self {
-        self.dynamic_persona = Some(persona);
-        self
+    /// 注入动态人设（run_agent 在 persona 创建后调用；切角色重建 persona 后同样适用）。
+    /// std RwLock 仅短临界区写入，不跨 await 持有。
+    pub fn set_dynamic_persona(&self, persona: ThreadSafePersona) {
+        *self.dynamic_persona.write().expect("rwlock poisoned") = Some(persona);
     }
 
     /// 设置托梦存储
@@ -1027,7 +1028,12 @@ impl HttpApiState {
             return;
         };
 
-        let Some(persona) = &self.dynamic_persona else {
+        let persona = self
+            .dynamic_persona
+            .read()
+            .expect("rwlock poisoned")
+            .clone();
+        let Some(persona) = persona else {
             return;
         };
 

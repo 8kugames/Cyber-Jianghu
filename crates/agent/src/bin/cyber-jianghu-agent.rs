@@ -966,6 +966,9 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     };
     let persona =
         cyber_jianghu_agent::component::persona::ThreadSafePersona::new(resolved_initial_persona);
+    // 接入 HTTP API：state_stream 视图(主角名/情绪)、认知上下文、叙事更新均消费 persona；
+    // 此前该字段恒 None，四处消费者全部静默跳过（死接线）
+    api_state.set_dynamic_persona(persona.clone());
 
     let cognitive_config = CognitiveEngineConfig {
         agent_name: agent_name.to_string(),
