@@ -514,10 +514,15 @@ pub(crate) async fn get_cognitive_context_handler(
         Some(world_state) => {
             let builder = CognitiveContextBuilder::new(Default::default());
 
+            let persona_opt = state
+                .dynamic_persona
+                .read()
+                .expect("rwlock poisoned")
+                .clone();
             let (persona_info, persona_ref): (
                 Option<CognitivePersonaInfo>,
                 Option<crate::component::persona::dynamic_persona::DynamicPersona>,
-            ) = if let Some(ref persona_arc) = state.dynamic_persona {
+            ) = if let Some(ref persona_arc) = persona_opt {
                 persona_arc.read(|p| {
                     let info = CognitivePersonaInfo {
                         name: p.name.clone(),

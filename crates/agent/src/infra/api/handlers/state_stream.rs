@@ -103,16 +103,16 @@ struct StreamViewDeps<'a> {
 async fn build_state_event_data(state: &HttpApiState) -> Option<Bytes> {
     let ws = state.current_state.read().await.clone()?;
 
-    let protagonist_name = state
-        .dynamic_persona
-        .as_ref()
-        .map(|p| p.read(|d| d.name.clone()))
-        .unwrap_or_default();
-    let mood = state
-        .dynamic_persona
-        .as_ref()
-        .map(|p| p.read(|d| d.current_state.current_emotion.clone()))
-        .unwrap_or_default();
+    let (protagonist_name, mood) = {
+        let guard = state.dynamic_persona.read().expect("rwlock poisoned");
+        match guard.as_ref() {
+            Some(p) => (
+                p.read(|d| d.name.clone()),
+                p.read(|d| d.current_state.current_emotion.clone()),
+            ),
+            None => (String::new(), String::new()),
+        }
+    };
     let last_action = state
         .decision_context_snapshot
         .read()
