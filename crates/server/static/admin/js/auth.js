@@ -20,10 +20,10 @@ async function apiFetch(url, options = {}) {
     if (authToken) {
         options.headers["Authorization"] = "Bearer " + authToken;
     }
-    
+
     try {
         const res = await fetch(url, options);
-        
+
         // 统一处理 401 鉴权失败
         if (res.status === 401) {
             // 如果曾验证过但现在 401，说明 Token 过期，需要重置状态并唤起弹窗
@@ -36,14 +36,14 @@ async function apiFetch(url, options = {}) {
             showAuthModal();
             throw new ApiError(401, "UNAUTHORIZED");
         }
-        
+
         // 统一处理 5xx 网关/服务异常
         if (res.status >= 500) {
             console.error(`[API] Server Error ${res.status} on ${url}`);
             showToast("服务器内部错误，请稍后重试", "error");
             throw new ApiError(res.status, "SERVER_ERROR");
         }
-        
+
         return res;
     } catch (e) {
         // 网络层异常 (如 net::ERR_CONNECTION_REFUSED)
@@ -65,14 +65,14 @@ function showAuthModal() {
             <div class="modal-content" style="max-width: 400px; text-align: center;">
                 <h2 style="margin-bottom: 20px;">系统鉴权</h2>
                 <p style="margin-bottom: 20px; color: var(--text-secondary); font-size: 14px;">请输入管理员 Token 以继续操作</p>
-                <input type="password" id="auth-token-input" placeholder="输入 Token..." 
+                <input type="password" id="auth-token-input" placeholder="输入 Token..."
                        style="width: 100%; padding: 10px; margin-bottom: 20px; background: var(--bg-level-1); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: var(--radius-sm); outline: none;">
                 <button class="btn btn-primary" onclick="submitAuthToken()" style="width: 100%;">验证</button>
             </div>
         </div>`;
         document.body.insertAdjacentHTML('beforeend', modalHtml);
         modal = document.getElementById("auth-modal");
-        
+
         // Add enter key listener for the newly injected input
         document.getElementById("auth-token-input").addEventListener("keypress", function(e) {
             if (e.key === "Enter") submitAuthToken();
@@ -86,6 +86,41 @@ function hideAuthModal() {
     if (modal) modal.classList.remove("show");
 }
 
+// 登录成功后的公共收尾：持久化凭证并按当前页面触发数据加载。
+// 手动输入弹窗与 hash 直达链接（#token=xxx）两条路径共用。
+async function completeLogin(token, tokenType) {
+    authToken = token;
+    localStorage.setItem("admin_token", token);
+    authVerified = true;
+    authTokenType = tokenType || "read";
+    localStorage.setItem("admin_token_type", authTokenType);
+    hideAuthModal();
+    if (Object.keys(locationNames).length === 0) {
+        await initLocationMapping();
+    }
+    if (Object.keys(attributeMeta).length === 0) {
+        await initAttributeMeta();
+    }
+
+    // Safe dispatch based on current page
+    var dashboardEl = document.getElementById("dashboard");
+    var configListEl = document.getElementById("config-list");
+
+    if (dashboardEl && dashboardEl.classList.contains("active") && typeof loadStats === "function") {
+        loadStats();
+    } else if (configListEl && typeof loadConfigList === "function") {
+        loadConfigList();
+    } else if (typeof loadActiveHistoryTab === "function") {
+        loadActiveHistoryTab();
+    } else if (typeof loadChronicles === "function") {
+        loadChronicles();
+    } else if (typeof loadExperiences === "function") {
+        loadExperiences();
+    } else if (typeof loadConfig === "function") {
+        loadConfig();
+    }
+}
+
 async function submitAuthToken() {
     var token = document.getElementById("auth-token-input").value.trim();
     if (token) {
@@ -97,37 +132,8 @@ async function submitAuthToken() {
             });
 
             if (res.ok) {
-                authToken = token;
-                localStorage.setItem("admin_token", token);
-                authVerified = true; // Mark as manually verified
                 var loginData = await res.json();
-                authTokenType = loginData.token_type || "read";
-                localStorage.setItem("admin_token_type", authTokenType);
-                hideAuthModal();
-                if (Object.keys(locationNames).length === 0) {
-                    await initLocationMapping();
-                }
-                if (Object.keys(attributeMeta).length === 0) {
-                    await initAttributeMeta();
-                }
-                
-                // Safe dispatch based on current page
-                var dashboardEl = document.getElementById("dashboard");
-                var configListEl = document.getElementById("config-list");
-                
-                if (dashboardEl && dashboardEl.classList.contains("active") && typeof loadStats === "function") {
-                    loadStats();
-                } else if (configListEl && typeof loadConfigList === "function") {
-                    loadConfigList();
-                } else if (typeof loadActiveHistoryTab === "function") {
-                    loadActiveHistoryTab();
-                } else if (typeof loadChronicles === "function") {
-                    loadChronicles();
-                } else if (typeof loadExperiences === "function") {
-                    loadExperiences();
-                } else if (typeof loadConfig === "function") {
-                    loadConfig();
-                }
+                await completeLogin(token, loginData.token_type);
             } else {
                 alert('Token 无效');
             }
@@ -151,7 +157,42 @@ async function logout() {
     window.location.href = '/admin';
 }
 
+// Hash 直达链接登录：#token=xxx 由 utils.js 提取并即时抹除 URL。
+// 验证走标准 /api/admin/login，失败回落到手动输入弹窗。
+async function bootstrapFromHashToken() {
+    try {
+        const res = await fetch(API.ADMIN + '/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: hashBootstrapToken })
+        });
+        if (res.ok) {
+            var loginData = await res.json();
+            await completeLogin(hashBootstrapToken, loginData.token_type);
+        } else {
+            console.warn("[Auth] Hash token rejected by server, falling back to manual input");
+            showAuthModal();
+        }
+    } catch (e) {
+        console.warn("[Auth] Hash token login request failed:", e);
+        showAuthModal();
+    }
+}
+
+var hashBootstrapStarted = false;
+
+function startHashBootstrapIfPending() {
+    if (!hashBootstrapToken || hashBootstrapStarted) return;
+    hashBootstrapStarted = true;
+    // URL 显式携带的 token 优先于本地缓存（支持凭证轮换）；
+    // 验证完成前先置空 authToken，避免 bootstrap() 并行触发双重加载
+    authToken = "";
+    bootstrapFromHashToken();
+}
+
 function initAuth() {
+    startHashBootstrapIfPending();
+    if (hashBootstrapToken) return; // hash 流程接管，验证后由 completeLogin 分发加载
     if (!authToken) {
         showAuthModal();
     }
@@ -166,3 +207,7 @@ function getAuthHeaders() {
     }
     return { "Authorization": "Bearer " + authToken };
 }
+
+// 自举不等待页面入口：settings / history 等子页面不调用 initAuth()，
+// 任何页面直达 #token= 均可在此触发登录（与 initAuth 共用防重入守卫）。
+startHashBootstrapIfPending();

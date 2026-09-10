@@ -37,15 +37,28 @@ function isShoutAtype(at, ad) {
 // authVerified may be declared in auth.js (loaded after utils.js), so window guard needed
 var authVerified = typeof window.authVerified !== "undefined" ? window.authVerified : false;
 
-// P1-20 修复：禁止从 URL ?token=... bootstrap token。
-// 之前会把 token 写入浏览器历史、access log、CDN 缓存、分享链接。
-// 现在的唯一登录入口：登录页输入 token，存入 localStorage 与 sessionStorage。
-// 如果用户在 URL 携带了 token，提示其走登录页重新认证。
+// 直达链接支持（P1-20 安全边界内）：只接受 hash fragment 形式（#token=xxx）。
+// hash 不会随请求发送到服务器 —— 不进 access log / CDN 缓存 / Referer；
+// 提取后立即 replaceState 抹除，浏览器历史与复制出的链接均不再含 token。
+// ?token=xxx 仍然禁止（token 会进入服务器日志与代理缓存，P1-20 移除）。
+var hashBootstrapToken = "";
+(function extractHashToken() {
+    var hash = window.location.hash;
+    if (hash.length > 1) {
+        var t = new URLSearchParams(hash.slice(1)).get("token");
+        if (t) {
+            hashBootstrapToken = t;
+            history.replaceState(null, "", window.location.pathname + window.location.search);
+        }
+    }
+})();
+
 if (new URLSearchParams(window.location.search).has("token")) {
     console.warn(
-        "[Security] URL token bootstrap has been disabled for security. " +
-        "Please log in via the login page; tokens are no longer accepted from URL parameters."
+        "[Security] URL ?token= has been disabled (it leaks into server logs / CDN caches). " +
+        "Use the #token= fragment form instead."
     );
+    showToast("已禁用 ?token= 链接，请改用 #token= 直达链接", "error");
 }
 
 // ============================================================================
