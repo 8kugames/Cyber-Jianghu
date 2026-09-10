@@ -9,30 +9,30 @@ members = [
 
 [workspace.dependencies]
 # 序列化
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-serde_yaml = "0.9"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+serde_yaml = "0.9.34"
 
 # 异步运行时
-tokio = { version = "1.35", features = ["full"] }
-futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+tokio = { version = "1.53.1", features = ["full"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
 
 # 工具库
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.6", features = ["v4", "v5", "serde"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+uuid = { version = "1.26.0", features = ["v4", "v5", "serde"] }
 
 # 错误处理
-anyhow = "1.0"
-thiserror = "1.0"
+anyhow = "1.0.104"
+thiserror = "1.0.69"
 
 # 随机数
-rand = "0.10"
+rand = "0.10.2"
 
 # 日志
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-tracing-appender = "0.1"
-tracing-test = "0.2"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+tracing-appender = "0.1.2"
+tracing-test = "0.2.6"
 
 # 协议 crate
 cyber-jianghu-protocol = { path = "crates/protocol" }
