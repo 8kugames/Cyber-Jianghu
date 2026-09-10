@@ -268,6 +268,75 @@ let expPage = 1;
 var LAYER_NAMES = { layer0: '目标校验', layer1: '动作审查', layer2: '规则校验', layer3: '意图审查' };
 const SPEAK_TYPES = { speak: true, talk: true, say: true, chat: true, 说话: true };
 
+// ============================================================================
+// 经历翻译层：{名}[{短uuid}]（与服务端 crate::display 同源同格式）
+// 数据源：WorldState（背包/采集点/地面/配方详情）+ 关系记忆（历史互动对象）
+// ============================================================================
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// 来源/去向类型中文化（与管理端 SOURCE_TYPE_NAMES 同步）
+const SOURCE_TYPE_NAMES = { ground: '地面', agent: '角色', resource: '资源点' };
+let expNameMaps = { items: {}, agents: {}, recipes: {} };
+
+async function loadExpNameMaps() {
+    const add = (uuid, name) => { if (uuid && name) expNameMaps.items[uuid] = name; };
+    try {
+        const ws = await get(API.STATE);
+        (ws.self_state?.inventory || []).forEach((i) => add(i.item_id, i.name));
+        (ws.location?.gatherable_items || []).forEach((i) => add(i.item_id, i.name));
+        (ws.nearby_items || []).forEach((i) => add(i.item_id, i.name));
+        (ws.self_state?.recipe_details || []).forEach((r) => {
+            if (r.recipe_id && r.name) expNameMaps.recipes[r.recipe_id] = r.name;
+            add(r.result_item, r.result_item_name);
+            (r.materials || []).forEach((m) => add(m.item_id, m.item_name));
+        });
+        (ws.entities || []).forEach((e) => { if (e.id && e.name) expNameMaps.agents[e.id] = e.name; });
+    } catch (_) {}
+    // 关系记忆补全历史互动对象（best-effort）
+    try {
+        const rel = await get(API.RELATIONSHIP_LIST);
+        (rel.relationships || rel || []).forEach((r) => {
+            const id = r.target_agent_id || r.target_id;
+            if (id && r.target_name) expNameMaps.agents[id] = r.target_name;
+        });
+    } catch (_) {}
+}
+
+function shortId(v) { return String(v || '').substring(0, 8); }
+
+// 属性值转义：escapeHtml 不转义双引号，title 属性内嵌 JSON 必须额外处理
+function escapeAttr(v) { return escapeHtml(v).replace(/"/g, '&quot;'); }
+
+// 物品引用翻译；非 uuid（历史裸 id）原样返回
+function resolveItemRef(v) {
+    if (!v) return '';
+    if (!UUID_RE.test(v)) return String(v);
+    const name = expNameMaps.items[v];
+    return name ? `${name}[${shortId(v)}]` : `未知物品[${shortId(v)}]`;
+}
+
+// 角色引用翻译；未知角色保留短 uuid 便于排障
+function resolveAgentRef(v) {
+    if (!v) return '';
+    const name = expNameMaps.agents[v];
+    return name ? `${name}[${shortId(v)}]` : `未知角色[${shortId(v)}]`;
+}
+
+// 配方引用翻译
+function resolveRecipeRef(v) {
+    if (!v) return '';
+    const name = expNameMaps.recipes[v];
+    return name ? `${name}[${shortId(v)}]` : `未知配方[${shortId(v)}]`;
+}
+
+// target_id 语义兜底：已知名册内先角色后物品，未知 uuid 默认按角色展示
+function resolveTargetRef(v) {
+    if (!v) return '';
+    if (expNameMaps.agents[v]) return resolveAgentRef(v);
+    if (expNameMaps.items[v]) return resolveItemRef(v);
+    if (UUID_RE.test(v)) return resolveAgentRef(v);
+    return resolveItemRef(v);
+}
+
 // 尝试从服务器 souls.yaml layer_display 配置拉取天魂层名（失败时静默保留 LAYER_NAMES 硬编码值）
 async function tryFetchLayerDisplay() {
     try {
@@ -280,6 +349,7 @@ async function mountExperiences(container, ctx) {
     expPage = 1;
     showLoading(container);
     tryFetchLayerDisplay(); // best-effort 从服务器拉取层配置；失败时静默保留硬编码
+    await loadExpNameMaps(); // 翻译层就绪后再渲染（失败时空表兑底）
     await loadExpPage(container, ctx);
 }
 
@@ -460,20 +530,55 @@ function renderActionText(actionType, actionData) {
     if (typeof ad === 'string') { try { ad = JSON.parse(ad); } catch { ad = {}; } }
     if (!ad || typeof ad !== 'object') ad = {};
     const content = ad.content || '';
-    const targetId = ad.target_agent_id;
 
-    let html = '<div class="soul-text">';
-    if (SPEAK_TYPES[at] && (!ad || !ad.channel || ad.channel === "public") && content) {
-        const label = targetId ? `对${targetId.substring(0, 8)}...说话` : '向在场众人说话';
-        html += `${escapeHtml(label)}："${escapeHtml(content)}"`;
-    } else if (at === "说话" && ad && ad.channel === "private" && content) {
-        html += `密语："${escapeHtml(content)}"`;
-    } else if (at === "说话" && ad && ad.channel === "broadcast" && content) {
+    // 翻译后的结构化字段（known keys）；原始 JSON 保留在 title 中供查验
+    const parts = [];
+    if (ad.item_id) parts.push(resolveItemRef(ad.item_id));
+    if (ad.recipe_id) parts.push(`配方：${resolveRecipeRef(ad.recipe_id)}`);
+    if (ad.quantity != null) parts.push(`x${escapeHtml(ad.quantity)}`);
+    if (ad.target_agent_id) parts.push(`→${resolveAgentRef(ad.target_agent_id)}`);
+    if (ad.target_id) parts.push(`→${resolveTargetRef(ad.target_id)}`);
+    if (ad.source_id) {
+        parts.push(ad.source_type === 'agent'
+            ? `来源：${resolveAgentRef(ad.source_id)}`
+            : `来源：${resolveItemRef(ad.source_id)}`);
+    } else if (ad.source_type) {
+        parts.push(`来源：${escapeHtml(SOURCE_TYPE_NAMES[ad.source_type] || ad.source_type)}`);
+    }
+    if (ad.recipient_id) {
+        parts.push(ad.recipient_type === 'agent'
+            ? `→${resolveAgentRef(ad.recipient_id)}`
+            : `→${resolveItemRef(ad.recipient_id)}`);
+    } else if (ad.recipient_type) {
+        parts.push(`→${escapeHtml(SOURCE_TYPE_NAMES[ad.recipient_type] || ad.recipient_type)}`);
+    }
+    if (ad.target_location) parts.push(`→${escapeHtml(ad.target_location)}`);
+    if (content) parts.push(`"${escapeHtml(content)}"`);
+
+    // 剩余未知字段：键值截断展示
+    const known = ['item_id', 'recipe_id', 'quantity', 'target_agent_id', 'target_id',
+        'source_id', 'source_type', 'recipient_id', 'recipient_type',
+        'target_location', 'content', 'channel'];
+    const extra = Object.keys(ad)
+        .filter((k) => ad[k] != null && ad[k] !== '' && known.indexOf(k) === -1)
+        .map((k) => `${escapeHtml(k)}:${escapeHtml(String(ad[k]).substring(0, 30))}`);
+    if (extra.length > 0) parts.push(extra.join('，'));
+
+    // 原始 JSON 供查验（属性级转义：JSON 内含双引号）
+    const titleAttr = ` title="原始数据: ${escapeAttr(JSON.stringify(ad, null, 0))}"`;
+
+    let html = '<div class="soul-text"' + titleAttr + '>';
+    if (SPEAK_TYPES[at] && (!ad.channel || ad.channel === 'public') && content) {
+        const label = ad.target_agent_id ? `对${resolveAgentRef(ad.target_agent_id)}说话` : '向在场众人说话';
+        html += `${label}："${escapeHtml(content)}"`;
+    } else if (at === '说话' && ad.channel === 'private' && content) {
+        const label = ad.target_agent_id ? `对${resolveAgentRef(ad.target_agent_id)}密语` : '密语';
+        html += `${label}："${escapeHtml(content)}"`;
+    } else if (at === '说话' && ad.channel === 'broadcast' && content) {
         html += `大喊："${escapeHtml(content)}"`;
     } else {
         html += escapeHtml(at);
-        const keys = Object.keys(ad).filter(k => ad[k] != null && ad[k] !== '');
-        if (keys.length > 0) html += ` <span class="soul-params">${escapeHtml(JSON.stringify(ad, null, 0))}</span>`;
+        if (parts.length > 0) html += ` <span class="soul-params"${titleAttr}>${parts.join('，')}</span>`;
     }
     html += '</div>';
     return html;

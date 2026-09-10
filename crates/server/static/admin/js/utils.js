@@ -331,6 +331,18 @@ function resolveRecipeName(recipeId) {
     return recipeId;
 }
 
+// 物品引用翻译（兼容 uuid 新协议与历史裸 item_id）
+function resolveItemName(itemRef) {
+    if (!itemRef) return "";
+    var rawId = displayMapCache.itemsByUuid[itemRef] || itemRef;
+    if (displayMapCache.items[rawId]) {
+        var itemUuid = displayMapCache.item_uuids[rawId] || "";
+        return displayMapCache.items[rawId] + "[" + (itemUuid ? itemUuid.substring(0, 8) : rawId) + "]";
+    }
+    if (UUID_RE.test(itemRef)) return "未知物品[" + itemRef.substring(0, 8) + "]";
+    return itemRef;
+}
+
 // 来源类型中文化（UI 标签，非业务数据）
 function resolveSourceName(sourceType) {
     if (!sourceType) return "";
@@ -361,31 +373,33 @@ function renderActionText(aType, aData) {
 
     // 物品类字段结构化展示
     if (aData.item_id) {
-        // 新协议：完整 uuid（v5 派生）→ 反查裸 id 取名；历史记录：裸 item_id 直接翻译
-        // 均未命中 → 未知物品/原始引用（不区分 LLM 幻觉与配置漂移，如实展示）
-        var rawItemId = displayMapCache.itemsByUuid[aData.item_id] || aData.item_id;
-        if (displayMapCache.items[rawItemId]) {
-            var itemUuid = displayMapCache.item_uuids[rawItemId] || "";
-            text += " " + escapeHtml(
-                displayMapCache.items[rawItemId] + "[" + (itemUuid ? itemUuid.substring(0, 8) : rawItemId) + "]"
-            );
-        } else if (UUID_RE.test(aData.item_id)) {
-            text += " 未知物品[" + escapeHtml(aData.item_id.substring(0, 8)) + "]";
-        } else {
-            text += " " + escapeHtml(aData.item_id);
-        }
+        text += " " + escapeHtml(resolveItemName(aData.item_id));
     }
     if (aData.quantity) text += " x" + aData.quantity;
     if (aData.recipe_id) text += " 配方：" + escapeHtml(resolveRecipeName(aData.recipe_id));
-    if (aData.source_type) text += "（" + escapeHtml(resolveSourceName(aData.source_type)) + "）";
-    if (aData.recipient_type) text += "（→" + escapeHtml(resolveSourceName(aData.recipient_type)) + "）";
+    if (aData.target_id) text += " → " + escapeHtml(resolveTargetName(aData.target_id));
+    if (aData.source_id) {
+        // source_id 语义随 source_type 变化：agent=角色，其余=物品
+        var sourceDisplay = aData.source_type === "agent"
+            ? resolveTargetName(aData.source_id)
+            : resolveItemName(aData.source_id);
+        text += "（来源：" + escapeHtml(sourceDisplay) + "）";
+    }
+    if (aData.recipient_id) {
+        var recipientDisplay = aData.recipient_type === "agent"
+            ? resolveTargetName(aData.recipient_id)
+            : resolveItemName(aData.recipient_id);
+        text += "（→" + escapeHtml(recipientDisplay) + "）";
+    }
+    if (aData.source_type && !aData.source_id) text += "（" + escapeHtml(resolveSourceName(aData.source_type)) + "）";
+    if (aData.recipient_type && !aData.recipient_id) text += "（→" + escapeHtml(resolveSourceName(aData.recipient_type)) + "）";
     if (aData.content) text += " \"" + escapeHtml(content) + "\"";
     if (aData.target_agent_id) text += " → " + escapeHtml(resolveTargetName(aData.target_agent_id));
     if (aData.target_location) text += " → " + escapeHtml(aData.target_location);
 
     // 剩余未知字段：键值对中文化（非暴力 JSON.stringify）
     var known = ["content", "item_id", "quantity", "recipe_id", "source_type", "source_id",
-                 "recipient_type", "recipient_id", "target_agent_id", "target_location", "channel"];
+                 "recipient_type", "recipient_id", "target_id", "target_agent_id", "target_location", "channel"];
     var extra = Object.keys(aData).filter(function (k) { return known.indexOf(k) === -1; });
     if (extra.length > 0) {
         text += " " + extra.map(function (k) {
