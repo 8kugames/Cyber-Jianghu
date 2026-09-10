@@ -477,6 +477,45 @@ impl super::Agent {
                         }
                     }
                 }
+                // auto-rebirth 完成轮询：转世成功后立即重连，不等面板触发。
+                // 修复：注册返回 nil 入口调度的自动转世仅置 is_dead=false +
+                // pending_rebirth_agent_id，无 reconnect_rx 信号，需在此轮询唤醒。
+                _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+                    let api_state = self.http_api_state.clone();
+                    let Some(ref api_state) = api_state else {
+                        continue;
+                    };
+                    if api_state.is_dead.load(std::sync::atomic::Ordering::Relaxed) {
+                        continue;
+                    }
+                    // peek：重连成功后才消费，失败保留 pending id 供下轮重试
+                    let new_agent_id = *api_state.pending_rebirth_agent_id.read().await;
+                    let Some(new_id) = new_agent_id else {
+                        continue;
+                    };
+                    info!("[rebirth] 检测到自动转世完成: new_agent_id={}", new_id);
+
+                    self.client.set_agent_id(Some(new_id)).await;
+                    match self.reconnect().await {
+                        Ok(()) => {
+                            // 消费 pending id + 更新本地角色配置（仅成功后）
+                            api_state.pending_rebirth_agent_id.write().await.take();
+                            if let Some(ref mut char_cfg) = self.character_config {
+                                char_cfg.agent_id = Some(new_id);
+                                char_cfg.status = crate::config::CharacterStatus::Alive;
+                                let dir = api_state.character_dir.read().await.clone();
+                                if let Err(e) = save_character_config_to_fs(char_cfg, &dir) {
+                                    warn!("[rebirth] 保存角色配置失败: {}", e);
+                                }
+                            }
+                            info!("[rebirth] 自动转世重连成功，退出等待转生模式");
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            warn!("[rebirth] 自动转世重连失败（5s 后重试）: {}", e);
+                        }
+                    }
+                }
             }
         }
     }

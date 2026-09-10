@@ -262,9 +262,14 @@ pub type DecayResult = (
 );
 
 /// 返回值：(更新后的Agent状态, 本Tick死亡的Agent ID列表, 事件列表, 死亡通知列表)
+///
+/// `acted_recently`：本 tick 窗口内提交过 intent 的 Agent 集合。
+/// 集合外的 Agent 视为休息 tick（idle-skip/离线/思考间隙），
+/// decay≠0 且有 recovery_formula 的属性（如 sanity）仅在休息 tick 恢复。
 pub fn apply_decay_and_environmental_damage(
     tick_id: i64,
     mut agent_states: Vec<AgentState>,
+    acted_recently: &std::collections::HashSet<Uuid>,
 ) -> DecayResult {
     let mut dead_agents = Vec::new();
     let mut events = Vec::new();
@@ -287,8 +292,10 @@ pub fn apply_decay_and_environmental_damage(
 
         // 应用基础生理值衰减
         // 传递 tick_id，以便 apply_decay 可以获取季节信息
+        // 休息判定：本 tick 窗口无 intent = 身体在休息（门控恢复生效）
+        let rested = !acted_recently.contains(&agent_id);
         // 返回触发死亡的属性名（如果有）
-        let death_attr_name = state.apply_decay(tick_id);
+        let death_attr_name = state.apply_decay_with_rest(tick_id, rested);
 
         // 如果Agent因衰减死亡，创建死亡通知
         if let Some(attr_name) = death_attr_name {
@@ -618,7 +625,11 @@ mod tests {
 
         // 执行衰减
         let (updated_agents, dead_agents, events, death_notifications) =
-            apply_decay_and_environmental_damage(tick_id, agents);
+            apply_decay_and_environmental_damage(
+                tick_id,
+                agents,
+                &std::collections::HashSet::new(),
+            );
 
         // 验证死亡通知
         assert_eq!(death_notifications.len(), 1, "应该创建一个死亡通知");
@@ -660,7 +671,11 @@ mod tests {
         let agents = vec![agent];
 
         let (updated_agents, dead_agents, events, death_notifications) =
-            apply_decay_and_environmental_damage(tick_id, agents);
+            apply_decay_and_environmental_damage(
+                tick_id,
+                agents,
+                &std::collections::HashSet::new(),
+            );
 
         // 验证死亡通知
         assert_eq!(death_notifications.len(), 1);
@@ -697,7 +712,8 @@ mod tests {
 
         let agents = vec![agent];
 
-        let (_, _, _, death_notifications) = apply_decay_and_environmental_damage(1, agents);
+        let (_, _, _, death_notifications) =
+            apply_decay_and_environmental_damage(1, agents, &std::collections::HashSet::new());
 
         assert!(
             death_notifications.is_empty(),
@@ -725,7 +741,11 @@ mod tests {
         let agents = vec![agent1, agent2];
 
         let (updated_agents, dead_agents, events, death_notifications) =
-            apply_decay_and_environmental_damage(tick_id, agents);
+            apply_decay_and_environmental_damage(
+                tick_id,
+                agents,
+                &std::collections::HashSet::new(),
+            );
 
         // 验证死亡通知
         assert_eq!(death_notifications.len(), 2, "应该创建两个死亡通知");
@@ -759,13 +779,46 @@ mod tests {
 
         let agents = vec![agent];
 
-        let (_, _, _, death_notifications) = apply_decay_and_environmental_damage(1, agents);
+        let (_, _, _, death_notifications) =
+            apply_decay_and_environmental_damage(1, agents, &std::collections::HashSet::new());
 
         // 已死亡的 Agent 不应再次产生死亡通知
         assert!(
             death_notifications.is_empty(),
             "已死亡的 Agent 不应再次产生死亡通知"
         );
+    }
+
+    /// 休息门控恢复：休息 tick 恢复 sanity，行动 tick 只衰减
+    #[test]
+    fn test_rest_gated_recovery_differentiates_acted_and_rested() {
+        crate::game_data::init_test_registry();
+
+        // 测试 fixture 中 sanity 配置为 decay_per_tick=1 + recovery_formula="4"
+        let mut rested_agent = AgentState::new(Uuid::new_v4(), 1);
+        rested_agent.is_alive = true;
+        rested_agent.status.set("sanity", 50).unwrap();
+        let rested_id = rested_agent.agent_id;
+
+        let mut acted_agent = AgentState::new(Uuid::new_v4(), 1);
+        acted_agent.is_alive = true;
+        acted_agent.status.set("sanity", 50).unwrap();
+        let acted_id = acted_agent.agent_id;
+
+        let acted_recently: std::collections::HashSet<Uuid> = [acted_id].into();
+
+        let (updated_states, dead, _, _) = apply_decay_and_environmental_damage(
+            1,
+            vec![rested_agent, acted_agent],
+            &acted_recently,
+        );
+        assert!(dead.is_empty());
+
+        let by_id = |id: Uuid| updated_states.iter().find(|s| s.agent_id == id).unwrap();
+        // 行动：仅 -1 衰减 = 49
+        assert_eq!(by_id(acted_id).status.get("sanity"), Some(49));
+        // 休息：-1 衰减 +4 恢复 = 53
+        assert_eq!(by_id(rested_id).status.get("sanity"), Some(53));
     }
 
     // ============================================================================

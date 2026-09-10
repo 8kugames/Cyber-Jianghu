@@ -61,6 +61,12 @@ pub struct IntentWorker {
     db_pool: DbPool,
     /// Agent 状态内存缓存
     state_cache: AgentStateCache,
+    /// 最近成功执行 intent 的 tick（agent_id → tick_id）
+    ///
+    /// 唯一写入点：process_intent 持久化成功后；
+    /// 唯一读取点：process_tick_boundary 衰减前的休息判定
+    /// （tick_id - last_intent_tick <= 1 视为本 tick 窗口内行动过）。
+    last_intent_ticks: dashmap::DashMap<uuid::Uuid, i64>,
     /// 状态处理器（验证 + 执行 + 状态变更）
     state_processor: Arc<StateProcessor>,
     /// WebSocket 连接管理器（广播用）
@@ -86,6 +92,7 @@ impl IntentWorker {
         Self {
             db_pool,
             state_cache,
+            last_intent_ticks: dashmap::DashMap::new(),
             state_processor,
             connection_manager,
             agent_to_device_map,
@@ -249,20 +256,34 @@ impl IntentWorker {
         let persisted_version = match result.persisted_version {
             Some(version) => version,
             None => {
-                // persist 失败 → DashMap 不更新 → 反馈失败给 Agent + 释放 whisper session
-                self.send_error_to_agent(
-                    agent_id,
-                    intent_id,
-                    "persist_failed",
-                    "状态持久化失败，Intent 未生效",
-                    tick_id,
-                )
-                .await;
+                // 失败分流：验证/执行失败携带具体原因，走 action_failed 反馈
+                // 让 Agent 获得可纠错的拒绝理由；无原因的才是真实落库失败。
+                // 修复：此前所有 rollback 一律误报"状态持久化失败"，掩盖真实
+                // 拒绝原因（如"未知的动作类型"），Agent 无法自纠。
+                let (code, message) = match &result.failure_reason {
+                    Some(reason) => ("action_failed", reason.clone()),
+                    None => (
+                        "persist_failed",
+                        "状态持久化失败，Intent 未生效".to_string(),
+                    ),
+                };
+                self.send_error_to_agent(agent_id, intent_id, code, &message, tick_id)
+                    .await;
                 self.close_session_if_whisper(&action_type, &intent).await;
-                return Err(anyhow::anyhow!(
-                    "Agent {} 状态持久化失败（tx 已回滚）",
-                    agent_id
-                ));
+
+                // 词汇表自愈：未知动作拒绝时推送最新动作配置，消除部署/热更新
+                // 后 Agent 词表漂移（Agent 侧 action_update 回调刷新引擎词表）
+                if message.contains("未知的动作类型") {
+                    self.push_fresh_actions(agent_id, tick_id).await;
+                }
+
+                if code == "persist_failed" {
+                    return Err(anyhow::anyhow!(
+                        "Agent {} 状态持久化失败（tx 已回滚）",
+                        agent_id
+                    ));
+                }
+                return Ok(());
             }
         };
 
@@ -270,6 +291,8 @@ impl IntentWorker {
         let mut persisted_state = result.updated_state.clone();
         persisted_state.state_version = persisted_version;
         self.state_cache.insert(agent_id, persisted_state.clone());
+        // 记录行动 tick（休息门控恢复的反向信号：本 tick 有 intent = 非休息）
+        self.last_intent_ticks.insert(agent_id, tick_id);
 
         // 6.15 跨 Agent 效果 write-through：目标状态回写 DashMap + 死亡善后
         // （战斗击杀在此路径触发 handle_deaths：目击广播 / AgentDied / 物品掉落）
@@ -495,28 +518,30 @@ impl IntentWorker {
             .process_single_intent(tick_id, agent_state, intent, &all_states, pipe_seq)
             .await;
 
-        let (updated_state, event_tuples, persisted_version, mut collateral_states) = match result {
-            Ok(r) => (
-                r.updated_state,
-                r.events,
-                r.persisted_version,
-                r.collateral_states,
-            ),
-            Err(e) => {
-                // 执行失败 → 发 failure notification + 清理 whisper session
-                self.send_error_to_agent(
-                    agent_id,
-                    intent.intent_id,
-                    "execution_failed",
-                    &format!("Intent 执行失败: {}", e),
-                    tick_id,
-                )
-                .await;
-                self.close_session_if_whisper(intent.action_type.as_ref(), intent)
+        let (updated_state, event_tuples, persisted_version, failure_reason, mut collateral_states) =
+            match result {
+                Ok(r) => (
+                    r.updated_state,
+                    r.events,
+                    r.persisted_version,
+                    r.failure_reason,
+                    r.collateral_states,
+                ),
+                Err(e) => {
+                    // 执行失败 → 发 failure notification + 清理 whisper session
+                    self.send_error_to_agent(
+                        agent_id,
+                        intent.intent_id,
+                        "execution_failed",
+                        &format!("Intent 执行失败: {}", e),
+                        tick_id,
+                    )
                     .await;
-                return Err(e).context("Subsequent intent 执行失败");
-            }
-        };
+                    self.close_session_if_whisper(intent.action_type.as_ref(), intent)
+                        .await;
+                    return Err(e).context("Subsequent intent 执行失败");
+                }
+            };
 
         // 持久化结果：processor 已在 tx 内完成 agent_states UPSERT 并 commit，
         // 此处仅读取返回的 state_version。`persisted_version = None` 表示
@@ -524,18 +549,27 @@ impl IntentWorker {
         let persisted_version = match persisted_version {
             Some(version) => version,
             None => {
-                // persist 失败 → 发 failure notification + 清理 whisper session（不更新 DashMap）
-                self.send_error_to_agent(
-                    agent_id,
-                    intent.intent_id,
-                    "persist_failed",
-                    "状态持久化失败，Intent 未生效",
-                    tick_id,
-                )
-                .await;
+                // 失败分流（与主 intent 路径同构）：验证/执行失败携带具体原因走
+                // action_failed；仅真实落库失败才报 persist_failed。
+                let (code, message) = match &failure_reason {
+                    Some(reason) => ("action_failed", reason.clone()),
+                    None => (
+                        "persist_failed",
+                        "状态持久化失败，Intent 未生效".to_string(),
+                    ),
+                };
+                self.send_error_to_agent(agent_id, intent.intent_id, code, &message, tick_id)
+                    .await;
                 self.close_session_if_whisper(intent.action_type.as_ref(), intent)
                     .await;
-                return Err(anyhow::anyhow!("Subsequent intent 持久化失败（tx 已回滚）"));
+                if message.contains("未知的动作类型") {
+                    self.push_fresh_actions(agent_id, tick_id).await;
+                }
+                if code == "persist_failed" {
+                    return Err(anyhow::anyhow!("Subsequent intent 持久化失败（tx 已回滚）"));
+                }
+                // 验证/执行失败：已反馈真实原因，Err 中断后续 pipeline（协议语义：失败即中断队列）
+                return Err(anyhow::anyhow!("Subsequent intent 失败已反馈: {}", message));
             }
         };
 
@@ -676,8 +710,16 @@ impl IntentWorker {
         }
 
         // 2. 衰减
+        // 休息判定：本 tick 或上一 tick 内成功执行过 intent 的 Agent 视为行动中，
+        // 其余（idle-skip / 离线 / 思考间隙）视为休息 tick，门控恢复生效。
+        let acted_recently: std::collections::HashSet<uuid::Uuid> = self
+            .last_intent_ticks
+            .iter()
+            .filter(|entry| tick_id - entry.value() <= 1)
+            .map(|entry| *entry.key())
+            .collect();
         let (mut updated_states, dead_agents, _decay_events, death_notifications) =
-            decay::apply_decay_and_environmental_damage(tick_id, states);
+            decay::apply_decay_and_environmental_damage(tick_id, states, &acted_recently);
 
         // 2.1 更新 tick_id 到当前 tick（衰减不更新 tick_id，需显式设置）
         for state in &mut updated_states {
@@ -802,6 +844,38 @@ impl IntentWorker {
 
     /// 发送 ExecutionResult 给指定 Agent
     #[allow(clippy::too_many_arguments)]
+    /// 推送最新动作配置给指定 Agent（UnknownAction 拒绝的自愈链路）
+    ///
+    /// Agent 側 action_update 回调收到后刷新引擎词表（prompt 动作索引 + chaos
+    /// 候选），使下一次决策即使用有效动作词汇。
+    async fn push_fresh_actions(&self, agent_id: uuid::Uuid, tick_id: i64) {
+        let available_actions = ActionRegistry::build_available_actions();
+        let msg = cyber_jianghu_protocol::ServerMessage::ConfigUpdate {
+            config_type: cyber_jianghu_protocol::ConfigType::Actions,
+            update_type: "full".to_string(),
+            version: format!("unknown-action-heal-{tick_id}"),
+            content: serde_json::to_value(&available_actions)
+                .unwrap_or(serde_json::Value::Array(vec![])),
+            content_hash: None,
+            updated_items: vec![],
+            removed_items: vec![],
+        };
+        if let Err(e) = super::send_to_agent(
+            agent_id,
+            &msg,
+            &self.connection_manager,
+            &self.agent_to_device_map,
+        )
+        .await
+        {
+            debug!(
+                "UnknownAction 自愈推送失败（agent 可能离线）: agent={}, error={}",
+                agent_id, e
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)] // 执行结果字段天然与 ExecutionResult 载荷一一对应，结构体化反增样板
     async fn send_execution_result(
         &self,
         agent_id: uuid::Uuid,

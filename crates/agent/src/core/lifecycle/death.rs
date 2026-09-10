@@ -136,6 +136,11 @@ pub(super) async fn maybe_schedule_auto_rebirth(
         .map(|s| s.auto_rebirth.load(std::sync::atomic::Ordering::Relaxed))
         .unwrap_or(true);
 
+    // 重生延迟回退默认：对齐 server game_rules.yaml 出厂值（delay_ticks: 5）。
+    // 仅在 game_rules 尚未到达（新鲜进程注册即 nil）且无动态值时使用；
+    // game_rules 已到达且显式为 0（= 不自动重生）时仍尊重用户配置。
+    const FALLBACK_REBIRTH_DELAY_TICKS: i32 = 5;
+
     // 重生延迟来源链: (1) WS AgentDied 动态覆写 > (2) 注册时 game_rules 默认值
     // 两条死亡检测路径（events_log vs WS 回调）解耦: 不依赖 WS 回调写入时序。
     let effective_delay = if agent.rebirth_delay_ticks > 0 {
@@ -143,6 +148,18 @@ pub(super) async fn maybe_schedule_auto_rebirth(
     } else {
         let cfg_delay = agent.config.rebirth_delay_ticks();
         if cfg_delay > 0 { cfg_delay } else { 0 }
+    };
+
+    // game_rules 缺失时 rebirth_delay_ticks() 返回 0，与"显式配置 0 = 不自动重生"
+    // 无法区分。回退出厂默认，避免"容器重启 + 角色已死"静默卡死在等待转生模式。
+    let effective_delay = if effective_delay <= 0 && agent.config.game_rules.is_none() {
+        warn!(
+            "rebirth_delay_ticks 未知（game_rules 未到达），回退出厂默认 {} ticks",
+            FALLBACK_REBIRTH_DELAY_TICKS
+        );
+        FALLBACK_REBIRTH_DELAY_TICKS
+    } else {
+        effective_delay
     };
 
     if effective_delay <= 0 || !auto_rebirth_enabled {

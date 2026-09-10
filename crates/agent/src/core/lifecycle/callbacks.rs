@@ -26,6 +26,47 @@ impl super::super::Agent {
             }))
             .await;
 
+        // 动作配置热更新回调（ConfigUpdate actions）：刷新引擎词表并持久化。
+        // 修复：该回调此前从未接线，server 推送的动作配置更新全部落空，
+        // 部署/热更新后 Agent 词表漂移（提交已下线的动作 → 全量拒绝）。
+        let cognitive_engine_for_actions = self.cognitive_engine.clone();
+        let agent_name_for_actions = self.character_name().to_string();
+        self.client
+            .set_action_update_callback(Arc::new(move |msg| {
+                if let cyber_jianghu_protocol::ServerMessage::ConfigUpdate {
+                    content,
+                    version,
+                    ..
+                } = &msg
+                {
+                    match serde_json::from_value::<Vec<cyber_jianghu_protocol::AvailableAction>>(
+                        content.clone(),
+                    ) {
+                        Ok(actions) => {
+                            info!(
+                                "Agent '{}' received actions config update: version={}, {} actions",
+                                agent_name_for_actions,
+                                version,
+                                actions.len()
+                            );
+                            if let Some(ref engine) = cognitive_engine_for_actions {
+                                engine.update_action_index(&actions);
+                                engine.set_available_actions(actions.clone());
+                            }
+                            // 持久化供下次启动加载
+                            let path = crate::config::config_dir().join("actions.json");
+                            if let Ok(json) = serde_json::to_string_pretty(&actions)
+                                && let Err(e) = std::fs::write(&path, json)
+                            {
+                                warn!("actions.json 写入失败: {}", e);
+                            }
+                        }
+                        Err(e) => warn!("actions ConfigUpdate 解析失败: {}", e),
+                    }
+                }
+            }))
+            .await;
+
         let cognitive_engine_for_skills = self.cognitive_engine.clone();
         self.client
             .set_skill_update_callback(Arc::new(move |skills, removed_items| {

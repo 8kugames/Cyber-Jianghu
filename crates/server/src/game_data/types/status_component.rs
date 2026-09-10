@@ -114,16 +114,37 @@ impl StatusComponent {
         result
     }
 
-    /// 获取需要恢复的属性列表及其恢复公式
+    /// 获取需要无条件恢复的属性列表及其恢复公式
     ///
-    /// 这些属性有 recovery_formula 但没有 decay_per_tick（或 decay_per_tick 为 0）
+    /// 这些属性有 recovery_formula 且 decay_per_tick 为 0（如 stamina/qi）：
+    /// 无论是否行动，每 tick 恢复。
+    /// decay_per_tick 非零的属性（如 sanity）走 get_rest_gated_recovering_attributes，
+    /// 仅在休息 tick（本 tick 窗口无 intent）恢复。
     pub fn get_recovering_attributes(&self) -> Vec<(String, String)> {
         let mut result = Vec::new();
         for (name, attr) in &self.collection.attributes {
             if let Some(formula) = &attr.metadata.recovery_formula {
-                // 只有当 decay_per_tick 为 0 或不存在时，才使用 recovery_formula
+                // 只有当 decay_per_tick 为 0 或不存在时，才无条件恢复
                 let decay = attr.metadata.decay_per_tick.unwrap_or(0.0);
                 if decay == 0.0 {
+                    result.push((name.clone(), formula.clone()));
+                }
+            }
+        }
+        result
+    }
+
+    /// 获取"休息才恢复"的属性列表及其恢复公式
+    ///
+    /// 这些属性同时配置了 recovery_formula 和非零 decay_per_tick（如 sanity）：
+    /// 衰减每 tick 照常，恢复仅在休息 tick（无 intent 提交）生效。
+    /// 物理语义：身体没在做事 = 休息（idle-skip、离线、思考间隙均自然覆盖）。
+    pub fn get_rest_gated_recovering_attributes(&self) -> Vec<(String, String)> {
+        let mut result = Vec::new();
+        for (name, attr) in &self.collection.attributes {
+            if let Some(formula) = &attr.metadata.recovery_formula {
+                let decay = attr.metadata.decay_per_tick.unwrap_or(0.0);
+                if decay != 0.0 {
                     result.push((name.clone(), formula.clone()));
                 }
             }

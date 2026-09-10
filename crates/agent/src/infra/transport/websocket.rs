@@ -424,6 +424,21 @@ impl WebSocketClient {
         });
     }
 
+    /// 设置动作配置更新回调（ConfigUpdate with config_type="actions"）
+    ///
+    /// 参数为完整 ServerMessage（content 为 Vec<AvailableAction> 的 JSON）。
+    /// 修复：该回调此前从未接线，server 的动作配置推送全部落空，
+    /// 部署/热更新后 Agent 词表漂移无法自愈。
+    pub fn set_action_update_callback(&self, callback: Arc<dyn Fn(ServerMessage) + Send + Sync>) {
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let mut state = self.state.write().await;
+                state.action_update_callback = Some(callback);
+            });
+        });
+    }
+
     /// 设置 Prompt 模板配置更新回调（ConfigUpdate with config_type="prompt_templates"）
     /// 参数: (PromptTemplateConfig)
     pub fn set_prompt_template_callback(
@@ -1400,6 +1415,15 @@ impl AgentClient {
     pub async fn set_skill_update_callback(&self, callback: SkillUpdateCallback) {
         let client = self.client.read().await;
         client.set_skill_update_callback(callback);
+    }
+
+    /// 设置动作配置更新回调（ConfigUpdate with config_type="actions"）
+    pub async fn set_action_update_callback(
+        &self,
+        callback: Arc<dyn Fn(ServerMessage) + Send + Sync>,
+    ) {
+        let client = self.client.read().await;
+        client.set_action_update_callback(callback);
     }
 
     /// 设置 Prompt 模板配置更新回调

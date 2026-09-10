@@ -127,6 +127,21 @@ impl super::Agent {
                         .is_dead
                         .store(true, std::sync::atomic::Ordering::Relaxed);
                 }
+                // 注册返回 nil：设备无存活角色（容器重启/断连期间死亡后重连的常见入口）。
+                // auto_rebirth 开启且本地角色为 Dead 时自动转世，
+                // 否则将永久停在等待转生模式（无面板干预时无人唤醒）。
+                if let Some(ref char_cfg) = self.character_config
+                    && char_cfg.status == crate::config::CharacterStatus::Dead
+                    && let Some(old_id) = char_cfg.agent_id.filter(|id| !id.is_nil())
+                {
+                    death::maybe_schedule_auto_rebirth(
+                        self,
+                        old_id,
+                        0,
+                        "（注册时角色已死亡，自动转世）",
+                    )
+                    .await;
+                }
                 self.wait_for_rebirth().await?;
                 return Ok(());
             }
