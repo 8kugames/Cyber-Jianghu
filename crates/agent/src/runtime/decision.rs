@@ -170,7 +170,16 @@ pub fn cognitive_decision_with_chain(
                         let (action, _reason) = classify_llm_error(&e);
                         match action {
                             ErrorAction::Retry => {
-                                // 网络瞬时故障，可能恢复，继续重试
+                                // 网络瞬时故障，可能恢复；指数退避后重试，
+                                // 避免对 provider / breaker 形成瞬时失败风暴
+                                let backoff =
+                                    std::time::Duration::from_secs(1u64 << attempt.min(4));
+                                warn!(
+                                    "[cognitive] Retrying in {:?} (after attempt {})",
+                                    backoff,
+                                    attempt + 1
+                                );
+                                tokio::time::sleep(backoff).await;
                             }
                             other => {
                                 warn!(

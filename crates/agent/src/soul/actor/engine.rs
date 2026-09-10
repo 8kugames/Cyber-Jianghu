@@ -83,9 +83,11 @@ struct DirectCognitiveResponse {
     self_status: serde_json::Value,
     #[serde(default)]
     environment: serde_json::Value,
-    /// 关键观察
+    /// 关键观察（模型偶发省略；仅用于 trace 展示，容忍缺失）
+    #[serde(default)]
     key_observations: Vec<String>,
-    /// 主要驱动力
+    /// 主要驱动力（模型偶发省略；仅用于 trace 展示，容忍缺失）
+    #[serde(default = "crate::soul::actor::stages::default_primary_drive")]
     primary_drive: String,
     /// 驱动力强度 (1-10)
     drive_intensity: u8,
