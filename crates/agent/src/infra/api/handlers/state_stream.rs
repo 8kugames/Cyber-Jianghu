@@ -144,7 +144,7 @@ async fn read_active_dream(state: &HttpApiState) -> Option<(String, u32)> {
     let store = state.dream_store.as_ref()?;
     let agent_id = *state.agent_id.read().await;
     // 先算目录再取写锁，避免 dream 写锁跨 await 点
-    let dd = super::soul_cycle::dream_data_dir(state, agent_id).await;
+    let dd = super::dream::dream_data_dir(state, agent_id).await;
     let mut dream = store.write().await;
     dream.ensure_loaded(&dd, &agent_id);
     match dream.thought.clone() {
