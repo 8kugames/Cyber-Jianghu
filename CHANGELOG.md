@@ -4,6 +4,45 @@
 
 ## [Unreleased]
 
+## [0.1.297] - 2026-09-10
+
+### Major Features
+
+- **client P1-P7 契约前置**（agent+server）：state/stream SSE 复合流、独立 `protocol_version` 双侧 version 端点、静态 token 并集鉴权（`CYBER_JIANGHU_AGENT_TOKEN` ∪ device token）、契约 JSON Schema 片段（docs/contracts/）、memory `?since=` 增量补帧、characters id 路由
+- **物品/配方全面 uuid 化**：物品与配方标识统一为 uuid，展示名统一为 `名称[短uuid]`
+
+### Bug Fixes
+
+- **死亡链路与目击传播**（BREAKING，agent+server）：修复死亡事件传播链路，移除教训广播改为纯涌现（f4a2da1c）
+- **refresh_auth_token 读锁自死锁**（agent）：读锁未释放导致注册重试自死锁（fd661a5c）
+- **dynamic_persona 死接线**（agent）：接通断线调用，state/stream 恢复主角名/情绪显示（4abf90ef）
+- **LLM 调用弹性**（agent）：429 分级冷却自愈、认知重试退避、认知/日记 schema 容忍（a11049a5）
+- **群像传记 modal 滚动条**（admin，555a26fc）
+
+### Performance
+
+- **tick 调速与成本杠杆**：tick 120s + 空转跳过昼夜节律 + 四条 LLM 成本杠杆（53a2e8b9）
+
+### CI
+
+- **quality 质量门**：发布管线新增 fmt/clippy/nextest 门并与 build 并行，结果串入 docker-build/release 守卫——杜绝 v0.1.292 式"tag 发布成功而 main/dev clippy 红"的带病发布；同步修正 job 注释（1da6c229）
+- **pre-commit 对齐**：不再尝试入库 Cargo.lock（对齐 untrack 决策），输出消歧显式播报（e511c49d、736a3ec0）
+
+### Build
+
+- **依赖版本地板三段化**：Cargo.lock 不入库前提下，workspace.dependencies 与各 crate 直接依赖全部收紧到当前最新解析的三段版本地板（tokio 1.53.1、clap 4.6.6、candle 0.10.2 等），收窄 CI 解析漂移（9941f313）
+
+### Tooling
+
+- **/release 流程与 hook 对齐**、**pre-commit 版本号控制落地**（承接自上周期 Unreleased 条目，随本版发布）
+- **联调工具链**：一键部署注册、离线构建、健康快照（check-round.sh）、监控链整合（9007cd2f 等）
+- **.gitignore 补 `!.github` 例外**：`.*` 通配误伤 workflow 目录，新 workflow 文件不再被静默忽略（c1464d04）
+- **验收快照输出迁移 `./.tmp`**：对齐 .gitignore/.dockerignore 忽略规则（363d8d13）
+
+### Refactor
+
+- **soul_cycle 托梦域拆分至 dream.rs**（agent，文件行数治理，55293309）
+
 ### Tooling
 
 - **/release 流程与 hook 对齐**（`.claude/skills/release/SKILL.md`）：重排为「先提交全部代码（hook bump 落定）→ 读定稿版本转正 CHANGELOG → 仅含 CHANGELOG.md 的发版提交（不触发 bump）→ 打 tag」，保证 tag v<VER> = 打 tag 时 Cargo.toml = CHANGELOG [VER]，消除旧流程 tag 落后 1 个 patch 的错位
