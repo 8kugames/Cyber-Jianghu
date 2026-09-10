@@ -10,9 +10,9 @@
 # - time.yaml 定义"Tick → 游戏时间"的转换（游戏世界观）
 #
 # 示例：
-# - real_seconds_per_tick: 60 → 现实每60秒执行1个tick
+# - real_seconds_per_tick: 120 → 现实每120秒执行1个tick
 # - time.yaml 中 ticks_per_hour: 1 → 1 tick = 1 游戏小时
-# - 结果：现实1分钟 = 1 tick = 1 游戏小时
+# - 结果：现实2分钟 = 1 tick = 1 游戏小时
 # ============================================================================
 
 version: "0.0.1"
@@ -20,7 +20,7 @@ description: "游戏规则配置文件"
 
 meta:
   created_at: "2026-03-16"
-  updated_at: "2026-03-18"
+  updated_at: "2026-09-10"
   author: "Cyber-Jianghu Community"
   tags: ["rules", "gameplay", "config"]
   notes:
@@ -35,7 +35,7 @@ data:
     # Tick 调度配置（现实时间 → Tick 转换）
     tick:
       # 服务器每多少秒执行一个 tick
-      real_seconds_per_tick: 60
+      real_seconds_per_tick: 120
 
     # 生存底线配置
     survival:

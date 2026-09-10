@@ -610,6 +610,15 @@ impl super::Agent {
                         }
                     }
 
+                    // 空转跳过：delta 无显著变化且本 tick 无 events_log 事件时不执行认知循环
+                    // （token_optimization.idle_skip，默认开启）。
+                    // v1 保守节律：夜间抑制 Info 空转 + 黎明唤醒 + 白天 whim 1/N（默认 1/2）；
+                    // 插入点位于死亡检查之后、记忆上下文构建之前。
+                    if self.should_skip_idle_tick(&world_state).await {
+                        self.record_idle_tick(&world_state).await;
+                        continue;
+                    }
+
                     // 构建记忆上下文（事件消费 + 遗忘 + 对话 + 交易提示 + triage）
                     let (mut memory_context, trade_hints) =
                         self.build_tick_memory_context(&world_state).await;

@@ -40,7 +40,9 @@ impl Broadcaster {
 
     /// 广播新状态给所有Agent
     ///
-    /// 为每个Agent构建个性化WorldState并通过WebSocket发送
+    /// 为每个在线Agent构建个性化WorldState并通过WebSocket发送。
+    /// 离线Agent直接跳过（不构建、不发送，节省逐agent构建开销）；
+    /// 死亡但在线的Agent不受影响（在 online 集合中），死亡通知依赖广播送达。
     #[allow(clippy::too_many_arguments)]
     pub async fn broadcast_states(
         &self,
@@ -77,7 +79,12 @@ impl Broadcaster {
         };
 
         // 批量加载所有 Agent 的背包（单次 DB 查询，解决 N+1 问题）
-        let agent_ids: Vec<Uuid> = agent_states.iter().map(|s| s.agent_id).collect();
+        // 只为在线 Agent 批量加载（离线 Agent 不会构建 WorldState）
+        let agent_ids: Vec<Uuid> = agent_states
+            .iter()
+            .filter(|s| online_agent_ids.contains(&s.agent_id))
+            .map(|s| s.agent_id)
+            .collect();
         let agent_inventories = match crate::inventory::InventoryManager::get_all_items_batch(
             db_pool, &agent_ids,
         )
@@ -127,9 +134,10 @@ impl Broadcaster {
             }
         };
 
-        // 批量加载所有节点的地面物品（单次 DB 查询）
+        // 批量加载所有节点的地面物品（单次 DB 查询）；按在线集合过滤，与 agent_ids 对称
         let node_ids: Vec<String> = agent_states
             .iter()
+            .filter(|s| online_agent_ids.contains(&s.agent_id))
             .map(|s| s.node_id.clone())
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
@@ -196,6 +204,11 @@ impl Broadcaster {
             };
 
         for agent_state in agent_states {
+            // 离线 Agent 跳过：无 WebSocket 连接，构建了也发不出去。
+            // 实体可见性已按 online 集合过滤，对在线 Agent 的世界视图零影响。
+            if !online_agent_ids.contains(&agent_state.agent_id) {
+                continue;
+            }
             let events = event_manager
                 .lock()
                 .expect("lock poisoned")

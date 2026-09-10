@@ -3,10 +3,109 @@ use tokio::sync::Notify;
 use tracing::{info, warn};
 
 use super::super::reconnect::save_character_config_to_fs;
+use crate::component::delta_engine::Urgency;
 use crate::component::immediate::{EventStore, ImmediateEventHandler};
 use crate::component::memory::backend::MemoryBackend;
+use rand::RngExt;
+
+/// 空转跳过占位摘要风味文本（零 LLM，进入 NarrativeSummaryWindow 保持时间连续性）
+const IDLE_FLAVOR_DAY: &str = "（空转：无显著变化，未执行认知循环）";
+const IDLE_FLAVOR_NIGHT: &str = "夜色已深，原地安歇。（夜间空转：未执行认知循环）";
 
 impl super::super::Agent {
+    /// 判定给定游戏小时是否属于夜间时段
+    fn is_night_hour(&self, hour: i32) -> bool {
+        is_night_hour(&self.config.token_optimization.idle_skip, hour)
+    }
+
+    /// 空转跳过判定（v1 保守方案）。
+    ///
+    /// 豁免层级（优先级从高到低）：
+    /// 1. 生存驱动/实体/事件等 Important+ 信号：任何时段都唤醒（含夜间）；
+    /// 2. 活跃对话会话：唤醒；
+    /// 3. 黎明唤醒：离开夜间时段的第一个 tick 无条件完整思考；
+    /// 4. 跳过上限（任何时段兜底）：连续跳过 max_consecutive_skips 后强制思考，夜间同样受约束；
+    /// 5. 夜间：Info 空转跳过（无 whim；上限兜底仍适用）；
+    /// 6. 白天：全 Info 空转按 1/whim_wake_divisor 概率照常思考（保留自发性）。
+    ///
+    /// 返回 true 表示跳过（streak +1）；false 表示照常思考（streak 清零）。
+    pub(super) async fn should_skip_idle_tick(
+        &mut self,
+        world_state: &cyber_jianghu_protocol::WorldState,
+    ) -> bool {
+        let (idle_enabled, max_streak, whim_divisor) = {
+            let cfg = &self.config.token_optimization.idle_skip;
+            (
+                cfg.enabled,
+                cfg.max_consecutive_skips,
+                cfg.whim_wake_divisor,
+            )
+        };
+
+        let is_night = self.is_night_hour(world_state.world_time.hour);
+        let is_dawn = self.idle_was_night && !is_night;
+        self.idle_was_night = is_night;
+
+        let dialogue_active = if let Some(ref dm) = self.dialogue_manager {
+            dm.read().await.active_session_count() > 0
+        } else {
+            false
+        };
+
+        // 白天 whim 唤醒采样：真随机 1/N（独立采样天然分散，无羊群同步；
+        // 不用 tick_id 做 hash——tick_id 为墙钟秒、按 tick 偶数步进，奇偶粘滞会使小除数退化）。
+        // 采样提前于状态机：夜间/上限路径不消费该结果，仅多一次无副作用的随机数消耗。
+        let whim_wake = whim_divisor <= 1 || rand::rng().random_bool(1.0 / whim_divisor as f64);
+
+        let prev_streak = self.idle_skip_streak;
+        let (skip, new_streak) = idle_skip_decision(
+            idle_enabled,
+            max_streak,
+            whim_wake,
+            is_night,
+            is_dawn,
+            self.idle_tick_candidate,
+            dialogue_active,
+            prev_streak,
+        );
+        self.idle_skip_streak = new_streak;
+
+        // 日志语义与原分支一一对应：黎明/上限各自仅在对应分支真正触发时打印
+        if !skip && idle_enabled && self.idle_tick_candidate && !dialogue_active {
+            if is_dawn {
+                info!(
+                    "黎明唤醒: tick={}，离开夜间时段，执行完整认知循环",
+                    world_state.tick_id
+                );
+            } else if prev_streak >= max_streak {
+                info!(
+                    "空转跳过连续 {} 个 tick 达到上限，本 tick 强制执行认知循环",
+                    max_streak
+                );
+            }
+        }
+
+        skip
+    }
+
+    /// 空转 tick 记录：仅本地占位摘要 + 日志，零 LLM 消耗。
+    /// 夜间用夜宿风味文本，保持叙事窗口的世界感与时间连续性。
+    pub(super) async fn record_idle_tick(&self, world_state: &cyber_jianghu_protocol::WorldState) {
+        let flavor = if self.is_night_hour(world_state.world_time.hour) {
+            IDLE_FLAVOR_NIGHT
+        } else {
+            IDLE_FLAVOR_DAY
+        };
+        tracing::debug!(
+            "空转跳过: tick={}, streak={}",
+            world_state.tick_id,
+            self.idle_skip_streak
+        );
+        if let Some(ref engine) = self.cognitive_engine {
+            engine.record_idle_summary(world_state.tick_id, flavor);
+        }
+    }
+
     pub(super) async fn update_tick_state(
         &mut self,
         world_state: &cyber_jianghu_protocol::WorldState,
@@ -268,6 +367,7 @@ impl super::super::Agent {
             store.update(world_state.clone()).await;
         }
 
+        let mut idle_candidate = false;
         let focus_summary = if self.config.token_optimization.enabled {
             if let (Some(store), Some(delta_engine), Some(attention_ctrl)) = (
                 &self.world_state_store,
@@ -276,14 +376,23 @@ impl super::super::Agent {
             ) {
                 let prev = store.previous().await;
                 let delta = delta_engine.compute(prev.as_ref(), world_state);
-                let summary = attention_ctrl.filter(&delta);
-                Some(summary)
+                // 空转跳过判定：非首 tick、本 tick 无 events_log 事件、且全部变化均为 Info 级。
+                // 事件门控：server 每 tick 清空重注 events_log（相邻 tick 为独立事件集），
+                // DeltaEngine 按长度比较可能漏检事件数持平的新事件——events_log 非空时一律思考，
+                // 保证跳过 tick 不丢弃任何事件（v1 不制造记忆盲区）。
+                // 唤醒保证：drive 支撑的生存属性变化至少 Important、实体出现/位置变化为 Important，
+                // 这些信号天然打破全 Info 前提；无 drive 的亚阈值衰减为 Info，由跳过上限兜底。
+                idle_candidate = !delta.is_first_tick
+                    && world_state.events_log.is_empty()
+                    && delta.changes.iter().all(|c| c.urgency == Urgency::Info);
+                Some(attention_ctrl.filter(&delta))
             } else {
                 None
             }
         } else {
             None
         };
+        self.idle_tick_candidate = idle_candidate;
         if let Some(ref summary) = focus_summary {
             *self.current_focus_summary.write().await = Some(summary.clone());
             if let Some(ref engine) = self.cognitive_engine {
@@ -368,5 +477,135 @@ impl super::super::Agent {
                 warn!("EventStore 延迟初始化失败: {}", e);
             }
         }
+    }
+}
+
+/// 判定游戏小时是否属于夜间时段（自由函数便于单测；hour 为 i32 对齐 WorldTime.hour）
+fn is_night_hour(cfg: &crate::config::IdleSkipConfig, hour: i32) -> bool {
+    cfg.night.enabled && cfg.night.night_hours.contains(&hour)
+}
+
+/// 空转跳过状态机核心（纯函数，便于单测；分支顺序即豁免层级）
+///
+/// 返回 (是否跳过, 新 streak)。`whim_wake` 为白天 whim 采样结果（调用方负责：
+/// whim_wake_divisor<=1 时恒为 true；否则以 1/N 概率为 true）。
+#[allow(clippy::too_many_arguments)] // 状态机输入信号天然为 8 个，结构体化反增样板（先例：broadcaster build_world_state_for_agent）
+fn idle_skip_decision(
+    enabled: bool,
+    max_streak: usize,
+    whim_wake: bool,
+    is_night: bool,
+    is_dawn: bool,
+    candidate: bool,
+    dialogue_active: bool,
+    streak: usize,
+) -> (bool, usize) {
+    // 1. 总开关关闭 / Important+ 信号（candidate=false，任何时段唤醒）/ 对话活跃 / 黎明：照常思考
+    if !enabled || !candidate || dialogue_active || is_dawn {
+        return (false, 0);
+    }
+    // 2. 跳过上限（任何时段兜底，防长眠；也兼兑 night_hours 误配为全天）
+    if streak >= max_streak {
+        return (false, 0);
+    }
+    // 3. 夜间：Info 空转跳过（无 whim）；白天：whim 未唤醒则跳过
+    if is_night || !whim_wake {
+        return (true, streak + 1);
+    }
+    // 4. 白天 whim 唤醒：照常思考，streak 清零
+    (false, 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_night_hours_containment() {
+        let cfg = crate::config::IdleSkipConfig::default();
+        assert!(cfg.night.enabled);
+        // 默认夜：9,10,11,0,1,2（跨零点）
+        for h in [9i32, 10, 11, 0, 1, 2] {
+            assert!(is_night_hour(&cfg, h), "hour {h} 应为夜间");
+        }
+        for h in [3i32, 5, 8] {
+            assert!(!is_night_hour(&cfg, h), "hour {h} 应为白天");
+        }
+    }
+
+    #[test]
+    fn test_night_disabled() {
+        let mut cfg = crate::config::IdleSkipConfig::default();
+        cfg.night.enabled = false;
+        assert!(!is_night_hour(&cfg, 10));
+    }
+
+    #[test]
+    fn test_state_machine_disabled_always_thinks() {
+        assert_eq!(
+            idle_skip_decision(false, 4, false, true, false, true, false, 3),
+            (false, 0)
+        );
+    }
+
+    #[test]
+    fn test_state_machine_important_signal_wakes_any_time() {
+        // candidate=false：Important+ 信号（含夜间）打破全 Info 前提
+        assert_eq!(
+            idle_skip_decision(true, 4, false, true, false, false, false, 2),
+            (false, 0)
+        );
+    }
+
+    #[test]
+    fn test_state_machine_dialogue_blocks_skip() {
+        assert_eq!(
+            idle_skip_decision(true, 4, false, true, false, true, true, 0),
+            (false, 0)
+        );
+    }
+
+    #[test]
+    fn test_state_machine_dawn_wakes_and_resets_streak() {
+        assert_eq!(
+            idle_skip_decision(true, 4, false, false, true, true, false, 3),
+            (false, 0)
+        );
+    }
+
+    #[test]
+    fn test_state_machine_cap_forces_think_any_time() {
+        // 白天上限
+        assert_eq!(
+            idle_skip_decision(true, 4, false, false, false, true, false, 4),
+            (false, 0)
+        );
+        // 夜间同样受上限约束（兜底 night_hours 误配全天）
+        assert_eq!(
+            idle_skip_decision(true, 4, false, true, false, true, false, 4),
+            (false, 0)
+        );
+    }
+
+    #[test]
+    fn test_state_machine_night_skips_info_regardless_of_whim() {
+        assert_eq!(
+            idle_skip_decision(true, 4, true, true, false, true, false, 2),
+            (true, 3)
+        );
+    }
+
+    #[test]
+    fn test_state_machine_day_whim_gate() {
+        // whim 未唤醒 → 跳过
+        assert_eq!(
+            idle_skip_decision(true, 4, false, false, false, true, false, 1),
+            (true, 2)
+        );
+        // whim 唤醒 → 照常思考，streak 清零
+        assert_eq!(
+            idle_skip_decision(true, 4, true, false, false, true, false, 1),
+            (false, 0)
+        );
     }
 }
