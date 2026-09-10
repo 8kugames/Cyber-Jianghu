@@ -114,6 +114,7 @@ temp/
 .*
 !.claude
 !.test-agents
+!.github
 
 agent.yaml
 scripts/test/
