@@ -105,6 +105,7 @@ docker compose exec db psql -U cyberjianghu -d cyberjianghu
 ### CI/CD Requirements
 
 PR checks enforce these before merge:
+
 1. `cargo fmt --check` - Format verification
 2. `cargo clippy --all-targets -- -D warnings` - Lint with warnings as errors
 3. `cargo nextest run --workspace` - All tests pass
@@ -142,6 +143,7 @@ The server is the authoritative "physics engine" of the world:
 - **Formula Engine**: Dynamic expression evaluation using `evalexpr` crate for attribute calculations
 
 **Real-time Architecture** (0.1.0+):
+
 ```
 Agent 提交 Intent ──> handler.rs (try_send) ──> IntentWorker (MPSC channel)
                                                         │
@@ -155,6 +157,7 @@ Agent 提交 Intent ──> handler.rs (try_send) ──> IntentWorker (MPSC cha
 ```
 
 **State Management** (DashMap write-through):
+
 - `AgentStateCache = Arc<DashMap<Uuid, AgentState>>` — in-memory cache, startup-loaded from DB
 - Write-through: persist to DB → await confirm → update DashMap
 - Persist failure → DashMap NOT updated → Agent receives ExecutionResult(success=false)
@@ -162,10 +165,12 @@ Agent 提交 Intent ──> handler.rs (try_send) ──> IntentWorker (MPSC cha
 **Conflict Resolution**: FIFO via single IntentWorker (zero race conditions)
 
 **Atomic Intent Queue**:
+
 - Single tick can submit multiple independent ATOMIC Intents (`subsequent_intents`), executed in order
 - Failed Intent triggers rollback ONLY for itself and aborts the rest of the queue (previously successful intents in the queue are kept)
 
 Key server modules:
+
 - `src/tick/scheduler.rs` - Pure clock scheduler (decay + broadcast)
 - `src/tick/realtime.rs` - IntentWorker (real-time intent processing engine)
 - `src/tick/processor/` - StateProcessor (validate + execute + Saga rollback)
@@ -192,13 +197,13 @@ The agent crate implements a **unified Agent SDK** with cognitive engine, memory
 
 ```
 ActorSoul (人魂) → ReflectorSoul (天魂)
-  直连 WorldState    三层审查
+  直连 WorldState    四层审查
   内嵌 EarthSoul tool calling（LLM 推理中按需调用）
 ```
 
 - **ActorSoul** (人魂/行动之魂): 直连 WorldState, outputs structured Intent with CognitiveChain, driven by CognitiveEngine (four-stage: Perception→Motivation→Planning→Decision)
 - **EarthSoul** (地魂/能力之魂): tool calling 工具池，嵌入 ActorSoul 的 LLM 推理循环中。LLM 按需调用工具（`query_world`, `search_memory`, `skill_view`, `list_skills` 等）
-- **ReflectorSoul** (天魂/守护之魂): 三层审查 — Layer 1 (action_type) → Layer 2 (RuleEngine) → Layer 3 (LLM OOC review).
+- **ReflectorSoul** (天魂/守护之魂): 四层审查 — Layer 0 (硬性目标校验：物品持有/可见、人物在场，拦截 LLM 臆造目标，见 `reflector/hard_logic.rs`) → Layer 1 (action_type) → Layer 2 (RuleEngine) → Layer 3 (LLM OOC review).
 
 #### Memory System (Three-Tier Architecture)
 
@@ -209,12 +214,14 @@ ActorSoul (人魂) → ReflectorSoul (天魂)
 - **CoreAffect**: Emotion-memory linkage driven by Barrett's theory (valence×arousal)
 
 #### Token Optimization & Performance
+
 - **AttentionController & DeltaEngine**: Lean prompts via WorldStateStore diffing and two-stage focus summarization
 - **DeepSeek Cache Tuning**: system_hash metric tracking, reasoning stripping (D8, 默认关闭，env var `CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT` 启用), and schema canonicalization (D9)
 
 ### Data-Driven Design
 
 All game mechanics configured via YAML in `crates/server/config/`:
+
 - `actions.yaml`, `attributes.yaml`, `items.yaml`, `locations.yaml`
 - `game_rules.yaml`, `time.yaml`, `emotion.yaml`, `narrative_config.yaml`
 - `skills/` — AI Procedural Skills (SKILL.md)
@@ -241,12 +248,12 @@ use super::builder::AgentBuilder;
 
 ### Naming Conventions
 
-| Element | Convention | Example |
-|---------|------------|---------|
-| Structs/Enums | `PascalCase` | `TickScheduler`, `ActionType` |
-| Functions/Variables | `snake_case` | `execute_tick()`, `agent_states` |
-| Constants | `SCREAMING_SNAKE_CASE` | `MAX_RETRY_ATTEMPTS` |
-| Type aliases | `PascalCase` | `GameRulesCallback` |
+| Element             | Convention             | Example                          |
+| ------------------- | ---------------------- | -------------------------------- |
+| Structs/Enums       | `PascalCase`           | `TickScheduler`, `ActionType`    |
+| Functions/Variables | `snake_case`           | `execute_tick()`, `agent_states` |
+| Constants           | `SCREAMING_SNAKE_CASE` | `MAX_RETRY_ATTEMPTS`             |
+| Type aliases        | `PascalCase`           | `GameRulesCallback`              |
 
 ### Error Handling
 
@@ -293,39 +300,39 @@ use super::builder::AgentBuilder;
 
 ## Key Dependencies
 
-| Crate | Purpose |
-|-------|---------|
-| `axum` | Web framework with WebSocket support |
-| `sqlx` | PostgreSQL async driver |
-| `tokio` | Async runtime |
-| `evalexpr` | Formula/expression evaluation |
-| `tokio-tungstenite` | WebSocket client (agent) |
-| `rusqlite` | Local SQLite storage (agent memory) |
-| `instant-distance` | HNSW vector index (agent semantic memory) |
-| `candle-core/transformers` | Local BERT inference (embedding crate) |
+| Crate                      | Purpose                                   |
+| -------------------------- | ----------------------------------------- |
+| `axum`                     | Web framework with WebSocket support      |
+| `sqlx`                     | PostgreSQL async driver                   |
+| `tokio`                    | Async runtime                             |
+| `evalexpr`                 | Formula/expression evaluation             |
+| `tokio-tungstenite`        | WebSocket client (agent)                  |
+| `rusqlite`                 | Local SQLite storage (agent memory)       |
+| `instant-distance`         | HNSW vector index (agent semantic memory) |
+| `candle-core/transformers` | Local BERT inference (embedding crate)    |
 
 ## Key Configuration Files
 
-| Purpose | Path |
-|---------|------|
-| Environment variables | `.env` |
-| Server configuration | `crates/server/config/*.yaml` |
-| World-building rules | `crates/server/config/world_building_rules.yaml` |
-| Skill definitions | `crates/server/config/skills/{category}/{skill_id}/SKILL.md` |
-| Prompt templates (agent) | `crates/server/config/prompt_templates.yaml` (含 `rule_sections` 按需检索配置) |
-| Souls governance config | `crates/server/config/souls.yaml` (Soul 审议规则、投票阈值、主题路由) |
-| Action evolution config | `crates/server/config/action_evolution.yaml` (动作演化策略、能力清单) |
-| Training export config | `crates/server/config/training_export.yaml` (SFT 导出：调度/分桶/容量，env 覆盖) |
-| Reward config | `crates/server/config/reward.yaml` (生存 reward 天道账本：分量/周期，fail-fast 强制配置) |
-| Database migrations | `crates/server/migrations/*.sql` |
-| Docker stack | `docker-compose.yml`, `docker-compose.prod.yml` |
+| Purpose                  | Path                                                                                     |
+| ------------------------ | ---------------------------------------------------------------------------------------- |
+| Environment variables    | `.env`                                                                                   |
+| Server configuration     | `crates/server/config/*.yaml`                                                            |
+| World-building rules     | `crates/server/config/world_building_rules.yaml`                                         |
+| Skill definitions        | `crates/server/config/skills/{category}/{skill_id}/SKILL.md`                             |
+| Prompt templates (agent) | `crates/server/config/prompt_templates.yaml` (含 `rule_sections` 按需检索配置)           |
+| Souls governance config  | `crates/server/config/souls.yaml` (Soul 审议规则、投票阈值、主题路由)                    |
+| Action evolution config  | `crates/server/config/action_evolution.yaml` (动作演化策略、能力清单)                    |
+| Training export config   | `crates/server/config/training_export.yaml` (SFT 导出：调度/分桶/容量，env 覆盖)         |
+| Reward config            | `crates/server/config/reward.yaml` (生存 reward 天道账本：分量/周期，fail-fast 强制配置) |
+| Database migrations      | `crates/server/migrations/*.sql`                                                         |
+| Docker stack             | `docker-compose.yml`, `docker-compose.prod.yml`                                          |
 
 ### Environment Variables (auth)
 
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `ADMIN_READ_TOKEN` | optional | Dashboard / read API token. If unset, Server generates a random one at startup and logs it. |
-| `ADMIN_WRITE_TOKEN` | optional | Dashboard write API token. If unset, Server generates a random one at startup and logs it. |
+| Variable            | Required | Purpose                                                                                                                                                                                                                                  |
+| ------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ADMIN_READ_TOKEN`  | optional | Dashboard / read API token. If unset, Server generates a random one at startup and logs it.                                                                                                                                              |
+| `ADMIN_WRITE_TOKEN` | optional | Dashboard write API token. If unset, Server generates a random one at startup and logs it.                                                                                                                                               |
 | `CLIENT_READ_TOKEN` | optional | Read-only auth token for game clients. If unset, dashboard READ endpoints fall back to `ADMIN_READ_TOKEN`. When set, dashboard READ endpoints (`require_client_read_token`) accept **either** `CLIENT_READ_TOKEN` or `ADMIN_READ_TOKEN`. |
 
 ## Protocol Types
@@ -333,9 +340,11 @@ use super::builder::AgentBuilder;
 The `crates/protocol` crate defines the wire types shared between Server, Agent, and Dashboard/Client. Key enums and contract structs:
 
 ### Content & Risk Enums
+
 - `OocRisk` (`low` / `medium` / `high`) — out-of-character risk classification emitted during ReflectorSoul review / dialogue validation.
 
 ### Config Enums (data-driven config model, `crates/server/config/*.yaml`)
+
 - `ConfigType` (`skills` / `actions` / `game_rules` / `world_building_rules` / `prompt_templates` / `persona_event_rules` / `narrative_config`) — discriminator for `GET/PUT /api/config/{filename}` payloads.
 - `EffectType` (`attribute_change` / `attribute_max_change` / `add_item`) — action effect kinds.
 - `RequirementType` (`attribute` / `item`) — gating requirements for actions/skills.
@@ -343,6 +352,7 @@ The `crates/protocol` crate defines the wire types shared between Server, Agent,
 - `ValidationType` (`not_empty` / `min_value` / `max_value` / `min_length` / `max_length` / `item_exists`) — declarative validators used by `actions.yaml`.
 
 ### Relationship Protocol Contract (Strategy B, full snapshot per game day)
+
 - `RelationshipMemory` — relationship memory record with `i64` millisecond timestamps (epoch ms), agent IDs, valence/affinity score, and free-form metadata.
 - `RelationshipKeyEvent` — discrete event that shifted a relationship (fight, trade, gift, dialogue, etc.); `i64` ms timestamps.
 - `ClientMessage::RelationshipSnapshot` — variant carrying a full per-day relationship snapshot from Agent → Server. Naturally idempotent: each game day overwrites the prior snapshot for that `(agent_id, game_day)` key.
@@ -354,6 +364,7 @@ Timestamps in the relationship protocol are `i64` milliseconds (Unix epoch), not
 ### Server (port 23333)
 
 **Agent Lifecycle**:
+
 - `POST /api/v1/device/verify` - Strict device verification (returns 404 if unknown; agent must re-register)
 - `POST /api/v1/device/register` - Explicit device registration (server generates device_id, returns 201 Created)
 - `POST /api/v1/agent/register` - Register new agent (returns `narrative_config`)
@@ -368,6 +379,7 @@ Timestamps in the relationship protocol are `i64` milliseconds (Unix epoch), not
 - `POST /api/v1/action-evolution/propose` - Submit action evolution proposal
 
 **Training Data Export** (mixed auth: `write_token` for trigger/delete, `client_read_token` for reads; scheduler runs in background, endpoints are manual-trigger/inspect):
+
 - `POST /api/v1/training/export` - Trigger an SFT export run (write_token)
 - `GET /api/v1/training/exports` - List export runs (client read token)
 - `GET /api/v1/training/exports/{run_id}` - Get a run's metadata (client read token)
@@ -376,9 +388,11 @@ Timestamps in the relationship protocol are `i64` milliseconds (Unix epoch), not
 - `GET /api/v1/training/checkpoint` - Get scheduler checkpoint / progress (client read token)
 
 **WebSocket**:
+
 - `WS /ws?token={auth_token}` - WebSocket connection
 
 **Dashboard (Read Token)**:
+
 - `GET /api/dashboard/agents` - List all agents
 - `GET /api/dashboard/agents/offline` - Offline agents
 - `GET /api/dashboard/agents/dead` - Dead agents
@@ -402,6 +416,7 @@ Timestamps in the relationship protocol are `i64` milliseconds (Unix epoch), not
 - `GET /api/dashboard/layer-display` - Tianhun layer display name mapping (data-driven)
 
 **Dashboard Read (Client Token)** — these endpoints use `require_client_read_token` (accepts `CLIENT_READ_TOKEN` or admin read token), designed for read-only game client access:
+
 - `GET /api/dashboard/agent-relationships` - Global relationship graph (all agents)
 - `GET /api/dashboard/agent-relationships/{agent_id}` - Single agent's relationships
 - `GET /api/dashboard/world-snapshot` - Unified world snapshot (read-only transaction isolation; aggregates world state in a single consistent read)
@@ -410,6 +425,7 @@ Timestamps in the relationship protocol are `i64` milliseconds (Unix epoch), not
 - `GET /api/dashboard/deaths` - Death timeline (supports `?limit`, `?tick_from`)
 
 **Dashboard (Write Token)**:
+
 - `POST /api/dashboard/agents/cleanup` - Cleanup offline agents
 - `POST /api/dashboard/chronicles/generate` - Generate chronicle
 - `PUT /api/dashboard/agent/{id}/vendor-refill` - Set vendor refill rules
@@ -419,6 +435,7 @@ Timestamps in the relationship protocol are `i64` milliseconds (Unix epoch), not
 - `GET/POST /api/config/llm/enabled` - LLM enabled flag
 
 **Admin Auth**:
+
 - `POST /api/admin/login` - Admin login
 - `POST /api/admin/logout` - Admin logout
 - `GET /api/admin/session` - Check admin session
@@ -432,6 +449,7 @@ Timestamps in the relationship protocol are `i64` milliseconds (Unix epoch), not
 - `POST /api/embed-batch` - Batch text embedding (`{"texts": [...]}` -> `{"embeddings": [[...], ...]}`)
 
 Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env var):
+
 - Set → Remote mode (HTTP to embedding service, fast fail on connection error)
 - Unset → Local mode (in-process candle-transformers)
 - Both fail → Unavailable (FTS5 fallback)
@@ -439,10 +457,12 @@ Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env v
 ### Agent HTTP API (port 23340-23999, auxiliary to WebSocket)
 
 **Core** (WebSocket primary, HTTP auxiliary):
+
 - `GET /api/v1/state` - Get current WorldState
 - `GET /api/v1/context` - Get narrative context + DecisionContextSnapshot enrichment
 
 **Character**:
+
 - `GET /api/v1/character` - Get character info
 - `POST /api/v1/character/generate` - LLM one-click character generation
 - `POST /api/v1/character/register` - Register new character (forwards to Server)
@@ -453,10 +473,12 @@ Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env v
 - `GET/POST /api/v1/character/dream` - Dream injection (sustained n-turn thought injection)
 
 **Biography**:
+
 - `GET /api/v1/character/biography` - Get cached biography (query: `agent_id`)
 - `POST /api/v1/character/biography` - Generate biography from soul cycles + daily summaries (query: `agent_id`)
 
 **Attributes & Status**:
+
 - `GET /api/v1/attributes` - Get attribute values
 - `GET /api/v1/attribute-meta` - Attribute categories
 - `GET /api/v1/tick` - Get tick status
@@ -464,6 +486,7 @@ Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env v
 - `GET /api/v1/cognitive` - Get structured cognitive context
 
 **Relationships & Memory**:
+
 - `GET /api/v1/relationship/list` - Get all relationships
 - `GET /api/v1/memory/recent` - Get recent memories
 - `GET /api/v1/memory/daily-summaries` - Get daily summaries
@@ -471,14 +494,17 @@ Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env v
 - `POST /api/v1/memory` - Store memory
 
 **Characters (Multi-character, 设备与角色分离)**:
+
 - `GET /api/v1/characters` - List all characters
 - `POST /api/v1/characters/switch` - Switch current character
 - `GET /api/v1/characters/{agent_id}` - Get character by ID
 
 **Validation & Review**:
+
 - `POST /api/v1/validate` - Validate intent
 
 **Events & Config**:
+
 - `GET /api/v1/events` - Death events SSE stream
 - `GET /api/v1/state/stream` - WorldState + IntentSnapshot composite SSE stream (桌面窗口消费)
 - `GET/POST /api/v1/config/llm-disabled` - LLM disable toggle
@@ -493,6 +519,7 @@ Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env v
 - `GET /api/v1/metrics` - LLM performance metrics (支持 `?system_hash=<hex64>` 按 system_hash 维度过滤, Phase 0 测量用)
 
 ### Admin Web Panel
+
 - `GET /admin/` - Main dashboard
 - `GET /admin/{*path}` - Admin panel routes (served from `crates/server/static/admin/`)
 
