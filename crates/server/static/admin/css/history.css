@@ -969,6 +969,24 @@ body {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 10px;
+    max-height: 240px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color, #4a5568) transparent;
+    padding-right: 4px;
+}
+
+.agents-grid::-webkit-scrollbar {
+    width: 6px;
+}
+
+.agents-grid::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.agents-grid::-webkit-scrollbar-thumb {
+    background: var(--border-color, #4a5568);
+    border-radius: 3px;
 }
 
 .agent-card {
