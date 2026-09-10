@@ -70,3 +70,16 @@ pub async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoRespon
 pub async fn root() -> &'static str {
     "Cyber-Jianghu Server v0.1.0\n\n天道无为，万物自化。"
 }
+
+/// 协议握手接口
+///
+/// GET /api/v1/version
+///
+/// 返回 server 版本与协议版本。version 属公开信息，无需认证；
+/// Agent 的 /api/v1/version 会透传本端点的 server_version 字段。
+pub async fn version() -> impl IntoResponse {
+    Json(serde_json::json!({
+        "server_version": env!("CARGO_PKG_VERSION"),
+        "protocol_version": cyber_jianghu_protocol::PROTOCOL_VERSION,
+    }))
+}

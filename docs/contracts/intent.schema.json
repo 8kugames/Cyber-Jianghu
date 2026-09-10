@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://cyber-jianghu.github.io/contracts/intent.schema.json",
+  "title": "Intent (wire shape, fragment)",
+  "description": "Agent -> Server 的 Intent wire 结构。片段式契约:subsequent_intents 内部递归引用本结构,此处为松类型。真源为 Rust 类型 crates/protocol/src/types/actions.rs::Intent;不兼容变更须 bump PROTOCOL_VERSION major。",
+  "type": "object",
+  "required": ["intent_id", "agent_id", "tick_id", "action_type"],
+  "properties": {
+    "intent_id": { "type": "string", "format": "uuid" },
+    "agent_id": { "type": "string", "format": "uuid" },
+    "tick_id": { "type": "integer", "minimum": 0 },
+    "thought_log": { "type": "string", "description": "内心独白(可选)" },
+    "action_type": { "type": "string", "description": "数据驱动动作标识,由 actions.yaml 定义" },
+    "action_data": { "type": "object", "description": "动作参数(可选),schema 由 actions.yaml 按动作定义" },
+    "priority": { "type": "integer", "minimum": 1, "maximum": 10, "default": 5 },
+    "reflector_thought": { "type": "string", "description": "天魂审查意见(可选)" },
+    "chaos_marker": { "type": "object", "description": "混沌降级行为标记(可选)" },
+    "dream_marker": { "type": "object", "description": "托梦影响标记(可选)" },
+    "already_broadcast": { "type": "boolean", "default": false },
+    "session_id": { "type": "string", "description": "whisper 对话 session(可选)" },
+    "subsequent_intents": {
+      "type": "array",
+      "description": "原子意图队列(按序执行,失败即中止后续;已成功的保持成功)。元素结构与本结构相同。",
+      "items": { "type": "object" }
+    }
+  }
+}

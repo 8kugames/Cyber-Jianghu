@@ -71,6 +71,37 @@ pub(crate) async fn health_handler(State(state): State<HttpApiState>) -> impl In
     Json(response)
 }
 
+/// 协议握手 handler
+///
+/// GET /api/v1/version（公开端点，无需认证）
+///
+/// 返回 agent/protocol/server 三段版本。server_version 实时向 server 的
+/// /api/v1/version 拉取（2s 超时）；server 不可达时为 null，不阻断握手。
+pub(crate) async fn version_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
+    let server_version = fetch_server_version(&state).await;
+    Json(serde_json::json!({
+        "agent_version": env!("CARGO_PKG_VERSION"),
+        "protocol_version": cyber_jianghu_protocol::PROTOCOL_VERSION,
+        "server_version": server_version,
+    }))
+}
+
+/// 从 server 拉取 server_version（失败返回 None，不作为错误处理）
+async fn fetch_server_version(state: &HttpApiState) -> Option<String> {
+    let server_http_url = state.server_http_url.read().await.clone();
+    let url = format!("{}/api/v1/version", server_http_url);
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(2))
+        .send()
+        .await
+        .ok()?;
+    let body: serde_json::Value = resp.json().await.ok()?;
+    body.get("server_version")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
 /// Get current state handler
 pub(crate) async fn get_state_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
     let current = state.current_state.read().await;

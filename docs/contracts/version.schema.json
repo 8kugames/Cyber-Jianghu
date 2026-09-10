@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://cyber-jianghu.github.io/contracts/version.schema.json",
+  "title": "/api/v1/version response",
+  "description": "协议握手端点响应。Agent 侧 (GET {agent_url}/api/v1/version) 返回全部三字段,无需认证;server_version 由 agent 实时代理 server 同名端点,server 不可达时为 null。Server 侧 (GET {server_url}/api/v1/version) 仅返回 server_version + protocol_version。protocol_version 为独立 semver,真源 crates/protocol/src/lib.rs::PROTOCOL_VERSION,client 按 major 号判断兼容。",
+  "type": "object",
+  "required": ["protocol_version"],
+  "properties": {
+    "protocol_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "独立协议版本(semver),与 crate 版本解耦"
+    },
+    "agent_version": {
+      "type": "string",
+      "description": "Agent crate 版本(仅 agent 端点返回)"
+    },
+    "server_version": {
+      "type": ["string", "null"],
+      "description": "Server crate 版本;agent 端点上 server 不可达时为 null"
+    }
+  }
+}

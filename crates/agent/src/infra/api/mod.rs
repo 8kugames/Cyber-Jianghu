@@ -396,6 +396,7 @@ pub fn create_api_router() -> Router<HttpApiState> {
         .route("/api/v1", get(handlers::api_list_handler)) // API 列表和使用规范
         // === 基础端点 ===
         .route("/api/v1/health", get(handlers::health_handler)) // 健康检查
+        .route("/api/v1/version", get(handlers::version_handler)) // 协议握手（公开，无需认证）
         .route("/api/v1/state", get(handlers::get_state_handler)) // 获取当前世界状态
         .route("/api/v1/context", get(handlers::get_context_handler)) // 获取格式化上下文
         .route("/api/v1/attributes", get(handlers::get_attributes_handler)) // 梦中一瞥：属性数值
@@ -494,8 +495,26 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/characters/{agent_id}",
             get(handlers::get_character_by_id_handler),
         ) // 获取指定角色详情
+        // === 角色管理端点（client 契约的 id 路由形态，委托现有 handler）===
+        .route(
+            "/api/v1/characters/{agent_id}/rebirth",
+            post(handlers::rebirth_character_by_id_handler),
+        ) // 重生（仅当前活跃角色，其余 409）
+        .route(
+            "/api/v1/characters/{agent_id}/inject-dream",
+            post(handlers::inject_dream_by_id_handler),
+        ) // 托梦（仅当前活跃角色，其余 409）
+        .route(
+            "/api/v1/characters/{agent_id}/biography",
+            get(handlers::get_biography_by_id_handler),
+        ) // 获取指定角色传记
+        .route(
+            "/api/v1/characters/{agent_id}/biography",
+            post(handlers::generate_biography_by_id_handler),
+        ) // 生成指定角色传记（LLM 纪传体）
         // === 实时事件端点（SSE）===
         .route("/api/v1/events", get(handlers::death_events_handler)) // 死亡事件 SSE 流
+        .route("/api/v1/state/stream", get(handlers::state_stream_handler)) // WorldState+IntentSnapshot 复合 SSE 流（桌面 client 消费）
         // === 配置管理端点 ===
         .route("/api/v1/config", get(handlers::get_config_handler)) // 获取当前配置
         .route(

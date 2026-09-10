@@ -55,8 +55,15 @@ pub use resolve::{
     resolve_agent_id_lenient, short_id,
 };
 
-/// 协议版本
-pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// 协议版本（semver，独立于 crate 版本号）
+///
+/// 该版本描述 Server/Agent/Client 之间的 wire 契约，与 crate 发布版本解耦：
+/// - 不兼容的 wire 结构变更 → bump major
+/// - 新增可选字段/端点 → bump minor
+/// - 无契约影响的修复 → bump patch
+///
+/// Client 启动握手按 major 号判断兼容性（major 不一致即拒绝连接）。
+pub const PROTOCOL_VERSION: &str = "1.0.0";
 
 // ============================================================================
 // LLM 配置默认值（agent + server 共享唯一来源）
@@ -167,3 +174,25 @@ pub const ERROR_CODE_INVALID_MESSAGE: &str = "invalid_message";
 pub const ERROR_CODE_DIALOGUE_FAILED: &str = "dialogue_failed";
 /// 动作处理失败（通用）
 pub const ERROR_CODE_ACTION_FAILED: &str = "action_failed";
+
+#[cfg(test)]
+mod version_tests {
+    use super::PROTOCOL_VERSION;
+
+    /// 协议版本必须是三段式 semver，且独立维护（不得回退为 crate 版本宏）
+    #[test]
+    fn protocol_version_is_semver() {
+        let parts: Vec<&str> = PROTOCOL_VERSION.split('.').collect();
+        assert_eq!(
+            parts.len(),
+            3,
+            "PROTOCOL_VERSION 必须是 x.y.z: {PROTOCOL_VERSION}"
+        );
+        for p in parts {
+            assert!(
+                !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()),
+                "每段必须是纯数字: {PROTOCOL_VERSION}"
+            );
+        }
+    }
+}

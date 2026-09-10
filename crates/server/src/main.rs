@@ -705,6 +705,7 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/", get(handlers::system::root))
         .route("/health", get(handlers::system::health_check))
+        .route("/api/v1/version", get(handlers::system::version)) // 协议握手（公开，无需认证）
         // 设备身份生命周期 v2 — 严格校验（DB 不存在时返回 404）
         .route(
             "/api/v1/device/verify",
