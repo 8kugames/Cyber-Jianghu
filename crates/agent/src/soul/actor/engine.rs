@@ -117,16 +117,23 @@ impl DirectCognitiveResponse {
     /// 统一获取 actions 列表
     ///
     /// 优先使用 `actions` 字段（新格式），fallback 到 `action_type` + `action_data`（旧格式）。
+    /// 返回前做动作名规范化：LLM 输出的语义/英文别名（如 idle/进食/给予/采集）
+    /// 映射为 canonical 键并注入缺省字段，未命中别名的原样通过（由后续审查/Server 兑底）。
     fn get_actions(&self) -> Vec<DirectCognitiveAction> {
+        let normalize = |mut a: DirectCognitiveAction| {
+            a.action_type =
+                cyber_jianghu_protocol::normalize_action_type(&a.action_type, &mut a.action_data);
+            a
+        };
         if !self.actions.is_empty() {
-            return self.actions.clone();
+            return self.actions.iter().cloned().map(normalize).collect();
         }
         // 旧格式 fallback
         if let Some(ref at) = self.action_type {
-            vec![DirectCognitiveAction {
+            vec![normalize(DirectCognitiveAction {
                 action_type: at.clone(),
                 action_data: self.action_data.clone(),
-            }]
+            })]
         } else {
             vec![DirectCognitiveAction {
                 action_type: "休整".to_string(),

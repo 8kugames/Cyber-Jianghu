@@ -223,10 +223,17 @@ impl ReflectorSoul {
             return Ok(());
         }
 
-        // 查找匹配的 action 定义（精确匹配 action 或 name，不做 alias 匹配）
+        // 查找匹配的 action 定义：精确匹配 action/name，或词表条目规范化后与
+        // intent（已规范化）一致——兼容新旧两套词表并存过渡期（不做任意 alias 匹配）
         let action_input = intent.action_type.as_str().to_lowercase();
         let matched = actions.iter().find(|a| {
-            a.action == intent.action_type.as_str() || a.name.to_lowercase() == action_input
+            a.action == intent.action_type.as_str()
+                || a.name.to_lowercase() == action_input
+                || cyber_jianghu_protocol::normalize_action_type(&a.action, &mut None)
+                    .to_lowercase()
+                    == action_input
+                || cyber_jianghu_protocol::normalize_action_type(&a.name, &mut None).to_lowercase()
+                    == action_input
         });
 
         if let Some(action) = matched {
@@ -324,6 +331,25 @@ impl ReflectorSoul {
         request: ValidationRequest,
     ) -> Result<PipelineValidationResult> {
         let mut request = request;
+
+        // 动作名规范化（全面 uuid 化配套）：LLM 语义/英文别名（idle/进食/给予/采集…）
+        // → canonical 键 + 缺省字段注入。必须在 layer0 之前执行，
+        // 使后续所有审查层与 Server 看到统一的动作词表。
+        {
+            let normalized = cyber_jianghu_protocol::normalize_action_type(
+                request.intent.action_type.as_str(),
+                &mut request.intent.action_data,
+            );
+            request.intent.action_type = normalized.into();
+            for si in request.intent.subsequent_intents.iter_mut() {
+                let normalized = cyber_jianghu_protocol::normalize_action_type(
+                    si.action_type.as_str(),
+                    &mut si.action_data,
+                );
+                si.action_type = normalized.into();
+            }
+        }
+
         let graded_config = request.runtime.graded_config.clone();
         let mut layers = Vec::with_capacity(4);
 
