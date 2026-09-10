@@ -215,7 +215,7 @@ pub fn set_upload_sender(sender: tokio::sync::mpsc::Sender<cyber_jianghu_protoco
 /// 调用方记录 trace（同步 Vec push，非阻塞——O(1)，无 I/O）。
 ///
 /// fire-and-forget：失败只丢 trace，不 panic，不影响 agent tick。
-/// 直接记录原文——本项目所有玩家角色均为 LLM 驱动，无真人隐私内容。
+/// 直接记录原文——角色行为由 LLM 驱动；但玩家手写的角色设定/托梦文本会随 prompt 原文保留（见 docs/DATA_USAGE.md）。
 pub fn record(trace: LlmTrace) {
     // 配置未加载或未启用 → 空操作
     let cfg = match TRACE_CONFIG.get().and_then(|c| c.as_ref()) {
