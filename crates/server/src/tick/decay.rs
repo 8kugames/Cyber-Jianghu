@@ -468,9 +468,8 @@ pub fn apply_decay_and_environmental_damage(
 
 /// 从 birth_tick 和 current_tick 计算角色年龄（游戏年）
 ///
-/// tick_id 是 tick count（非秒级时间戳）。
-/// age_ticks / ticks_per_hour = game_hours
-/// game_hours / hours_per_year = game_years
+/// tick_id 是秒级时间戳；tick→游戏时换算真源 = TimeRegistry::game_hours
+/// （禁止内联复制公式），年龄 = game_hours(age_ticks) / hours_per_year
 pub fn compute_age_years(birth_tick: i64, current_tick: i64) -> i64 {
     use crate::game_data::registry::TimeRegistry;
 
@@ -479,46 +478,18 @@ pub fn compute_age_years(birth_tick: i64, current_tick: i64) -> i64 {
         return 0;
     }
 
-    if let Some(time_config) = TimeRegistry::get_config() {
-        let ticks_per_hour = time_config.ticks_per_hour as i64;
-        if ticks_per_hour <= 0 {
-            return 0;
-        }
+    // 配置缺失时 fail-soft 返回 0（不衰减），公式真源 = TimeRegistry::game_hours
+    let Some(time_config) = TimeRegistry::get_config() else {
+        return 0;
+    };
 
-        // tick_id 是秒级时间戳，需除以 real_seconds_per_tick 得到 tick count
-        let registry = match crate::game_data::registry_or_error() {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(
-                    "get_real_seconds_per_tick: registry 读取失败（fallback 0 = 不衰减）：{e:?}"
-                );
-                return 0;
-            }
-        };
-        let real_seconds_per_tick = registry
-            .get()
-            .game_rules
-            .data
-            .agent_state
-            .tick
-            .real_seconds_per_tick as i64;
-        let real_seconds_per_game_hour = real_seconds_per_tick * ticks_per_hour;
-        let game_hours = if real_seconds_per_game_hour > 0 {
-            age_ticks / real_seconds_per_game_hour
-        } else {
-            age_ticks / ticks_per_hour
-        };
-
-        let hours_per_year = time_config.hours_per_day as i64
-            * time_config.days_per_season as i64
-            * time_config.seasons_per_year as i64;
-        if hours_per_year <= 0 {
-            return 0;
-        }
-        game_hours / hours_per_year
-    } else {
-        0
+    let hours_per_year = time_config.hours_per_day as i64
+        * time_config.days_per_season as i64
+        * time_config.seasons_per_year as i64;
+    if hours_per_year <= 0 {
+        return 0;
     }
+    TimeRegistry::game_hours(age_ticks) / hours_per_year
 }
 
 /// 计算 starting_age 对应的 tick 偏移量（用于重生时设置 birth_tick）

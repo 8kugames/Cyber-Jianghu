@@ -20,14 +20,16 @@ mod cache;
 pub mod formula_engine;
 mod loader;
 pub mod loaders;
+pub mod location_registry;
 pub mod registry;
 pub mod types;
 
 #[cfg(test)]
 mod test_utils;
 
-pub use cache::{GameDataCache, LocationRegistry};
+pub use cache::GameDataCache;
 pub use loader::load_from_dir;
+pub use location_registry::LocationRegistry;
 pub use registry::{
     ActionField, ActionRegistry, InitialInventoryRegistry, InventoryRegistry, ItemRegistry,
     NetworkRegistry, StateRegistry, init_registry, registry, registry_or_error,

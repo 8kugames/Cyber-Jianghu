@@ -369,6 +369,21 @@ impl BasicActionExecutor {
             );
         }
 
+        // 时代显隐：终点被 time_variants 隐藏 = 当前时代不存在，拒绝进入。
+        // 起点不校验（与传灯录同语义：所在地永远允许离开）。
+        let game_day =
+            crate::game_data::registry::time_registry::TimeRegistry::game_day(intent.tick_id);
+        if !location_registry.is_node_visible(&data.target_location, game_day) {
+            return ActionExecutionResult::failure(
+                format!(
+                    "目标位置 {} 在当前时代不可达（尚未出现或已湮灭）",
+                    data.target_location
+                ),
+                intent.action_type.to_string(),
+                Some(intent.intent_id),
+            );
+        }
+
         if !location_registry.is_connected(current_location, &data.target_location) {
             return ActionExecutionResult::failure(
                 format!(
