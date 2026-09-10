@@ -142,6 +142,10 @@ impl super::super::Agent {
             let mut batch_rejection: Option<String> = None;
             let mut batch_layers: Vec<crate::soul::reflector::LayerResult> = Vec::new();
             let mut used_chaos_fallback = false;
+            // 链内前序已验证"取"动作获得的物品（裸 item_id）：
+            // 后序"取后即用/予"类 intent 共享同一 WorldState 快照，
+            // 需将获得物并入可见集合以免误拦合法连续动作
+            let mut acquired_item_ids: Vec<String> = Vec::new();
 
             // multi-intent pipeline: primary + subsequent intents + chaos
             let max_per_tick = _max_intents;
@@ -283,7 +287,12 @@ impl super::super::Agent {
             for intent in all_raw_intents {
                 let intent_for_summary = intent.clone();
                 match self
-                    .validate_with_reflector(intent, world_state, graded_config.as_ref())
+                    .validate_with_reflector(
+                        intent,
+                        world_state,
+                        graded_config.as_ref(),
+                        acquired_item_ids.clone(),
+                    )
                     .await?
                 {
                     crate::soul::reflector::PipelineValidationResult::Approved {
@@ -291,6 +300,17 @@ impl super::super::Agent {
                         layers,
                         narrative: _,
                     } => {
+                        // 链感知：取动作 approved 后其目标物品（已规范化为完整 uuid）
+                        // 供同链后序 intent 的 layer0 可见性检查（可见集合为 uuid 形态）
+                        if approved.action_type.as_str() == "取"
+                            && let Some(item_id) = approved
+                                .action_data
+                                .as_ref()
+                                .and_then(|d| d.get("item_id"))
+                                .and_then(|v| v.as_str())
+                        {
+                            acquired_item_ids.push(item_id.to_string());
+                        }
                         // 审查通过后推入 summary window（validated=true）
                         if let Some(ref chain) = cognitive_chain
                             && let Some(ref engine) = self.cognitive_engine
@@ -357,6 +377,7 @@ impl super::super::Agent {
                                             corrected_intent,
                                             world_state,
                                             graded_config.as_ref(),
+                                            acquired_item_ids.clone(),
                                         )
                                         .await?
                                     {
@@ -429,6 +450,7 @@ used_chaos_fallback = true;
 
             if !approved_intents.is_empty() {
                 if let Some(recorder) = self.soul_recorder().await {
+                    let layer0 = batch_layers.iter().find(|l| l.layer == "layer0");
                     let layer1 = batch_layers.iter().find(|l| l.layer == "layer1");
                     let layer2 = batch_layers.iter().find(|l| l.layer == "layer2");
                     let layer3 = batch_layers.iter().find(|l| l.layer == "layer3");
@@ -442,6 +464,7 @@ used_chaos_fallback = true;
                             world_state.tick_id,
                             attempt,
                             tianhun_result,
+                            layer0.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             layer1.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             layer2.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             layer3.map(|l| l.detail.as_deref().unwrap_or("通过")),
@@ -499,6 +522,7 @@ used_chaos_fallback = true;
             } else if let Some(reason) = batch_rejection.clone() {
                 // 仅旧模式会进入此分支
                 if let Some(recorder) = self.soul_recorder().await {
+                    let layer0 = batch_layers.iter().find(|l| l.layer == "layer0");
                     let layer1 = batch_layers.iter().find(|l| l.layer == "layer1");
                     let layer2 = batch_layers.iter().find(|l| l.layer == "layer2");
                     let layer3 = batch_layers.iter().find(|l| l.layer == "layer3");
@@ -507,6 +531,7 @@ used_chaos_fallback = true;
                             world_state.tick_id,
                             attempt,
                             "rejected",
+                            layer0.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             layer1.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             layer2.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             layer3.map(|l| l.detail.as_deref().unwrap_or("通过")),

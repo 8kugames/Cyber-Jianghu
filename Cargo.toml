@@ -19,7 +19,7 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 
 # 工具库
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.6", features = ["v4", "serde"] }
+uuid = { version = "1.6", features = ["v4", "v5", "serde"] }
 
 # 错误处理
 anyhow = "1.0"

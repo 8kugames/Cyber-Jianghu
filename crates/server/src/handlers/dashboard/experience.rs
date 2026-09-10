@@ -464,6 +464,8 @@ pub async fn get_experiences(
 #[derive(Debug, Serialize)]
 pub struct ItemSummary {
     pub item_id: String,
+    /// 稳定 uuid（UUID v5 从 item_id 派生，展示用短 uuid 取前 8 位）
+    pub uuid: String,
     pub name: String,
     pub item_type: String,
     pub description: String,
@@ -476,11 +478,15 @@ pub async fn get_items() -> Json<Vec<ItemSummary>> {
     let items = crate::game_data::registry::ItemRegistry::all_item_ids()
         .iter()
         .filter_map(|id| crate::game_data::registry::ItemRegistry::get(id))
-        .map(|entry| ItemSummary {
-            item_id: entry.item_id,
-            name: entry.name,
-            item_type: entry.item_type,
-            description: entry.description,
+        .map(|entry| {
+            let uuid = crate::items::item_uuid(&entry.item_id).to_string();
+            ItemSummary {
+                uuid,
+                item_id: entry.item_id,
+                name: entry.name,
+                item_type: entry.item_type,
+                description: entry.description,
+            }
         })
         .collect();
     Json(items)
@@ -493,10 +499,16 @@ pub async fn get_items() -> Json<Vec<ItemSummary>> {
 /// 展示名映射响应
 ///
 /// - `items`：item_id → 物品名（来自 items.yaml 权威配置源）
+/// - `item_uuids`：item_id → 稳定 uuid（UUID v5 派生；展示用短 uuid 取前 8 位）
+/// - `recipes`：recipe_id → 配方名（来自 recipes.yaml 权威配置源）
+/// - `recipe_uuids`：recipe_id → 稳定 uuid（UUID v5 派生）
 /// - `agents`：agent_id → 角色名（来自 agents 表，含全部状态：在线/离线/死亡）
 #[derive(Debug, Serialize)]
 pub struct DisplayMapResponse {
     pub items: HashMap<String, String>,
+    pub item_uuids: HashMap<String, String>,
+    pub recipes: HashMap<String, String>,
+    pub recipe_uuids: HashMap<String, String>,
     pub agents: HashMap<String, String>,
 }
 
@@ -519,6 +531,21 @@ pub async fn get_display_map(
         })
         .collect();
 
+    // item uuids：与 items 同源的稳定标识，供前端拼装 名称[短uuid] 展示
+    let item_uuids: HashMap<String, String> = items
+        .keys()
+        .map(|id| (id.clone(), crate::items::item_uuid(id).to_string()))
+        .collect();
+
+    // recipes：配方名 + 稳定 uuid（配方是制造/传授的前提，前端经历日志需要翻译 recipe_id）
+    let recipes: HashMap<String, String> = crate::game_data::registry::RecipeRegistry::all()
+        .into_iter()
+        .collect();
+    let recipe_uuids: HashMap<String, String> = recipes
+        .keys()
+        .map(|id| (id.clone(), crate::display::recipe_uuid(id).to_string()))
+        .collect();
+
     // agents：一条轻量 SQL，全状态、无 JOIN
     let rows = sqlx::query("SELECT agent_id, name FROM agents")
         .fetch_all(&state.db_pool)
@@ -537,7 +564,13 @@ pub async fn get_display_map(
         })
         .collect();
 
-    Ok(Json(DisplayMapResponse { items, agents }))
+    Ok(Json(DisplayMapResponse {
+        items,
+        item_uuids,
+        recipes,
+        recipe_uuids,
+        agents,
+    }))
 }
 
 /// 天魂层展示名映射（数据驱动，从 souls.yaml layer_display 读取）

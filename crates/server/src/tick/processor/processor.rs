@@ -118,7 +118,41 @@ impl StateProcessor {
                     Some(intent.intent_id),
                 )
             }
-            Ok(parsed) => executor.execute(&resolved_intent, &parsed, &mut agent_state, all_states),
+            Ok(parsed) => {
+                // 观察目标：预取对方背包（execute_observe 同步无 DB 访问，由本层查出注入）
+                let observe_target = match &parsed {
+                    crate::actions::ParsedActionData::Observe(d) => d
+                        .target_agent_id
+                        .as_deref()
+                        .and_then(|s| uuid::Uuid::parse_str(s).ok()),
+                    _ => None,
+                };
+                let target_inventory = match observe_target {
+                    Some(target_id) => match crate::inventory::InventoryManager::get_all_items(
+                        &self.db_pool,
+                        target_id,
+                    )
+                    .await
+                    {
+                        Ok(items) => Some(items),
+                        Err(e) => {
+                            warn!(
+                                "查询观察目标 {} 背包失败，观察结果跳过物品清单: {}",
+                                target_id, e
+                            );
+                            None
+                        }
+                    },
+                    None => None,
+                };
+                executor.execute(
+                    &resolved_intent,
+                    &parsed,
+                    &mut agent_state,
+                    all_states,
+                    target_inventory.as_deref(),
+                )
+            }
         };
 
         let mut execution_failed = !result.success;

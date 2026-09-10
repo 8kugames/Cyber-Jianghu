@@ -17,6 +17,17 @@ impl BasicActionExecutor {
         data: &YuData,
         current_location: &str,
     ) -> ActionExecutionResult {
+        // 意图携带物品 uuid（v5 派生），严格反解回内部 item_id
+        let item_id = match crate::items::resolve_item_id(&data.item_id) {
+            Some(id) => id,
+            None => {
+                return ActionExecutionResult::failure(
+                    format!("物品不存在或无效: {}", data.item_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
+                );
+            }
+        };
         let rtype = data.recipient_type.as_str();
 
         match rtype {
@@ -42,27 +53,35 @@ impl BasicActionExecutor {
                 };
 
                 let mut result = ActionExecutionResult::success(
-                    format!("将 {} 个 {} 给予目标", data.quantity, data.item_id),
+                    format!(
+                        "将 {} 个 {} 给予目标",
+                        data.quantity,
+                        crate::display::display_item_name(&item_id)
+                    ),
                     intent.action_type.to_string(),
                     Some(intent.intent_id),
                 );
                 result.add_change(StateChange::ItemTransferred {
                     from: intent.agent_id,
                     to: target_id,
-                    item_id: data.item_id.clone(),
+                    item_id,
                     quantity: data.quantity,
                 });
                 result
             }
             "ground" => {
                 let mut result = ActionExecutionResult::success(
-                    format!("将 {} 个 {} 丢弃到地面", data.quantity, data.item_id),
+                    format!(
+                        "将 {} 个 {} 丢弃到地面",
+                        data.quantity,
+                        crate::display::display_item_name(&item_id)
+                    ),
                     intent.action_type.to_string(),
                     Some(intent.intent_id),
                 );
                 result.add_change(StateChange::ItemDisposed {
                     agent_id: intent.agent_id,
-                    item_id: data.item_id.clone(),
+                    item_id,
                     quantity: data.quantity,
                     location: current_location.to_string(),
                 });
@@ -85,18 +104,33 @@ impl BasicActionExecutor {
         data: &QuData,
         current_location: &str,
     ) -> ActionExecutionResult {
+        // 意图携带物品 uuid（v5 派生），严格反解回内部 item_id
+        let item_id = match crate::items::resolve_item_id(&data.item_id) {
+            Some(id) => id,
+            None => {
+                return ActionExecutionResult::failure(
+                    format!("物品不存在或无效: {}", data.item_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
+                );
+            }
+        };
         let stype = data.source_type.as_str();
 
         match stype {
             "ground" => {
                 let mut result = ActionExecutionResult::success(
-                    format!("从地面拾取 {} 个 {}", data.quantity, data.item_id),
+                    format!(
+                        "从地面拾取 {} 个 {}",
+                        data.quantity,
+                        crate::display::display_item_name(&item_id)
+                    ),
                     intent.action_type.to_string(),
                     Some(intent.intent_id),
                 );
                 result.add_change(StateChange::ItemAcquired {
                     agent_id: intent.agent_id,
-                    item_id: data.item_id.clone(),
+                    item_id,
                     quantity: data.quantity,
                     source: "ground".to_string(),
                 });
@@ -124,21 +158,24 @@ impl BasicActionExecutor {
                 };
 
                 let mut result = ActionExecutionResult::success(
-                    format!("从目标获取 {} 个 {}", data.quantity, data.item_id),
+                    format!(
+                        "从目标获取 {} 个 {}",
+                        data.quantity,
+                        crate::display::display_item_name(&item_id)
+                    ),
                     intent.action_type.to_string(),
                     Some(intent.intent_id),
                 );
                 result.add_change(StateChange::ItemTransferred {
                     from: source_id,
                     to: intent.agent_id,
-                    item_id: data.item_id.clone(),
+                    item_id,
                     quantity: data.quantity,
                 });
                 result
             }
             "resource" => {
-                let resource_id = data.source_id.as_deref().unwrap_or(&data.item_id);
-
+                // 采集校验用内部 item_id（config gatherable_items 存原始 id）
                 let registry = match registry_or_error() {
                     Ok(r) => r,
                     Err(e) => {
@@ -153,12 +190,15 @@ impl BasicActionExecutor {
 
                 let can_gather = location_registry
                     .get_node(current_location)
-                    .map(|node| node.gatherable_items.contains(&resource_id.to_string()))
+                    .map(|node| node.gatherable_items.contains(&item_id))
                     .unwrap_or(false);
 
                 if !can_gather {
                     return ActionExecutionResult::failure(
-                        format!("当前位置无法采集 {}", resource_id),
+                        format!(
+                            "当前位置无法采集 {}",
+                            crate::display::display_item_name(&item_id)
+                        ),
                         intent.action_type.to_string(),
                         Some(intent.intent_id),
                     );
@@ -175,13 +215,17 @@ impl BasicActionExecutor {
                 }
 
                 let mut result = ActionExecutionResult::success(
-                    format!("从 {} 采集了 {} 个", resource_id, quantity),
+                    format!(
+                        "从 {} 采集了 {} 个",
+                        crate::display::display_item_name(&item_id),
+                        quantity
+                    ),
                     intent.action_type.to_string(),
                     Some(intent.intent_id),
                 );
                 result.add_change(StateChange::ItemAcquired {
                     agent_id: intent.agent_id,
-                    item_id: data.item_id.clone(),
+                    item_id,
                     quantity,
                     source: "resource".to_string(),
                 });
@@ -201,7 +245,18 @@ impl BasicActionExecutor {
     /// 用：消耗或激活物品
     /// 不做语义过滤——物品效果由 item 定义中的 effects 决定
     pub(super) fn execute_yong(intent: &Intent, data: &YongData) -> ActionExecutionResult {
-        let item = match crate::items::get_item_definition(&data.item_id) {
+        // 意图携带物品 uuid（v5 派生），严格反解回内部 item_id
+        let item_id = match crate::items::resolve_item_id(&data.item_id) {
+            Some(id) => id,
+            None => {
+                return ActionExecutionResult::failure(
+                    format!("物品不存在或无效: {}", data.item_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
+                );
+            }
+        };
+        let item = match crate::items::get_item_definition(&item_id) {
             Some(item) => item,
             None => {
                 return ActionExecutionResult::failure(
@@ -214,7 +269,7 @@ impl BasicActionExecutor {
 
         if !item.is_usable() {
             return ActionExecutionResult::failure(
-                format!("{} 不可使用", item.name),
+                format!("{} 不可使用", crate::display::display_item_name(&item_id)),
                 intent.action_type.to_string(),
                 Some(intent.intent_id),
             );
@@ -233,14 +288,14 @@ impl BasicActionExecutor {
             .collect();
 
         let mut result = ActionExecutionResult::success(
-            format!("使用了 {}", item.name),
+            format!("使用了 {}", crate::display::display_item_name(&item_id)),
             intent.action_type.to_string(),
             Some(intent.intent_id),
         );
 
         result.add_change(StateChange::ItemUsed {
             agent_id: intent.agent_id,
-            item_id: data.item_id.clone(),
+            item_id,
             effects,
         });
 
@@ -251,7 +306,11 @@ impl BasicActionExecutor {
     /// channel = "public" → 本地广播（默认）
     /// channel = "private" → 私密会话（Dialogue Session）
     /// channel = "broadcast" → 大范围广播
-    pub(super) fn execute_speak(intent: &Intent, data: &SpeakData) -> ActionExecutionResult {
+    pub(super) fn execute_speak(
+        intent: &Intent,
+        data: &SpeakData,
+        agent_name: &str,
+    ) -> ActionExecutionResult {
         let channel = data.channel.as_str();
 
         if channel == "private" && data.target_agent_id.is_none() {
@@ -263,7 +322,11 @@ impl BasicActionExecutor {
         }
 
         let mut result = ActionExecutionResult::success(
-            format!("{}: {}", intent.agent_id, data.content),
+            format!(
+                "{}: {}",
+                crate::display::display_agent_name(agent_name, intent.agent_id),
+                data.content
+            ),
             intent.action_type.to_string(),
             Some(intent.intent_id),
         );
@@ -353,10 +416,14 @@ impl BasicActionExecutor {
     }
 
     /// 观察
+    ///
+    /// `target_inventory`：目标持有物品清单（由调用方预取注入），
+    /// None 表示非目标观察或背包查询失败，此时不输出物品信息。
     pub(super) fn execute_observe(
         intent: &Intent,
         data: &ObserveData,
         all_states: &[crate::models::AgentState],
+        target_inventory: Option<&[crate::inventory::InventoryItem]>,
     ) -> ActionExecutionResult {
         match &data.target_agent_id {
             Some(target_str) => {
@@ -410,9 +477,11 @@ impl BasicActionExecutor {
                             "奄奄一息".to_string()
                         };
 
+                        let target_display =
+                            crate::display::display_agent_name(&state.name, state.agent_id);
                         let mut desc = format!(
                             "你注视着{}，见其{}，{}。",
-                            state.name, hp_desc, alive_status
+                            target_display, hp_desc, alive_status
                         );
 
                         let observer_has_stealth = all_states
@@ -428,9 +497,34 @@ impl BasicActionExecutor {
                         let detected = !observer_has_stealth;
 
                         if detected {
-                            desc.push_str(&format!(" {}似乎察觉到了你的目光。", state.name));
+                            desc.push_str(&format!(" {}似乎察觉到了你的目光。", target_display));
                         } else {
-                            desc.push_str(&format!(" {}对此毫无察觉。", state.name));
+                            desc.push_str(&format!(" {}对此毫无察觉。", target_display));
+                        }
+
+                        // 目标持有物品清单：为后续 取-agent 等动作提供真实物品标识（名称[短uuid]）
+                        match target_inventory {
+                            Some([]) => {
+                                desc.push_str(&format!(
+                                    " {}两手空空，身上没有任何物品。",
+                                    target_display
+                                ));
+                            }
+                            Some(items) => {
+                                let item_desc = items
+                                    .iter()
+                                    .map(|i| {
+                                        format!(
+                                            "{}×{}",
+                                            crate::display::display_item_name(&i.item_id),
+                                            i.quantity
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("、");
+                                desc.push_str(&format!(" 其身上携带：{}。", item_desc));
+                            }
+                            None => {}
                         }
 
                         let mut result = ActionExecutionResult::success(
@@ -460,12 +554,12 @@ impl BasicActionExecutor {
                     .map(|me| me.node_id.as_str())
                     .unwrap_or("");
 
-                let same_node_agents: Vec<&str> = all_states
+                let same_node_agents: Vec<String> = all_states
                     .iter()
                     .filter(|s| {
                         s.agent_id != intent.agent_id && s.node_id == observer_node && s.is_alive
                     })
-                    .map(|s| s.name.as_str())
+                    .map(|s| crate::display::display_agent_name(&s.name, s.agent_id))
                     .collect();
 
                 let (gatherable_info, location_name, hazard_info) = match registry_or_error() {
@@ -476,7 +570,13 @@ impl BasicActionExecutor {
                                 let items = if node.gatherable_items.is_empty() {
                                     String::new()
                                 } else {
-                                    format!("自然资源有：{}", node.gatherable_items.join("、"))
+                                    // 完整 uuid 清单由 WorldState.location 携带，此处短展示供人读
+                                    let names: Vec<String> = node
+                                        .gatherable_items
+                                        .iter()
+                                        .map(|id| crate::display::display_item_name(id))
+                                        .collect();
+                                    format!("自然资源有：{}", names.join("、"))
                                 };
                                 let hazard = node
                                     .environmental_damage
@@ -537,7 +637,19 @@ impl BasicActionExecutor {
 
     /// 制造
     pub(super) fn execute_craft(intent: &Intent, data: &CraftData) -> ActionExecutionResult {
-        let recipe = match crate::game_data::registry::RecipeRegistry::get(&data.recipe_id) {
+        // 意图携带配方 uuid（v5 派生），严格反解回内部 recipe_id
+        let recipe_id =
+            match crate::game_data::registry::RecipeRegistry::resolve_recipe_id(&data.recipe_id) {
+                Some(id) => id,
+                None => {
+                    return ActionExecutionResult::failure(
+                        format!("配方不存在或无效: {}", data.recipe_id),
+                        intent.action_type.to_string(),
+                        Some(intent.intent_id),
+                    );
+                }
+            };
+        let recipe = match crate::game_data::registry::RecipeRegistry::get(&recipe_id) {
             Some(r) => r,
             None => {
                 return ActionExecutionResult::failure(
@@ -549,7 +661,7 @@ impl BasicActionExecutor {
         };
 
         let mut result = ActionExecutionResult::success(
-            format!("制造了 {}", recipe.name),
+            format!("制造了 {}", crate::display::display_recipe_name(&recipe_id)),
             intent.action_type.to_string(),
             Some(intent.intent_id),
         );
@@ -576,12 +688,21 @@ impl BasicActionExecutor {
             }
         };
 
-        let recipe_name = crate::game_data::registry::RecipeRegistry::get(&data.recipe_id)
-            .map(|r| r.name)
-            .unwrap_or_else(|| data.recipe_id.clone());
+        // 意图携带配方 uuid（v5 派生），严格反解回内部 recipe_id
+        let recipe_display =
+            match crate::game_data::registry::RecipeRegistry::resolve_recipe_id(&data.recipe_id) {
+                Some(id) => crate::display::display_recipe_name(&id),
+                None => {
+                    return ActionExecutionResult::failure(
+                        format!("配方不存在或无效: {}", data.recipe_id),
+                        intent.action_type.to_string(),
+                        Some(intent.intent_id),
+                    );
+                }
+            };
 
         let mut result = ActionExecutionResult::success(
-            format!("传授配方「{}」", recipe_name),
+            format!("传授配方「{}」", recipe_display),
             intent.action_type.to_string(),
             Some(intent.intent_id),
         );

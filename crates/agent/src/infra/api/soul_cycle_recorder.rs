@@ -215,13 +215,14 @@ impl SoulCycleRecorder {
         }
     }
 
-    /// 记录天魂审查结果
+    /// 记录天魂审查结果（layer0-3 全量落入 tianhun_layers JSON，DB 列仅存 layer1-3）
     #[allow(clippy::too_many_arguments)]
     pub async fn record_tianhun(
         &self,
         tick_id: i64,
         attempt: i32,
         result: &str,
+        layer0: Option<&str>,
         layer1: Option<&str>,
         layer2: Option<&str>,
         layer3: Option<&str>,
@@ -235,18 +236,19 @@ impl SoulCycleRecorder {
 
         // 构建 tianhun_layers JSON 数组（数据驱动可扩展）
         let tianhun_layers = {
-            let layers: Vec<serde_json::Value> = [(1, layer1), (2, layer2), (3, layer3)]
-                .into_iter()
-                .filter_map(|(idx, layer)| {
-                    layer.map(|v| {
-                        serde_json::json!({
-                            "layer": format!("layer{}", idx),
-                            "passed": v != "rejected",
-                            "detail": if v == "rejected" { "驳回" } else { v },
+            let layers: Vec<serde_json::Value> =
+                [(0, layer0), (1, layer1), (2, layer2), (3, layer3)]
+                    .into_iter()
+                    .filter_map(|(idx, layer)| {
+                        layer.map(|v| {
+                            serde_json::json!({
+                                "layer": format!("layer{}", idx),
+                                "passed": v != "rejected",
+                                "detail": if v == "rejected" { "驳回" } else { v },
+                            })
                         })
                     })
-                })
-                .collect();
+                    .collect();
             if layers.is_empty() {
                 None
             } else {
@@ -768,6 +770,7 @@ mod tests {
                 1,
                 0,
                 "approved",
+                Some("目标校验通过"),
                 Some("action_type合法"),
                 Some("物品存在"),
                 None,
@@ -784,9 +787,10 @@ mod tests {
         let layers: Vec<serde_json::Value> =
             serde_json::from_str(record.tianhun_layers.as_ref().unwrap())
                 .expect("tianhun_layers JSON");
-        assert_eq!(layers.len(), 2, "should have 2 layers (layer1, layer2)");
-        assert_eq!(layers[0]["layer"], "layer1");
-        assert!(layers[0]["passed"].as_bool().unwrap());
+        assert_eq!(layers.len(), 3, "should have 3 layers (layer0-2)");
+        assert_eq!(layers[0]["layer"], "layer0");
+        assert_eq!(layers[1]["layer"], "layer1");
+        assert!(layers[1]["passed"].as_bool().unwrap());
         // 旧列仍然兼容
         assert_eq!(
             record.tianhun_layer1_result.as_deref(),
@@ -820,6 +824,7 @@ mod tests {
                 1,
                 0,
                 "approved",
+                None,
                 Some("action_type合法"),
                 Some("物品存在"),
                 None,
@@ -845,6 +850,7 @@ mod tests {
                 1,
                 0,
                 "rejected",
+                Some("目标不可见"),
                 Some("action_type合法"),
                 None,
                 None,

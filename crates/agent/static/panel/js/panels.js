@@ -9,6 +9,10 @@ const panels = {
         label: '属性',
         mount: mountAttributes,
     },
+    inventory: {
+        label: '持有物品',
+        mount: mountInventory,
+    },
     relationships: {
         label: '关系',
         mount: mountRelationships,
@@ -90,6 +94,70 @@ async function mountAttributes(container, ctx) {
 }
 
 // ============================================================================
+// 统一展示格式：{名}[{短uuid 前 8 位}]（与服务端 crate::display 同源同格式）
+// ============================================================================
+function formatAgentDisplayName(name, agentId) {
+    const short = agentId ? String(agentId).substring(0, 8) : '';
+    return (name || '未知角色') + '[' + short + ']';
+}
+
+// ============================================================================
+// Inventory（持有物品 + 持有配方，同一区域）
+// 数据源：GET /api/v1/state 的 self_state.inventory 与 self_state.recipe_details
+// （配方详情 Server 权威，每 tick 下发）
+// ============================================================================
+
+async function mountInventory(container) {
+    showLoading(container);
+    try {
+        const state = await get(API.STATE);
+        const selfState = state?.self_state || {};
+        const inventory = selfState.inventory || [];
+        const recipes = selfState.recipe_details || [];
+
+        // 持有物品
+        let itemsHtml;
+        if (inventory.length === 0) {
+            itemsHtml = '<p class="text-muted">空空如也</p>';
+        } else {
+            itemsHtml = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">';
+            for (const item of inventory) {
+                const equipped = item.is_equipped ? ' <span style="color:var(--accent,#14b8a6);font-size:11px">[已装备]</span>' : '';
+                itemsHtml += `<div class="card" style="padding:10px"><div style="font-size:13px;font-weight:600;margin-bottom:2px">${escapeHtml(item.name)}${equipped}</div><div style="font-size:12px;color:var(--text-muted)">x${escapeHtml(item.quantity)} · ${escapeHtml(String(item.item_id || '').substring(0, 8))}</div></div>`;
+            }
+            itemsHtml += '</div>';
+        }
+
+        // 持有配方（制造/传授的前提，含材料需求）
+        let recipesHtml;
+        if (recipes.length === 0) {
+            recipesHtml = '<p class="text-muted">尚未习得任何配方</p>';
+        } else {
+            recipesHtml = recipes.map((r) => {
+                const materials = (r.materials || [])
+                    .map((m) => `${m.item_name || m.item_id} x${m.quantity}`)
+                    .join('、');
+                const materialLine = materials
+                    ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">材料：${escapeHtml(materials)}</div>`
+                    : '';
+                const resultLine = r.result_item
+                    ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:2px">产出：${escapeHtml(r.result_item_name || r.result_item)} x${escapeHtml(r.result_quantity ?? 1)}</div>`
+                    : '';
+                return `<div class="card" style="padding:10px;margin-bottom:8px"><div style="font-size:13px;font-weight:600">${escapeHtml(r.name || r.recipe_id)}</div>${r.description ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px">${escapeHtml(r.description)}</div>` : ''}${materialLine}${resultLine}</div>`;
+            }).join('');
+        }
+
+        container.innerHTML = `
+            <h3 style="font-size:14px;font-weight:600;margin:0 0 8px;color:var(--text-secondary)">持有物品（${inventory.length}）</h3>
+            ${itemsHtml}
+            <h3 style="font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--text-secondary)">持有配方（${recipes.length}）</h3>
+            ${recipesHtml}`;
+    } catch (e) {
+        container.innerHTML = `<p class="text-muted">持有物品加载失败: ${escapeHtml(e.message)}</p>`;
+    }
+}
+
+// ============================================================================
 // Relationships
 // ============================================================================
 
@@ -106,13 +174,17 @@ async function mountRelationships(container, ctx) {
 
         let html = '';
         for (const rel of relationships) {
-            const name = rel.target_name || rel.name || '-';
+            // 角色展示统一 姓名[短uuid]；API 字段为 target_agent_id（兼容旧 target_id）
+            const relId = rel.target_agent_id || rel.target_id || '';
+            const name = relId
+                ? formatAgentDisplayName(rel.target_name || rel.name || '未知角色', relId)
+                : (rel.target_name || rel.name || '-');
             const label = rel.relationship_label || '-';
             const favor = rel.favorability ?? rel.level ?? '-';
             const color = typeof favor === 'number' ? (favor >= 70 ? 'var(--success)' : favor >= 30 ? 'var(--warning)' : 'var(--danger)') : 'var(--text-muted)';
             const initial = name.charAt(0);
             html += `
-            <div class="card rel-card" style="padding:12px;margin-bottom:8px;cursor:pointer" data-rel-id="${escapeHtml(rel.target_id || '')}">
+            <div class="card rel-card" style="padding:12px;margin-bottom:8px;cursor:pointer" data-rel-id="${escapeHtml(relId)}">
                 <div style="display:flex;align-items:center;gap:12px">
                     <div class="rel-avatar">${escapeHtml(initial)}</div>
                     <div style="flex:1;min-width:0">
@@ -128,7 +200,7 @@ async function mountRelationships(container, ctx) {
         container.querySelectorAll('[data-rel-id]').forEach(card => {
             card.addEventListener('click', () => {
                 const id = card.dataset.relId;
-                const rel = relationships.find(r => r.target_id === id);
+                const rel = relationships.find(r => (r.target_agent_id || r.target_id) === id);
                 if (rel) showRelationshipDetail(rel);
             });
         });
@@ -138,8 +210,12 @@ async function mountRelationships(container, ctx) {
 }
 
 function showRelationshipDetail(rel) {
+    const relId = rel.target_agent_id || rel.target_id || '';
+    const displayName = relId
+        ? formatAgentDisplayName(rel.target_name || rel.name || '未知角色', relId)
+        : (rel.target_name || rel.name || '-');
     const html = `
-        <h3 style="margin-bottom:12px">${escapeHtml(rel.target_name || '-')}</h3>
+        <h3 style="margin-bottom:12px">${escapeHtml(displayName)}</h3>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
             <div><span style="color:var(--text-muted);font-size:12px">关系</span><br>${escapeHtml(rel.relationship_label || '-')}</div>
             <div><span style="color:var(--text-muted);font-size:12px">好感度</span><br>${rel.favorability ?? rel.level ?? '-'}</div>
@@ -205,7 +281,7 @@ async function mountBiography(container, ctx) {
 let expPage = 1;
 
 // 天魂层名：可被 tryFetchLayerDisplay() 覆盖（从服务器 souls.yaml 配置驱动）
-var LAYER_NAMES = { layer1: '动作审查', layer2: '规则校验', layer3: '意图审查' };
+var LAYER_NAMES = { layer0: '目标校验', layer1: '动作审查', layer2: '规则校验', layer3: '意图审查' };
 const SPEAK_TYPES = { speak: true, talk: true, say: true, chat: true, 说话: true };
 
 // 尝试从服务器 souls.yaml layer_display 配置拉取天魂层名（失败时静默保留 LAYER_NAMES 硬编码值）

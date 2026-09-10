@@ -153,6 +153,12 @@ pub struct ValidationRuntimeConfig {
     pub graded_config: Option<cyber_jianghu_protocol::GradedValidationConfig>,
     /// 最近同类 intent 的完整决策内容（用于语义去重）
     pub recent_same_type_decisions: Vec<String>,
+    /// 同 tick 链内前序已通过验证的"取"动作获得的物品（裸 item_id）。
+    ///
+    /// subsequent_intents 链内逐个验证共享同一 WorldState 快照，
+    /// 后序"取后即用"类 intent 的目标物品尚不在快照可见集合中，
+    /// 由调用方将前序已 approved 的取动作 item_id 传入以免误拦。
+    pub acquired_item_ids: Vec<String>,
 }
 
 /// 验证请求
@@ -290,6 +296,7 @@ mod tests {
             runtime: ValidationRuntimeConfig {
                 graded_config: Some(GradedValidationConfig::default()),
                 recent_same_type_decisions: vec![],
+                acquired_item_ids: vec![],
             },
         };
 

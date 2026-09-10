@@ -49,8 +49,11 @@ pub use types::*;
 // 重导出错误类型（从 common 合并）
 pub use error::GameError;
 
-// 重导出 agent ID 解析工具
-pub use resolve::{ResolveAgentIdError, resolve_agent_id, resolve_agent_id_lenient, short_id};
+// 重导出 agent ID 解析工具与物品 uuid 派生（Server/Agent 共享真源）
+pub use resolve::{
+    ITEM_UUID_NAMESPACE, ResolveAgentIdError, item_uuid, parse_item_ref, resolve_agent_id,
+    resolve_agent_id_lenient, short_id,
+};
 
 /// 协议版本
 pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");

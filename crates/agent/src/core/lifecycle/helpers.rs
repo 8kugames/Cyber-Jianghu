@@ -102,9 +102,11 @@ impl super::super::Agent {
             if let Ok(uuid) = target_id.parse::<uuid::Uuid>()
                 && let Some(entity) = entities.iter().find(|e| e.id == uuid)
             {
-                return format!("{}（{}）", entity.name, &target_id[..8]);
+                return crate::core::utils::display_agent_name(&entity.name, uuid);
             }
-            target_id.chars().take(8).collect::<String>() + "..."
+            let mut short = target_id.chars().take(8).collect::<String>();
+            short.push_str("...");
+            format!("未知角色[{}]", short)
         };
 
         match action_type {

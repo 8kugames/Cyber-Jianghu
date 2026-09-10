@@ -210,6 +210,7 @@ function formatAttributeShort(key, value, attrs) {
 
 // 天魂三层审查标签中文映射（history.html + agents.js 共用）
 var LAYER_NAMES = {
+    layer0: "目标校验",
     layer1: "动作审查",
     layer2: "规则校验",
     layer3: "意图审查",
@@ -244,7 +245,8 @@ var SOURCE_TYPE_NAMES = {
 // 经历日志渲染前必须 await loadDisplayMap() 就绪，用于翻译 target_agent_id。
 // 数据源：后端 /api/dashboard/display-map（items.yaml + agents 表），单一权威源。
 // ============================================================================
-var displayMapCache = { agents: {}, items: {}, _loaded: false, _promise: null };
+var displayMapCache = { agents: {}, items: {}, item_uuids: {}, recipes: {}, recipe_uuids: {},
+    itemsByUuid: {}, recipesByUuid: {}, _loaded: false, _promise: null };
 
 function loadDisplayMap() {
     if (displayMapCache._loaded || displayMapCache._promise) return displayMapCache._promise;
@@ -253,6 +255,18 @@ function loadDisplayMap() {
         .then(function (data) {
             displayMapCache.agents = data.agents || {};
             displayMapCache.items = data.items || {};
+            displayMapCache.item_uuids = data.item_uuids || {};
+            displayMapCache.recipes = data.recipes || {};
+            displayMapCache.recipe_uuids = data.recipe_uuids || {};
+            // uuid 反查表：新协议下动作数据携带完整 uuid，需反解回裸 id 取名
+            displayMapCache.itemsByUuid = {};
+            Object.keys(displayMapCache.item_uuids).forEach(function (rawId) {
+                displayMapCache.itemsByUuid[displayMapCache.item_uuids[rawId]] = rawId;
+            });
+            displayMapCache.recipesByUuid = {};
+            Object.keys(displayMapCache.recipe_uuids).forEach(function (rawId) {
+                displayMapCache.recipesByUuid[displayMapCache.recipe_uuids[rawId]] = rawId;
+            });
             displayMapCache._loaded = true;
         })
         .catch(function (e) {
@@ -262,23 +276,46 @@ function loadDisplayMap() {
     return displayMapCache._promise;
 }
 
-// 解析 target_agent_id → 角色名称（history.html + agents.js 共用）
-// 优先查 displayMapCache.agents（权威映射），其次 allAgentsMap，兜底短 ID。
-// 统一输出格式：name(uuid[:8])（半角括号）。
+// ============================================================================
+// 统一展示格式：{名}[{短uuid 前 8 位}]
+// 与服务端 crate::display 同源同格式，任何页面禁止自行拼接。
+// ============================================================================
+
+// 纯格式化：已有 name + id 在手时直接用（无映射查表）
+function formatNameId(name, id) {
+    var short = id ? String(id).substring(0, 8) : "";
+    return (name || "未知") + "[" + short + "]";
+}
+
+// 解析 target_agent_id → 角色展示名（history.html + agents.js + health.js 共用）
+// 优先查 displayMapCache.agents（权威映射），其次 allAgentsMap，兜底未知角色[短ID]。
 function resolveTargetName(targetId) {
     if (!targetId) return "某人";
-    var shortId = targetId.substring(0, 8);
     // 权威映射优先（覆盖已死亡/离线角色）
     if (displayMapCache.agents[targetId]) {
-        return displayMapCache.agents[targetId] + "(" + shortId + ")";
+        return formatNameId(displayMapCache.agents[targetId], targetId);
     }
     if (typeof allAgentsMap !== "undefined" && allAgentsMap && allAgentsMap[targetId]) {
         var agent = allAgentsMap[targetId];
-        var name = agent.name || targetId;
-        return name + "(" + shortId + ")";
+        return formatNameId(agent.name, targetId);
     }
     // 兜底：仍未命中映射，给出中文化提示而非裸 UUID，便于排障
-    return "未知角色(" + shortId + ")";
+    return "未知角色[" + targetId.substring(0, 8) + "]";
+}
+
+// 解析 recipe_id → 配方展示名（制造/传授动作渲染共用）
+// 兼容两种引用：完整 uuid（新协议）与裸 recipe_id（历史记录）；未知时退化为原始引用
+function resolveRecipeName(recipeId) {
+    if (!recipeId) return "";
+    var rawId = recipeId;
+    if (!displayMapCache.recipes[recipeId]) {
+        rawId = displayMapCache.recipesByUuid[recipeId] || recipeId;
+    }
+    if (displayMapCache.recipes[rawId]) {
+        var uuid = displayMapCache.recipe_uuids[rawId] || "";
+        return displayMapCache.recipes[rawId] + "[" + (uuid ? uuid.substring(0, 8) : rawId) + "]";
+    }
+    return recipeId;
 }
 
 // 来源类型中文化（UI 标签，非业务数据）
@@ -311,17 +348,22 @@ function renderActionText(aType, aData) {
 
     // 物品类字段结构化展示
     if (aData.item_id) {
-        // 合法物品 ID（items.yaml 里是中文）→ display-map 翻译物品名
-        // UUID 格式 → LLM 幻觉，标注无效（历史遗留记录兜底）
-        if (UUID_RE.test(aData.item_id)) {
-            text += " [无效物品]";
-        } else if (displayMapCache.items[aData.item_id]) {
-            text += " " + escapeHtml(displayMapCache.items[aData.item_id]);
+        // 新协议：完整 uuid（v5 派生）→ 反查裸 id 取名；历史记录：裸 item_id 直接翻译
+        // 均未命中 → 未知物品/原始引用（不区分 LLM 幻觉与配置漂移，如实展示）
+        var rawItemId = displayMapCache.itemsByUuid[aData.item_id] || aData.item_id;
+        if (displayMapCache.items[rawItemId]) {
+            var itemUuid = displayMapCache.item_uuids[rawItemId] || "";
+            text += " " + escapeHtml(
+                displayMapCache.items[rawItemId] + "[" + (itemUuid ? itemUuid.substring(0, 8) : rawItemId) + "]"
+            );
+        } else if (UUID_RE.test(aData.item_id)) {
+            text += " 未知物品[" + escapeHtml(aData.item_id.substring(0, 8)) + "]";
         } else {
             text += " " + escapeHtml(aData.item_id);
         }
     }
     if (aData.quantity) text += " x" + aData.quantity;
+    if (aData.recipe_id) text += " 配方：" + escapeHtml(resolveRecipeName(aData.recipe_id));
     if (aData.source_type) text += "（" + escapeHtml(resolveSourceName(aData.source_type)) + "）";
     if (aData.recipient_type) text += "（→" + escapeHtml(resolveSourceName(aData.recipient_type)) + "）";
     if (aData.content) text += " \"" + escapeHtml(content) + "\"";
@@ -329,7 +371,7 @@ function renderActionText(aType, aData) {
     if (aData.target_location) text += " → " + escapeHtml(aData.target_location);
 
     // 剩余未知字段：键值对中文化（非暴力 JSON.stringify）
-    var known = ["content", "item_id", "quantity", "source_type", "source_id",
+    var known = ["content", "item_id", "quantity", "recipe_id", "source_type", "source_id",
                  "recipient_type", "recipient_id", "target_agent_id", "target_location", "channel"];
     var extra = Object.keys(aData).filter(function (k) { return known.indexOf(k) === -1; });
     if (extra.length > 0) {
