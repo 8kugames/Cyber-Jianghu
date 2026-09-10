@@ -42,7 +42,7 @@ logs/
 # Temporary files
 *.tmp
 *.temp
-tmp/
+.tmp/
 
 # OS files
 .DS_Store

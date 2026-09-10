@@ -12,7 +12,7 @@
 #   SERVER_URL        默认 http://localhost:23333
 #   ADMIN_READ_TOKEN  必填（或 CLIENT_READ_TOKEN，dashboard read 端点两者皆收）
 #   INTERVAL_SECS     快照间隔，默认 3600（验收纪律：每小时）
-#   OUT_DIR           快照目录，默认 ./tmp/acceptance_logs
+#   OUT_DIR           快照目录，默认 ./.tmp/acceptance_logs
 #
 # 快照文件：snap-YYYYMMDD-HHMMSS.json（health + emergence 合并）。
 # run 结束后整目录随 DB dump 一起归档。
@@ -21,7 +21,7 @@ set -eu
 
 SERVER_URL="${SERVER_URL:-http://localhost:23333}"
 INTERVAL_SECS="${INTERVAL_SECS:-3600}"
-OUT_DIR="${OUT_DIR:-./tmp/acceptance_logs}"
+OUT_DIR="${OUT_DIR:-./.tmp/acceptance_logs}"
 WINDOW=240  # MVP 观测窗口（PRD §6.1）
 
 if [ -z "${ADMIN_READ_TOKEN:-}" ]; then
