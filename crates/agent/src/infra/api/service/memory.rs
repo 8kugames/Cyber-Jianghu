@@ -22,7 +22,9 @@ impl<'a> MemoryService<'a> {
         Self { manager }
     }
 
-    /// 获取近期记忆（按时间倒序，支持分页）
+    /// 获取近期记忆（**重要度排序采样**：episodic 后端 get_top_by_importance，
+    /// ORDER BY importance_score DESC，非时间序）。需要严格时间序的场景
+    /// （如 since 增量补帧）应改用 SearchableBackend::get_recent。
     pub async fn get_recent(&self, limit: usize) -> Result<Vec<MemoryEntry>> {
         self.manager.episodic().get_top_by_importance(limit).await
     }

@@ -574,6 +574,31 @@ pub(crate) async fn rebirth_character_handler(
     .into_response()
 }
 
+/// POST /api/v1/characters/{agent_id}/rebirth — 重生（client 契约的 id 路由形态）
+///
+/// 重生作用于已加载运行时，仅当前活跃角色可重生；id 非当前角色 → 409。
+/// 语义与 POST /api/v1/character/rebirth 完全一致（委托实现）。
+pub(crate) async fn rebirth_character_by_id_handler(
+    State(state): State<HttpApiState>,
+    axum::extract::Path(agent_id): axum::extract::Path<uuid::Uuid>,
+    Json(req): Json<RebirthRequest>,
+) -> axum::response::Response {
+    let current = *state.agent_id.read().await;
+    if agent_id != current {
+        return (
+            StatusCode::CONFLICT,
+            Json(RebirthResponse {
+                success: false,
+                message: format!("character {} is not the active character", agent_id),
+            }),
+        )
+            .into_response();
+    }
+    rebirth_character_handler(State(state), Json(req))
+        .await
+        .into_response()
+}
+
 /// 托梦请求
 #[derive(Debug, Deserialize)]
 pub struct DreamRequest {
@@ -610,7 +635,10 @@ pub struct DreamRecord {
 
 /// Compute dream data directory for a specific character.
 /// Returns `character_dir / agent_id / data`.
-async fn dream_data_dir(state: &HttpApiState, agent_id: uuid::Uuid) -> std::path::PathBuf {
+pub(crate) async fn dream_data_dir(
+    state: &HttpApiState,
+    agent_id: uuid::Uuid,
+) -> std::path::PathBuf {
     state
         .character_dir
         .read()
@@ -823,6 +851,33 @@ pub(crate) async fn dream_character_handler(
         can_use_today: false, // 刚用过，今天不能再用了
     })
     .into_response()
+}
+
+/// POST /api/v1/characters/{agent_id}/inject-dream — 托梦（client 契约的 id 路由形态）
+///
+/// 托梦作用于已加载决策循环，仅当前活跃角色可注入；id 非当前角色 → 409。
+/// 语义与 POST /api/v1/character/dream 完全一致（委托实现）。
+pub(crate) async fn inject_dream_by_id_handler(
+    State(state): State<HttpApiState>,
+    axum::extract::Path(agent_id): axum::extract::Path<uuid::Uuid>,
+    Json(req): Json<DreamRequest>,
+) -> axum::response::Response {
+    let current = *state.agent_id.read().await;
+    if agent_id != current {
+        return (
+            StatusCode::CONFLICT,
+            Json(DreamResponse {
+                success: false,
+                message: format!("character {} is not the active character", agent_id),
+                remaining_ticks: 0,
+                can_use_today: false,
+            }),
+        )
+            .into_response();
+    }
+    dream_character_handler(State(state), Json(req))
+        .await
+        .into_response()
 }
 
 /// 获取当前托梦状态

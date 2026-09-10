@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://cyber-jianghu.github.io/contracts/world_state.schema.json",
+  "title": "WorldState (wire shape, fragment)",
+  "description": "Server -> Agent 的原始 WorldState wire 结构。片段式契约:顶层字段强类型,深层实体(self_state/entities 内部结构等)为松类型。真源为 Rust 类型 crates/protocol/src/types/world.rs::WorldState;不兼容变更须 bump PROTOCOL_VERSION major。",
+  "type": "object",
+  "required": ["event_type", "tick_id", "world_time", "location", "self_state"],
+  "properties": {
+    "event_type": { "type": "string", "const": "world_state" },
+    "tick_id": { "type": "integer", "minimum": 0 },
+    "agent_id": { "type": ["string", "null"], "format": "uuid" },
+    "world_time": {
+      "type": "object",
+      "required": ["year", "month", "day", "hour", "minute", "second", "weather"],
+      "properties": {
+        "year": { "type": "integer" },
+        "month": { "type": "integer" },
+        "day": { "type": "integer" },
+        "hour": { "type": "integer", "minimum": 0, "maximum": 23 },
+        "minute": { "type": "integer", "minimum": 0, "maximum": 59 },
+        "second": { "type": "integer", "minimum": 0, "maximum": 59 },
+        "weather": { "type": "string" }
+      }
+    },
+    "location": {
+      "type": "object",
+      "required": ["node_id", "name", "type"],
+      "properties": {
+        "node_id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "description": "节点类型,如 shrine/inn/street" },
+        "adjacent_nodes": { "type": "array" },
+        "gatherable_items": { "type": "array" }
+      }
+    },
+    "self_state": {
+      "type": "object",
+      "description": "Agent 自身状态(片段)。attributes 为 string->int 映射,键由 attributes.yaml 数据驱动(如 hp/stamina/satiation/hydration);另含 derived_attributes/attribute_descriptions/survival_drives/status_effects/inventory/skills/recipe_details/age_years/max_age。",
+      "properties": {
+        "attributes": { "type": "object", "additionalProperties": { "type": "integer" } }
+      }
+    },
+    "entities": {
+      "type": "array",
+      "description": "同地点其他 Agent",
+      "items": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "distance": { "type": "integer" },
+          "state": { "type": "string" },
+          "hostile": { "type": "boolean" },
+          "recent_actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tick_id": { "type": "integer" },
+                "action_type": { "type": "string" },
+                "content": { "type": ["string", "null"] },
+                "result": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "nearby_items": {
+      "type": "array",
+      "description": "场景可拾取物品",
+      "items": {
+        "type": "object",
+        "properties": {
+          "item_id": { "type": "string", "description": "v5 派生 uuid" },
+          "name": { "type": "string" },
+          "quantity": { "type": "integer" },
+          "item_type": { "type": "string" }
+        }
+      }
+    },
+    "events_log": {
+      "type": "array",
+      "description": "最近事件(结构化)",
+      "items": {
+        "type": "object",
+        "required": ["tick_id", "description"],
+        "properties": {
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "public_message",
+              "private_dialogue",
+              "action_result",
+              "environmental_change",
+              "state_change",
+              "time_update",
+              "system_notification",
+              "death_notification",
+              "social_interaction",
+              "observation"
+            ]
+          },
+          "tick_id": { "type": "integer" },
+          "description": { "type": "string" },
+          "metadata": { "type": "object" }
+        }
+      }
+    },
+    "private_dialogue_log": { "type": "array" },
+    "last_execution_summary": {
+      "type": ["object", "null"],
+      "description": "上一次 Pipeline 执行汇总 {total,succeeded,partial,failed,skipped}"
+    },
+    "lessons_learned": { "type": "array" }
+  }
+}

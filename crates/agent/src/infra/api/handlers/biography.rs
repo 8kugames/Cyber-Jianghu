@@ -135,6 +135,31 @@ async fn resolve_biography_agent_id(
     }
 }
 
+/// GET /api/v1/characters/{agent_id}/biography — 获取传记（client 契约的 id 路由形态）
+///
+/// 传记支持任意本地已知角色（含 server 回退场景走 query 版 `?fallback=server`），
+/// 故不做活跃角色守卫，直接委托 GET /api/v1/character/biography?agent_id=<id>。
+pub(crate) async fn get_biography_by_id_handler(
+    State(state): State<HttpApiState>,
+    axum::extract::Path(agent_id): axum::extract::Path<uuid::Uuid>,
+) -> axum::response::Response {
+    let mut params = std::collections::HashMap::new();
+    params.insert("agent_id".to_string(), agent_id.to_string());
+    get_biography_handler(State(state), axum::extract::Query(params)).await
+}
+
+/// POST /api/v1/characters/{agent_id}/biography — 生成传记（client 契约的 id 路由形态）
+///
+/// 委托 POST /api/v1/character/biography?agent_id=<id>。
+pub(crate) async fn generate_biography_by_id_handler(
+    State(state): State<HttpApiState>,
+    axum::extract::Path(agent_id): axum::extract::Path<uuid::Uuid>,
+) -> axum::response::Response {
+    let mut params = std::collections::HashMap::new();
+    params.insert("agent_id".to_string(), agent_id.to_string());
+    generate_biography_handler(State(state), axum::extract::Query(params)).await
+}
+
 /// 收集三魂循环数据，格式化为可读时间线（倒序 → 正序输出）
 async fn collect_soul_cycle_timeline(
     state: &HttpApiState,

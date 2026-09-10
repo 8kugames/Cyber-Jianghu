@@ -20,6 +20,7 @@ mod memory;
 mod multi_character;
 mod relationship;
 mod soul_cycle;
+mod state_stream;
 mod tick_notify;
 mod validate;
 
@@ -46,5 +47,6 @@ pub(crate) use memory::*;
 pub(crate) use multi_character::*;
 pub(crate) use relationship::*;
 pub(crate) use soul_cycle::*;
+pub(crate) use state_stream::*;
 pub(crate) use tick_notify::*;
 pub(crate) use validate::*;

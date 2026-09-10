@@ -1,0 +1,127 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://cyber-jianghu.github.io/contracts/state_stream.schema.json",
+  "title": "/api/v1/state/stream SSE events (fragment)",
+  "description": "Agent SSE 复合状态流 (GET {agent_url}/api/v1/state/stream,需 Bearer token 或 ?token=)。传输按 WHATWG SSE 帧格式 'event: <name>\\ndata: <json>\\n\\n';本 schema 描述各事件 data 解析后的 JSON。事件序列:连接即 connected;每个 tick 一帧 state(连接后如有当前状态立即推一帧);空闲 30s 一帧 heartbeat。可执行参考实现为 client 仓 tools/mock_sse_server.py。",
+  "oneOf": [
+    { "$ref": "#/definitions/connected_data" },
+    { "$ref": "#/definitions/state_data" },
+    { "$ref": "#/definitions/heartbeat_data" }
+  ],
+  "definitions": {
+    "connected_data": {
+      "type": "object",
+      "required": ["ok"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true }
+      }
+    },
+    "state_data": {
+      "type": "object",
+      "required": ["world_state"],
+      "properties": {
+        "world_state": {
+          "type": "object",
+          "required": [
+            "tick_id",
+            "protagonist_id",
+            "protagonist",
+            "nearby",
+            "headline_events",
+            "intent_snapshot"
+          ],
+          "description": "view 形态(非原始 WorldState wire 结构,原始结构见 world_state.schema.json)",
+          "properties": {
+            "tick_id": { "type": "integer" },
+            "protagonist_id": { "type": "string", "format": "uuid" },
+            "protagonist": {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "location_type",
+                "action_type",
+                "vitality",
+                "mood"
+              ],
+              "properties": {
+                "id": { "type": "string", "format": "uuid" },
+                "name": { "type": "string" },
+                "location_type": { "type": "string" },
+                "action_type": {
+                  "type": "string",
+                  "description": "最近执行动作,无记录时为 idle"
+                },
+                "vitality": {
+                  "type": "integer",
+                  "description": "self_state.attributes.hp"
+                },
+                "mood": {
+                  "type": "string",
+                  "description": "动态人设当前情绪标签"
+                }
+              }
+            },
+            "nearby": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "name", "distance", "action_type"],
+                "properties": {
+                  "id": { "type": "string", "format": "uuid" },
+                  "name": { "type": "string" },
+                  "distance": {
+                    "type": "number",
+                    "description": "MVP 阶段固定 0(同节点);mock 侧可能为浮点距离"
+                  },
+                  "action_type": {
+                    "type": "string",
+                    "description": "该角色最近动作,无记录为空串"
+                  }
+                }
+              }
+            },
+            "headline_events": {
+              "type": "array",
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "required": ["tick_id", "event_type", "summary"],
+                "properties": {
+                  "tick_id": { "type": "integer" },
+                  "event_type": { "type": "string" },
+                  "actor_id": { "type": ["string", "null"] },
+                  "target_id": { "type": ["string", "null"] },
+                  "summary": { "type": "string" }
+                }
+              }
+            },
+            "intent_snapshot": {
+              "type": ["object", "null"],
+              "description": "托梦视图;无活跃托梦时为 null",
+              "properties": {
+                "current_thought": { "type": "string" },
+                "expires_at_tick": {
+                  "type": "integer",
+                  "description": "当前 tick + 剩余回合数"
+                }
+              },
+              "required": ["current_thought", "expires_at_tick"]
+            }
+          }
+        },
+        "intent_snapshot": {
+          "type": "null",
+          "description": "保留字段,当前恒为 null(client 现阶段忽略)"
+        }
+      }
+    },
+    "heartbeat_data": {
+      "type": "object",
+      "required": ["ts"],
+      "properties": {
+        "ts": { "type": "integer", "description": "unix 秒" }
+      }
+    }
+  }
+}

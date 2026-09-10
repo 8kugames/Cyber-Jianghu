@@ -55,6 +55,53 @@ fn memory_to_json(m: &crate::component::memory::store::ClientMemory) -> serde_js
     })
 }
 
+/// since 增量模式单条映射：{tick_id, event_type, payload}（client 离线补帧契约）
+fn since_item_json(
+    tick_id: i64,
+    event_type: &str,
+    content: &str,
+    metadata: &serde_json::Value,
+    importance: f32,
+    created_at: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "tick_id": tick_id,
+        "event_type": event_type,
+        "payload": {
+            "content": content,
+            "metadata": metadata,
+            "importance": importance,
+            "created_at": created_at,
+        },
+    })
+}
+
+/// MemoryEntry → since 模式条目
+fn entry_since_item(m: &crate::component::memory::MemoryEntry) -> serde_json::Value {
+    since_item_json(
+        m.tick_id,
+        &m.event_type,
+        &m.content,
+        &m.metadata,
+        m.importance_score,
+        &m.created_at.to_rfc3339(),
+    )
+}
+
+/// ClientMemory → since 模式条目（created_at 已是 RFC3339 字符串）
+fn client_memory_since_item(
+    m: &crate::component::memory::store::ClientMemory,
+) -> serde_json::Value {
+    since_item_json(
+        m.tick_id,
+        &m.event_type,
+        &m.content,
+        &m.metadata,
+        m.importance_score,
+        &m.created_at,
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -62,6 +109,9 @@ fn memory_to_json(m: &crate::component::memory::store::ClientMemory) -> serde_js
 /// 获取近期记忆
 ///
 /// 支持可选 `agent_id` 查询参数：当指定非当前角色时，临时打开该角色的 DB 读取。
+/// 支持可选 `since` 查询参数（RFC3339，如 2026-06-30T00:00:00Z）：离线补帧增量模式，
+/// 返回该时间点之后的事件数组（每项 {tick_id, event_type, payload}，按时间升序），
+/// 候选集上限 MAX_PAGE_SIZE。
 pub(crate) async fn get_recent_memory_handler(
     State(state): State<HttpApiState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
@@ -83,11 +133,30 @@ pub(crate) async fn get_recent_memory_handler(
         .unwrap_or(DEFAULT_PAGE_SIZE)
         .min(MAX_PAGE_SIZE);
 
+    // since 增量参数（RFC3339）；格式错误时 fail-fast 返回 400
+    let since: Option<chrono::DateTime<chrono::Utc>> = match params.get("since") {
+        Some(s) => match chrono::DateTime::parse_from_rfc3339(s) {
+            Ok(dt) => Some(dt.with_timezone(&chrono::Utc)),
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    "Invalid 'since' parameter (expected RFC3339, e.g. 2026-06-30T00:00:00Z)",
+                )
+                    .into_response();
+            }
+        },
+        None => None,
+    };
+
     // 非当前角色 → 临时打开 DB 读取
     if let Some(target) = target_agent_id
         && target != current_agent_id
     {
-        return read_memories_for_agent(&state, target, page, limit).await;
+        return if let Some(since) = since {
+            read_memories_since_for_agent(&state, target, since).await
+        } else {
+            read_memories_for_agent(&state, target, page, limit).await
+        };
     }
 
     // 当前角色 → 使用内存中的 MemoryManager
@@ -104,7 +173,28 @@ pub(crate) async fn get_recent_memory_handler(
     };
 
     let mut mgr = mm.write().await;
+
+    // since 增量模式：按时间序取最近 MAX_PAGE_SIZE 条（created_at DESC）后过滤 since 之后的事件，
+    // 升序返回数组。注意：不可用 MemoryService::get_recent（重要度排序采样，会丢帧）。
+    if let Some(since) = since {
+        use crate::component::memory::backend::SearchableBackend;
+        return match mgr.episodic().get_recent(MAX_PAGE_SIZE).await {
+            Ok(all) => {
+                let mut matched: Vec<_> =
+                    all.into_iter().filter(|m| m.created_at > since).collect();
+                matched.sort_by_key(|m| m.created_at);
+                let items: Vec<serde_json::Value> = matched.iter().map(entry_since_item).collect();
+                Json(items).into_response()
+            }
+            Err(e) => {
+                error!("[http] Failed to get recent memories (since): {}", e);
+                (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read memories").into_response()
+            }
+        };
+    }
+
     let service = MemoryService::new(&mut mgr);
+
     let fetch = (page * limit).min(MAX_PAGE_SIZE);
     match service.get_recent(fetch).await {
         Ok(all) => {
@@ -159,6 +249,54 @@ async fn read_memories_for_agent(
         Err(e) => {
             error!(
                 "[http] Failed to read memories for agent {}: {}",
+                agent_id, e
+            );
+            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read memories").into_response()
+        }
+    }
+}
+
+/// 临时打开指定角色的记忆 DB 并返回 since 之后的事件数组（离线补帧增量模式）
+async fn read_memories_since_for_agent(
+    state: &HttpApiState,
+    agent_id: uuid::Uuid,
+    since: chrono::DateTime<chrono::Utc>,
+) -> axum::response::Response {
+    let character_dir = state.character_dir.read().await.clone();
+    let Some(store) = open_agent_store(&character_dir, agent_id) else {
+        // 与"无新事件"区分：DB 缺失/打开失败时显式落日志，避免补帧方静默跳帧
+        error!(
+            "[http] memory store unavailable for agent {} (since mode), returning empty",
+            agent_id
+        );
+        return Json(Vec::<serde_json::Value>::new()).into_response();
+    };
+
+    match store.get_recent_memories(MAX_PAGE_SIZE) {
+        Ok(all) => {
+            // created_at 为 RFC3339 字符串，解析失败者不进入结果
+            let mut matched: Vec<serde_json::Value> = all
+                .iter()
+                .filter(|m| {
+                    chrono::DateTime::parse_from_rfc3339(&m.created_at)
+                        .map(|dt| dt.with_timezone(&chrono::Utc) > since)
+                        .unwrap_or(false)
+                })
+                .map(client_memory_since_item)
+                .collect();
+            // 按创建时间升序（补帧回放语义）：复用解析结果排序
+            matched.sort_by_key(|item| {
+                item["payload"]["created_at"]
+                    .as_str()
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
+                    .unwrap_or(chrono::DateTime::<chrono::Utc>::MIN_UTC)
+            });
+            Json(matched).into_response()
+        }
+        Err(e) => {
+            error!(
+                "[http] Failed to read memories for agent {} (since): {}",
                 agent_id, e
             );
             (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read memories").into_response()

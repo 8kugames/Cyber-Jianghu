@@ -329,13 +329,16 @@ use super::builder::AgentBuilder;
 
 ### Environment Variables (auth)
 
-| Variable            | Required | Purpose                                                                                                                                                                                                                                  |
-| ------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ADMIN_READ_TOKEN`  | optional | Dashboard / read API token. If unset, Server generates a random one at startup and logs it.                                                                                                                                              |
-| `ADMIN_WRITE_TOKEN` | optional | Dashboard write API token. If unset, Server generates a random one at startup and logs it.                                                                                                                                               |
-| `CLIENT_READ_TOKEN` | optional | Read-only auth token for game clients. If unset, dashboard READ endpoints fall back to `ADMIN_READ_TOKEN`. When set, dashboard READ endpoints (`require_client_read_token`) accept **either** `CLIENT_READ_TOKEN` or `ADMIN_READ_TOKEN`. |
+| Variable                    | Required | Purpose                                                                                                                                                                                                                                  |
+| --------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ADMIN_READ_TOKEN`          | optional | Dashboard / read API token. If unset, Server generates a random one at startup and logs it.                                                                                                                                              |
+| `ADMIN_WRITE_TOKEN`         | optional | Dashboard write API token. If unset, Server generates a random one at startup and logs it.                                                                                                                                               |
+| `CLIENT_READ_TOKEN`         | optional | Read-only auth token for game clients. If unset, dashboard READ endpoints fall back to `ADMIN_READ_TOKEN`. When set, dashboard READ endpoints (`require_client_read_token`) accept **either** `CLIENT_READ_TOKEN` or `ADMIN_READ_TOKEN`. |
+| `CYBER_JIANGHU_AGENT_TOKEN` | optional | Agent-side static HTTP API token (union with device `auth_token`). When set, external clients can authenticate against the agent HTTP API before device registration.                                                                    |
 
 ## Protocol Types
+
+The `crates/protocol` crate also exports `PROTOCOL_VERSION`: an **independent semver** string (currently `1.0.0`) decoupled from the crate version, describing the Server/Agent/Client wire contract. Bump rules: incompatible wire change -> major; additive optional field/endpoint -> minor; no-contract-impact fix -> patch. Contract JSON Schema fragments for external consumers live in `docs/contracts/` (`world_state` / `intent` / `version` / `state_stream`).
 
 The `crates/protocol` crate defines the wire types shared between Server, Agent, and Dashboard/Client. Key enums and contract structs:
 
@@ -365,6 +368,7 @@ Timestamps in the relationship protocol are `i64` milliseconds (Unix epoch), not
 
 **Agent Lifecycle**:
 
+- `GET /api/v1/version` - Protocol handshake (public, no auth; returns `server_version` + `protocol_version`)
 - `POST /api/v1/device/verify` - Strict device verification (returns 404 if unknown; agent must re-register)
 - `POST /api/v1/device/register` - Explicit device registration (server generates device_id, returns 201 Created)
 - `POST /api/v1/agent/register` - Register new agent (returns `narrative_config`)
@@ -488,7 +492,7 @@ Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env v
 **Relationships & Memory**:
 
 - `GET /api/v1/relationship/list` - Get all relationships
-- `GET /api/v1/memory/recent` - Get recent memories
+- `GET /api/v1/memory/recent` - Get recent memories (supports `?since=<RFC3339>` incremental mode: returns bare array of `{tick_id, event_type, payload}` for offline frame-fill, bounded by MAX_PAGE_SIZE=100)
 - `GET /api/v1/memory/daily-summaries` - Get daily summaries
 - `POST /api/v1/memory/search` - Search memories (semantic)
 - `POST /api/v1/memory` - Store memory
@@ -498,6 +502,9 @@ Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env v
 - `GET /api/v1/characters` - List all characters
 - `POST /api/v1/characters/switch` - Switch current character
 - `GET /api/v1/characters/{agent_id}` - Get character by ID
+- `POST /api/v1/characters/{agent_id}/rebirth` - Rebirth by id (409 if not the active character; delegates to `/api/v1/character/rebirth`)
+- `POST /api/v1/characters/{agent_id}/inject-dream` - Dream injection by id (409 if not the active character; delegates to `/api/v1/character/dream`)
+- `GET/POST /api/v1/characters/{agent_id}/biography` - Get/generate biography by id (delegates to `/api/v1/character/biography?agent_id=`)
 
 **Validation & Review**:
 
@@ -506,7 +513,11 @@ Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env v
 **Events & Config**:
 
 - `GET /api/v1/events` - Death events SSE stream
-- `GET /api/v1/state/stream` - WorldState + IntentSnapshot composite SSE stream (桌面窗口消费)
+- `GET /api/v1/version` - Protocol handshake (public, no auth; `protocol_version` is an independent semver `PROTOCOL_VERSION`, `server_version` proxied live from server, null when unreachable)
+- `GET /api/v1/state/stream` - WorldState + IntentSnapshot composite SSE stream (桌面窗口消费; view-shape payload per `docs/contracts/state_stream.schema.json`; accepts `?token=` for EventSource)
+
+**Agent HTTP Auth**: all agent HTTP endpoints (except public paths `/`, `/api/v1`, `/api/v1/health`, `/api/v1/version`, `/api/v1/setup`, static assets) require `Authorization: Bearer <token>`. Accepted tokens are the UNION of env `CYBER_JIANGHU_AGENT_TOKEN` (static token, enables auth before device registration for external clients) and the device `auth_token` from server registration (used by the local panel). SSE endpoints (`/api/v1/events`, `/api/v1/state/stream`) additionally accept `?token=<token>`. No token configured at all -> 503 (fail-closed).
+
 - `GET/POST /api/v1/config/llm-disabled` - LLM disable toggle
 - `GET/POST /api/v1/config/auto-rebirth` - Auto-rebirth toggle
 - `GET/POST /api/v1/config/llm` - Get/update LLM config
