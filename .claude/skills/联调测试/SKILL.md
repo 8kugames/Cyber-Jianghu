@@ -588,7 +588,7 @@ Agent 运行统计（WorldState + 日志）：总决策数（tick × agent）、
 |-------|-------------|------------|-------------|-------------|
 ```
 
-Tick 数计算：`运行秒数 / 60`（real_seconds_per_tick = 60）。
+Tick 数计算：`运行秒数 / 120`（real_seconds_per_tick = 120）。
 
 ---
 
@@ -620,7 +620,7 @@ docker exec $c curl -s -H "Authorization: Bearer $TOKEN" \
 2. **镜像按 commit hash 缓存**：`agent-agent:{short-hash}` tag 用于 Phase 0.1 检测，代码未变不重新构建。
 3. **角色创建必须并行**：端口间用 `&` + `wait` 全并发；每端口内 generate→register→verify 串行（含 1 次重试）。
 4. **BuildKit 缓存**：`--no-cache` 不能清除 BuildKit cache mount；需改 Dockerfile 的 `--mount=type=cache,id=...` 或加 `--build-arg CACHEBUST=$(date +%s)`。
-5. **Tick 时长**：60s（`game_rules.yaml` 的 `real_seconds_per_tick`）。
+5. **Tick 时长**：120s（`game_rules.yaml` 的 `real_seconds_per_tick`）。
 6. **agent HTTP 协议（P0-11 a/b）**：容器内 bind `127.0.0.1` + 除公开路径外强制 Bearer token。宿主机 `localhost:$port` 会被 docker-proxy 拒绝，必须 `docker exec $c curl http://127.0.0.1:23340/...`。token 来自容器内 `/app/data/servers/47-102-120-116-23333/device.yaml`。**禁止改回 `0.0.0.0`**。
 7. **AGENT_ENDPOINTS**：由 Phase 0.0 从 compose 自动解析；增删 agent 改 `.test-agents/docker-compose.yml` 即可。
 8. **配置冻结**：测试开始后不得修改任何 agent 或 server 配置；如需调整，记录变更点并重新开始。

@@ -129,6 +129,15 @@ pub struct Agent {
     pub(crate) current_focus_summary:
         Arc<tokio::sync::RwLock<Option<crate::component::attention::FocusSummary>>>,
 
+    /// 空转跳过：连续跳过的 tick 计数
+    pub(crate) idle_skip_streak: usize,
+
+    /// 空转跳过：本 tick delta 是否无显著变化（update_tick_state 计算）
+    pub(crate) idle_tick_candidate: bool,
+
+    /// 空转跳过：上一 tick 是否处于夜间时段（黎明唤醒检测）
+    pub(crate) idle_was_night: bool,
+
     /// 设备身份配置（从 device.yaml 加载，或运行时注册生成）
     pub(crate) device_config: Option<DeviceConfig>,
 
@@ -246,6 +255,9 @@ impl Agent {
             immediate_handler: None,
             session_triage_handle: None,
             session_triage_game_day: None,
+            idle_skip_streak: 0,
+            idle_tick_candidate: false,
+            idle_was_night: false,
             server_error_feedback: Arc::new(Mutex::new(None)),
             consecutive_idle_count: 0,
             chaos_generator: None,

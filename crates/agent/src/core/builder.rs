@@ -473,6 +473,9 @@ impl AgentBuilder {
             session_triage_game_day: None,
             server_error_feedback: Arc::new(tokio::sync::Mutex::new(None)),
             consecutive_idle_count: 0,
+            idle_skip_streak: 0,
+            idle_tick_candidate: false,
+            idle_was_night: false,
             chaos_generator: self.chaos_generator,
             world_state_store: self.world_state_store,
             delta_engine: self.delta_engine,
@@ -485,6 +488,23 @@ impl AgentBuilder {
             event_trait_mapper,
             persona_store: self.persona_store,
         };
+
+        // 空转跳过静默失效防护：开关打开但机制未接线时一次性告警。
+        // 三组件由 run_agent 按 token_optimization.enabled 门控装配，父开关关闭即三组件缺位。
+        {
+            let tok = &agent.config.token_optimization;
+            if tok.idle_skip.enabled
+                && (!tok.enabled
+                    || agent.world_state_store.is_none()
+                    || agent.delta_engine.is_none()
+                    || agent.attention_controller.is_none())
+            {
+                tracing::warn!(
+                    "idle_skip.enabled=true 但 token_optimization.enabled={} 且/或 delta 组件未装配，空转跳过将静默不生效",
+                    tok.enabled
+                );
+            }
+        }
 
         // Engine 需要从 Agent 拿 persona 引用（真相源在 Agent）
         if let Some(ref engine) = agent.cognitive_engine {

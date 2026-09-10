@@ -276,6 +276,24 @@ impl CognitiveEngine {
         *window = NarrativeSummaryWindow::new(size);
     }
 
+    /// 空转 tick 占位摘要：不调用 LLM，仅在叙事窗口记录本次跳过的风味文本。
+    /// full_decision 不匹配任何 action_type 前缀，不会参与语义去重。
+    pub fn record_idle_summary(&self, tick_id: i64, flavor: &str) {
+        let summary = NarrativeSummary {
+            tick_id,
+            perception: "无显著变化".to_string(),
+            motivation: "维持当前状态".to_string(),
+            decision: flavor.to_string(),
+            full_decision: flavor.to_string(),
+            outcome: "无".to_string(),
+            validated: true,
+        };
+        self.summary_window
+            .write()
+            .expect("rwlock poisoned")
+            .push(summary, true);
+    }
+
     /// 更新技能缓存（接收 ConfigUpdate 后调用）
     ///
     /// - update_type == "full": 全量替换，先清空再插入

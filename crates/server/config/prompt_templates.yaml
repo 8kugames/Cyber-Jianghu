@@ -212,8 +212,8 @@ templates:
 
     # 结构限制配置（非字符截断）
     truncation:
-      planning_description: 100
-      tool_calling_history_turns: 8
+      planning_description: 80
+      tool_calling_history_turns: 6
 
   # RuleEngine reject 反馈模板
   # 规则验证失败时，向 LLM 提供可用选项的上下文，帮助其自纠正

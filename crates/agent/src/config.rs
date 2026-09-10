@@ -854,6 +854,8 @@ pub struct TokenOptimizationConfig {
     pub attention: AttentionConfig,
     /// Delta Engine
     pub delta: DeltaConfig,
+    /// 空转跳过（delta 无显著变化时跳过认知循环，昼夜节律默认开启）
+    pub idle_skip: IdleSkipConfig,
 }
 
 impl Default for TokenOptimizationConfig {
@@ -863,6 +865,58 @@ impl Default for TokenOptimizationConfig {
             reflector: ReflectorOptConfig::default(),
             attention: AttentionConfig::default(),
             delta: DeltaConfig::default(),
+            idle_skip: IdleSkipConfig::default(),
+        }
+    }
+}
+
+/// 空转跳过配置
+///
+/// delta 无 Important/Critical 级变化时跳过本 tick 认知循环（零 LLM 消耗）。
+/// 生存属性变化、实体出现、新事件、活跃对话会话均会唤醒思考（v1 保守豁免层级）。
+/// 昼夜节律：夜间抑制 Info 空转（无 whim），黎明无条件唤醒，白天按 1/N 概率保留 whim。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IdleSkipConfig {
+    /// 是否启用（默认开启：昼夜节律空转跳过随部署默认生效；置 false 可整体关闭）
+    pub enabled: bool,
+    /// 连续跳过上限（任何时段兜底，夜间同样受约束），达到后强制执行一次认知循环（防长眠；也兼兑 night_hours 误配为全天）
+    pub max_consecutive_skips: usize,
+    /// 白天全 Info 空转时按 1/N 概率照常思考（保留自发性 whim；<=1 表示空转全部思考）
+    pub whim_wake_divisor: usize,
+    /// 昼夜节律配置
+    pub night: NightSkipConfig,
+}
+
+impl Default for IdleSkipConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_consecutive_skips: 4,
+            whim_wake_divisor: 2,
+            night: NightSkipConfig::default(),
+        }
+    }
+}
+
+/// 夜间节律配置
+///
+/// 夜间时段：Info 空转跳过（无 whim；跳过上限兜底仍适用），黎明第一个 tick 无条件完整思考。
+/// Important 级变化夜间仍然唤醒（v1 保守：不制造记忆盲区）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NightSkipConfig {
+    /// 昼夜节律是否启用（idle_skip.enabled 开启后随父开关生效）
+    pub enabled: bool,
+    /// 夜间游戏小时列表（hours_per_day=12，hour 取值 0..=11，支持跨零点；i32 对齐 WorldTime.hour）
+    pub night_hours: Vec<i32>,
+}
+
+impl Default for NightSkipConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            night_hours: vec![9, 10, 11, 0, 1, 2],
         }
     }
 }
@@ -910,7 +964,9 @@ impl Default for ReflectorOptConfig {
 impl Default for AttentionConfig {
     fn default() -> Self {
         Self {
-            max_focus_items: 5,
+            // 5 → 3：上限只约束 Info 级候选（Important/Critical/社交目标均强制包含），
+            // 3 已足够覆盖无序环境噪声，同时显著减少 volatile prompt 体积
+            max_focus_items: 3,
             first_tick_focus_cap: 15,
             critical_auto_include: true,
         }
@@ -1021,7 +1077,7 @@ pub struct Config {
     #[serde(default)]
     pub earth_soul: crate::soul::earth::config::EarthSoulConfig,
 
-    /// Token 优化配置（总开关默认关闭）
+    /// Token 优化配置（总开关默认开启；serde 缺省与代码 Default 一致）
     #[serde(default)]
     pub token_optimization: TokenOptimizationConfig,
 
