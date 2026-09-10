@@ -6,6 +6,13 @@
 
 ### Bug Fixes
 
+- **意图失败原因误报"状态持久化失败"**（server）：验证/执行失败经 rollback 后一律误报 persist_failed，掩盖真实拒绝原因（实测"未知的动作类型"被包装成持久化故障，误导诊断且 Agent 无法自纠）。修复：SingleProcessingResult 增加 failure_reason，验证/执行失败走 action_failed 回传具体原因（含治理分类码），仅真实落库失败才报 persist_failed。
+- **Agent 动作词表漂移无法自愈**（server+agent）：server 部署/热更新动作配置后，运行中 Agent 仍持旧词表提交已下线动作（实测 Agent 持 20 旧名 vs 部署 actions.yaml 12 新名，全量拒绝）；且 action_update_callback 从未接线，server 的动作 ConfigUpdate 推送全部落空。修复：接线回调（刷新引擎词表+持久化 actions.json）；server 在 UnknownAction 拒绝时即时推送最新动作配置，形成自愈闭环。
+- **理智末日时钟（全员永久混沌）**（server+agent）：`get_recovering_attributes` 的 decay≠0 守卫使 sanity 的 recovery_formula 永不生效——理智每 tick 净流失 1 点且无任何恢复路径，跌破混沌阈值 30 后 ChaosGenerator 丢弃全部 LLM 推理决策（实测 4 agent 理智 7-20，"推理与裴沈对话 → 实际提交随机使用/修炼"）。修复：恢复公式按语义分层——decay=0 属性无条件恢复，decay≠0 属性（sanity）仅休息 tick（本 tick 窗口无 intent）恢复；idle-skip 空转/离线/思考间隙均自然计为休息（身体没在做事 = 休息）。IntentWorker 新增 last_intent_ticks 追踪作为休息判定的反向信号。
+- **注册 nil 永久等待转生**（agent）：容器重启/断连期间角色死亡后重连，注册返回 nil 即进入等待转生模式且无人唤醒（实测 agent-3 断连 45 分钟无重连、角色死 3 小时未转世）。修复：该入口在 auto_rebirth 开启且本地角色为 Dead 时自动调度转世（game_rules 未到达时回退出厂默认 5 tick）；等待循环增加 5s 轮询，转世完成后立即重连（peek-成功后消费，失败保留下轮重试）。
+
+### Bug Fixes（前序）
+
 - **动作统计泄露 Agent 主观记忆**（BREAKING，agent+server+protocol）：移除 `ServerMessage::DailySummaryData` 推送链路（scheduler 广播 → callbacks 写入 episodic）。客观动作统计（计数/成败/足迹）进入主观记忆后以 0.8 重要性霸榜日记取材 top-K，导致日记复读与 OOC 污染（"今日动作统计仅两次"式叙述），并回流决策上下文与 SFT 导出。PROTOCOL_VERSION 2.0.0 → 3.0.0。附带：Agent 启动时幂等清理遗留 `daily_action_stats` 记忆；日记取材排除 `daily_summary`/`daily_action_stats` 元条目，切断"改写昨日日记"复读环。
 
 ## [0.1.297] - 2026-09-10

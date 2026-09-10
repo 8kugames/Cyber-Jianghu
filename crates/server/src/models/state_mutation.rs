@@ -55,16 +55,23 @@ impl AgentState {
         1.0 // 默认无修饰
     }
 
-    /// 应用生理值衰减（委托给 StatusComponent）
+    /// 应用生理值衰减（默认视为休息 tick）
+    pub fn apply_decay(&mut self, tick_id: i64) -> Option<String> {
+        self.apply_decay_with_rest(tick_id, true)
+    }
+
+    /// 应用生理值衰减（显式休息标记）
     ///
-    /// 处理两类属性变化：
-    /// 1. decay_per_tick: 衰减值（正值表示扣减，如 satiation 每tick扣减5）
-    /// 2. recovery_formula: 恢复公式（如 stamina 每tick恢复 5 + constitution * 0.1）
+    /// 处理三类属性变化：
+    /// 1. decay_per_tick: 衰减值（正值表示扣减，如 satiation 每tick扣减5），每 tick 生效
+    /// 2. recovery_formula（decay=0 属性，如 stamina/qi）：无条件恢复
+    /// 3. recovery_formula（decay≠0 属性，如 sanity）：仅休息 tick（rested=true）恢复。
+    ///    物理语义：本 tick 窗口无 intent 提交 = 身体在休息（idle-skip/离线均自然覆盖）。
     ///
     /// 季节修饰系数从 time.json 的季节配置中读取（数据驱动）
     ///
     /// 返回值：如果Agent死亡，返回 Some(attr_name) 表示触发死亡的属性名；否则返回 None
-    pub fn apply_decay(&mut self, tick_id: i64) -> Option<String> {
+    pub fn apply_decay_with_rest(&mut self, tick_id: i64, rested: bool) -> Option<String> {
         if !self.is_alive {
             return None;
         }
@@ -133,50 +140,73 @@ impl AgentState {
             return None;
         }
 
-        // 2. 处理恢复属性 (recovery_formula)
-        let recovering_attributes = self.status.get_recovering_attributes();
+        // 2. 处理无条件恢复属性（recovery_formula 且 decay=0，如 stamina/qi）
+        for (attr_name, formula) in self.status.get_recovering_attributes() {
+            self.apply_formula_recovery(&attr_name, &formula, tick_id, &context);
+        }
 
-        for (attr_name, formula) in recovering_attributes {
-            // 使用 FormulaEngine 计算恢复值
-            let i64_context: std::collections::HashMap<String, i64> = context
-                .iter()
-                .map(|(k, v)| (k.clone(), *v as i64))
-                .collect();
-            let engine = crate::game_data::formula_engine::FormulaEngine::new();
-
-            let base_recovery = match engine.evaluate_int(&formula, &i64_context) {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::warn!(
-                        "state_mutation loop: 处理项失败（best-effort 跳过本轮）：{e:?}"
-                    );
-                    continue;
-                }
-            };
-
-            if base_recovery > 0 {
-                // 获取季节修饰系数（数据驱动）
-                let season_modifier = self.get_season_modifier(&attr_name, tick_id);
-                let delta = (base_recovery as f32 * season_modifier).round() as i32;
-
-                if delta > 0 {
-                    let before_value = self.status.get(&attr_name).unwrap_or(-1);
-                    debug!(
-                        "Applying recovery to {}: formula={}, base_recovery={}, season_modifier={}, delta={}, before_value={}",
-                        attr_name, formula, base_recovery, season_modifier, delta, before_value
-                    );
-
-                    if let Ok(new_val) = self.status.apply_change(&attr_name, delta, &context) {
-                        debug!(
-                            "Applied recovery to {}: before={}, delta={}, after={}",
-                            attr_name, before_value, delta, new_val
-                        );
-                    }
-                }
+        // 3. 处理休息门控恢复属性（recovery_formula 且 decay≠0，如 sanity）：
+        //    仅休息 tick（本 tick 窗口无 intent）恢复，行动 tick 只衰减。
+        //    修复前 recovery_formula 对此类属性永不生效（被 decay≠0 守卫排除），
+        //    sanity 成为纯单向末日时钟，全员永久混沌。
+        if rested {
+            for (attr_name, formula) in self.status.get_rest_gated_recovering_attributes() {
+                self.apply_formula_recovery(&attr_name, &formula, tick_id, &context);
             }
         }
 
         None
+    }
+
+    /// 应用单条 recovery_formula（公式求值 + 季节修饰 + apply_change，best-effort）
+    fn apply_formula_recovery(
+        &mut self,
+        attr_name: &str,
+        formula: &str,
+        tick_id: i64,
+        context: &std::collections::HashMap<String, i32>,
+    ) {
+        let i64_context: std::collections::HashMap<String, i64> = context
+            .iter()
+            .map(|(k, v)| (k.clone(), *v as i64))
+            .collect();
+        let engine = crate::game_data::formula_engine::FormulaEngine::new();
+
+        let base_recovery = match engine.evaluate_int(formula, &i64_context) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    "recovery 公式求值失败（best-effort 跳过本轮）: attr={}, formula={}, err={:?}",
+                    attr_name,
+                    formula,
+                    e
+                );
+                return;
+            }
+        };
+
+        if base_recovery <= 0 {
+            return;
+        }
+
+        // 获取季节修饰系数（数据驱动）
+        let season_modifier = self.get_season_modifier(attr_name, tick_id);
+        let delta = (base_recovery as f32 * season_modifier).round() as i32;
+
+        if delta > 0 {
+            let before_value = self.status.get(attr_name).unwrap_or(-1);
+            debug!(
+                "Applying recovery to {}: formula={}, base_recovery={}, season_modifier={}, delta={}, before_value={}",
+                attr_name, formula, base_recovery, season_modifier, delta, before_value
+            );
+
+            if let Ok(new_val) = self.status.apply_change(attr_name, delta, context) {
+                debug!(
+                    "Applied recovery to {}: before={}, delta={}, after={}",
+                    attr_name, before_value, delta, new_val
+                );
+            }
+        }
     }
 
     /// 恢复属性值（通用方法，委托给 StatusComponent）

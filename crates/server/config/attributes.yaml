@@ -119,8 +119,11 @@ data:
   # 状态值
   # ------------------------------------------------------------------
   # 状态值字段说明：
-  #   - decay_per_tick: 每 tick 自然衰减值（0 表示不衰减）
-  #   - recovery_formula: 每 tick 恢复公式（可选）
+  #   - decay_per_tick: 每 tick 自然衰减值（0 表示不衰减；正值 = 扣减）
+  #   - recovery_formula: 恢复公式（可选）。生效规则：
+  #       * decay_per_tick 为 0：每 tick 无条件恢复（如 stamina/qi）
+  #       * decay_per_tick 非 0：仅休息 tick 恢复（如 sanity）。
+  #         休息 = 本 tick 窗口无 intent 提交（idle-skip 空转/离线/思考间隙均算休息）
   #   - death_condition: 死亡触发条件（可选）
   #       * operator: 比较运算符（equals, less_than, greater_than 等）
   #       * value: 比较值
@@ -226,6 +229,9 @@ data:
         primary_attribute_deps:
           - constitution
 
+      # 语义（休息门控恢复）：衰减每 tick 生效（-1）；
+      # recovery 仅休息 tick 生效（idle-skip 空转 = 睡眠）。
+      # 平衡：休息 tick 净 +3~4，行动 tick -1。
       sanity:
         name: sanity
         display_name: 理智值

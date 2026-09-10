@@ -31,9 +31,13 @@ pub struct SingleProcessingResult {
     /// DashMap，不再用 pool 二次 upsert。
     ///
     /// 失败路径（执行失败 / action_log 写入失败 / upsert CAS 冲突 / commit 失败）
-    /// 全部 rollback，此字段为 `None`；realtime.rs 视为 persist 失败，发
-    /// `persist_failed` 并保持 DashMap 不变。
+    /// 全部 rollback，此字段为 `None`；realtime.rs 据此不发 DashMap 更新，
+    /// 并按 `failure_reason` 区分反馈：验证/执行失败携带具体原因走 action_failed，
+    /// 无原因的落库失败才报 persist_failed。
     pub persisted_version: Option<i64>,
+    /// 失败原因（仅 rollback 且失败源于验证/执行时非 None）。
+    /// 纯落库失败（action_log/upsert/commit）不设置，由 realtime 报 persist_failed。
+    pub failure_reason: Option<String>,
     /// 受本次 Intent 波及的第三方状态（跨 Agent 效果，如攻击目标）。
     ///
     /// 元素为 (更新后状态, 持久化版本)，仅 commit 成功才有值（与 actor 的
@@ -164,6 +168,13 @@ impl StateProcessor {
         };
 
         let mut execution_failed = !result.success;
+        // 失败原因：验证/执行层面的具体错误（供 Agent 自纠），
+        // 纯落库失败不设置（由 realtime 报 persist_failed）
+        let mut failure_reason: Option<String> = if result.success {
+            None
+        } else {
+            Some(result.message.clone())
+        };
         // 跨 Agent 效果目标状态（如攻击目标）：在 success 块内累积，
         // 在下方 upsert 段与行动者同事务持久化
         let mut collateral_states: Vec<AgentState> = Vec::new();
@@ -348,6 +359,7 @@ impl StateProcessor {
 
             if !all_applied {
                 execution_failed = true;
+                failure_reason = Some("状态变更未能全部应用，已回滚".to_string());
             }
         }
 
@@ -471,6 +483,7 @@ impl StateProcessor {
             updated_state: agent_state,
             events,
             persisted_version,
+            failure_reason,
             collateral_states: collateral_versions,
         })
     }

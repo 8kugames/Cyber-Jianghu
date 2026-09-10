@@ -99,7 +99,7 @@ pub fn init_test_registry() {
                            "satiation": { "name": "satiation", "display_name": "饱食度", "description": "饥饿", "type": "status", "default_value": 50, "min_value": 0, "max_value_formula": "100", "decay_per_tick": 0.2, "death_condition": { "operator": "equals", "value": 0 }, "death_cause": "satiation", "death_message": "你因长期饥饿而倒下，意识逐渐模糊..." },
                            "hydration": { "name": "hydration", "display_name": "饱饮度", "description": "口渴", "type": "status", "default_value": 50, "min_value": 0, "max_value_formula": "100", "decay_per_tick": 0.2, "death_condition": { "operator": "equals", "value": 0 }, "death_cause": "hydration", "death_message": "你因严重脱水而倒下，眼前一片黑暗..." },
                             "qi": { "name": "qi", "display_name": "内气", "description": "内气", "type": "status", "default_value": 50, "min_value": 0, "max_value_formula": "100", "decay_per_tick": 0 },
-                            "sanity": { "name": "sanity", "display_name": "理智", "description": "理智", "type": "status", "default_value": 100, "min_value": 0, "max_value_formula": "100", "decay_per_tick": 0 },
+                            "sanity": { "name": "sanity", "display_name": "理智", "description": "理智", "type": "status", "default_value": 100, "min_value": 0, "max_value_formula": "100", "decay_per_tick": 1, "recovery_formula": "4" },
                             "reputation": { "name": "reputation", "display_name": "声望", "description": "声望", "type": "status", "default_value": 0, "min_value": -1000, "max_value_formula": "1000", "decay_per_tick": 0 }
                         }
                     },
