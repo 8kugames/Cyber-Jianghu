@@ -16,9 +16,7 @@ AGENTS=(
   "agent-1:test-agent-1:23341"
   "agent-2:test-agent-2:23342"
   "agent-3:test-agent-3:23343"
-  "agent-5:test-agent-5:23345"
-  "agent-6:test-agent-6:23346"
-  "agent-ollama:test-agent-ollama:23349"
+  "agent-4:test-agent-5:23345"
 )
 
 READY_TIMEOUT=30
