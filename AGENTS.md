@@ -313,19 +313,19 @@ use super::builder::AgentBuilder;
 
 ## Key Configuration Files
 
-| Purpose                  | Path                                                                                     |
-| ------------------------ | ---------------------------------------------------------------------------------------- |
-| Environment variables    | `.env`                                                                                   |
-| Server configuration     | `crates/server/config/*.yaml`                                                            |
-| World-building rules     | `crates/server/config/world_building_rules.yaml`                                         |
-| Skill definitions        | `crates/server/config/skills/{category}/{skill_id}/SKILL.md`                             |
-| Prompt templates (agent) | `crates/server/config/prompt_templates.yaml` (含 `rule_sections` 按需检索配置)           |
-| Souls governance config  | `crates/server/config/souls.yaml` (Soul 审议规则、投票阈值、主题路由)                    |
-| Action evolution config  | `crates/server/config/action_evolution.yaml` (动作演化策略、能力清单)                    |
-| Training export config   | `crates/server/config/training_export.yaml` (SFT 导出：调度/分桶/容量，env 覆盖)         |
-| Reward config            | `crates/server/config/reward.yaml` (生存 reward 天道账本：分量/周期，fail-fast 强制配置) |
-| Database migrations      | `crates/server/migrations/*.sql`                                                         |
-| Docker stack             | `docker-compose.yml`, `docker-compose.prod.yml`                                          |
+| Purpose                  | Path                                                                             |
+| ------------------------ | -------------------------------------------------------------------------------- |
+| Environment variables    | `.env`                                                                           |
+| Server configuration     | `crates/server/config/*.yaml`                                                    |
+| World-building rules     | `crates/server/config/world_building_rules.yaml`                                 |
+| Skill definitions        | `crates/server/config/skills/{category}/{skill_id}/SKILL.md`                     |
+| Prompt templates (agent) | `crates/server/config/prompt_templates.yaml` (含 `rule_sections` 按需检索配置)   |
+| Souls governance config  | `crates/server/config/souls.yaml` (Soul 审议规则、投票阈值、主题路由)            |
+| Action evolution config  | `crates/server/config/action_evolution.yaml` (动作演化策略、能力清单)            |
+| Training export config   | `crates/server/config/training_export.yaml` (SFT 导出：调度/分桶/容量，env 覆盖) |
+| Reward config            | `crates/server/config/reward.yaml` (生存 reward ：分量/周期，fail-fast 强制配置) |
+| Database migrations      | `crates/server/migrations/*.sql`                                                 |
+| Docker stack             | `docker-compose.yml`, `docker-compose.prod.yml`                                  |
 
 ### Environment Variables (auth)
 
@@ -338,7 +338,7 @@ use super::builder::AgentBuilder;
 
 ## Protocol Types
 
-The `crates/protocol` crate also exports `PROTOCOL_VERSION`: an **independent semver** string (currently `3.0.0`) decoupled from the crate version, describing the Server/Agent/Client wire contract. Bump rules: incompatible wire change -> major; additive optional field/endpoint -> minor; no-contract-impact fix -> patch. Contract JSON Schema fragments for external consumers live in `docs/contracts/` (`world_state` / `intent` / `version` / `state_stream`).
+The `crates/protocol` crate also exports `PROTOCOL_VERSION`: an **independent semver** string (currently `3.1.0`) decoupled from the crate version, describing the Server/Agent/Client wire contract. Bump rules: incompatible wire change -> major; additive optional field/endpoint -> minor; no-contract-impact fix -> patch. Contract JSON Schema fragments for external consumers live in `docs/contracts/` (`world_state` / `intent` / `version` / `state_stream`).
 
 The `crates/protocol` crate defines the wire types shared between Server, Agent, and Dashboard/Client. Key enums and contract structs:
 
