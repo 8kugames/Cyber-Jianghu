@@ -1080,10 +1080,12 @@ impl HttpApiState {
     /// 路径。设备身份端点不负责游戏规则下发。
     pub async fn refresh_auth_token(&self) -> anyhow::Result<()> {
         // 1. 获取当前设备配置
-        let device = self.device_config.read().await;
-        let device = device.as_ref().context("设备身份未初始化")?;
-        let device_id = device.device_id;
-        let _ = device; // 释放锁，避免死锁
+        //    guard 必须限定在本作用域内释放：函数尾部要取写锁保存新 token，
+        //    若读锁存活到写锁请求处，同一任务自等自释放 → 死锁
+        let device_id = {
+            let device = self.device_config.read().await;
+            device.as_ref().context("设备身份未初始化")?.device_id
+        };
 
         // 2. 获取 HTTP URL
         let http_url = self.server_http_url.read().await.clone();

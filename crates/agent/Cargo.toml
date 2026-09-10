@@ -1,6 +1,6 @@
 [package]
 name = "cyber-jianghu-agent"
-version = "0.1.355"
+version = "0.1.356"
 edition = "2024"
 authors = ["Cyber-Jianghu Community"]
 license = "MIT OR Apache-2.0"
@@ -12,7 +12,7 @@ cyber-jianghu-protocol = { version = "0.1.91", path = "../protocol" }
 
 # 异步运行时
 tokio = { workspace = true }
-async-trait = "0.1"
+async-trait = "0.1.92"
 
 # WebSocket 客户端
 tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-native-roots"] }
@@ -21,7 +21,7 @@ futures-util = { workspace = true }
 # 序列化
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = "0.9"
+serde_yaml = "0.9.34"
 
 # 错误处理
 anyhow = { workspace = true }
@@ -35,61 +35,61 @@ tracing-appender = { workspace = true }
 # 工具库
 chrono = { workspace = true }
 uuid = { workspace = true }
-url = "2.5"
-percent-encoding = "2.3"
+url = "2.5.8"
+percent-encoding = "2.3.2"
 dirs = "6.0.0"
-clap = { version = "4.5", features = ["derive"] }
-regex = "1"
-lru = "0.12"
+clap = { version = "4.6.6", features = ["derive"] }
+regex = "1.13.1"
+lru = "0.12.5"
 
 # HTTP 客户端（用于 Server HTTP API 调用）
-reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"], default-features = false }
+reqwest = { version = "0.12.28", features = ["json", "rustls-tls", "stream"], default-features = false }
 
 # HTTP 服务器（用于 HTTP API 辅助功能）
-axum = { version = "0.8", features = ["ws", "tokio"] }
-tower = "0.5"
-http-body-util = "0.1"
-http-body = "1.0"
-bytes = "1.0"
+axum = { version = "0.8.9", features = ["ws", "tokio"] }
+tower = "0.5.3"
+http-body-util = "0.1.5"
+http-body = "1.1.0"
+bytes = "1.12.1"
 
 # SSE 流式响应
-async-stream = "0.3"
-tower-http = { version = "0.6", features = ["cors", "fs"] }
+async-stream = "0.3.6"
+tower-http = { version = "0.6.11", features = ["cors", "fs"] }
 
 # SQLite 数据库（用于本地记忆存储）
-rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
+rusqlite = { version = "0.32.1", features = ["bundled", "chrono"] }
 
 # Embedding 服务（本地嵌入 + 远程调用）
 cyber-jianghu-embedding = { workspace = true }
 
 # HNSW 向量索引（用于向量检索）
-instant-distance = "0.6"
+instant-distance = "0.6.1"
 
 # 并行计算
-rayon = "1.10"
+rayon = "1.12.0"
 
 # 快速哈希（用于缓存变化检测）
-fnv = "1.0"
-hex = "0.4"
-sha2 = "0.10"
+fnv = "1.0.7"
+hex = "0.4.3"
+sha2 = "0.10.9"
 
 # 随机数生成
 rand = { workspace = true }
 
 # 文件系统监控（配置热加载）
-notify = "7"
+notify = "7.0.0"
 
 # 浏览器打开
-open = "5"
+open = "5.4.3"
 
 # 速率限制（HTTP API）
-governor = "0.6"
+governor = "0.6.3"
 
 # 安全内存清理（API密钥）
-zeroize = "1"
+zeroize = "1.9.0"
 
 [dev-dependencies]
-tokio-test = "0.4"
+tokio-test = "0.4.5"
 tempfile = "3.27.0"
-dotenv = "0.15"
+dotenv = "0.15.0"
 tracing-test = { workspace = true }
