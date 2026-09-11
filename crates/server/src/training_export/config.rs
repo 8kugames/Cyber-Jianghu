@@ -2,7 +2,7 @@
 //!
 //! 复刻 main.rs:255-268 的 action_evolution.yaml 加载模式:
 //! read_to_string → serde_yaml → .get("data") → serde_json::from_value.
-//! env 覆盖用扁平 TRAINING_EXPORT_* (对齐 SERVER_/DB_ 规范, spec §7.2).
+//! env 覆盖用扁平 TRAINING_EXPORT_* (对齐 SERVER_/DB_ 规范).
 
 use anyhow::{Context, ensure};
 use serde::{Deserialize, Serialize};
@@ -113,14 +113,14 @@ impl TrainingExportConfig {
             self.limits.db_batch_size > 0,
             "training_export.limits.db_batch_size 必须大于 0"
         );
-        // spec §5.3: 单次 run DB 查询次数 ≤ 5. 防止运维把 batch 调太小触发几十次查询.
+        // 单次 run DB 查询次数 ≤ 5. 防止运维把 batch 调太小触发几十次查询.
         let db_query_count = self
             .limits
             .max_traces_per_run
             .div_ceil(self.limits.db_batch_size);
         ensure!(
             db_query_count <= 5,
-            "training_export: max_traces_per_run ({}) / db_batch_size ({}) = {} > 5, 违反 spec §5.3 单次 run DB 查询次数上限. 请调大 db_batch_size 或调小 max_traces_per_run",
+            "training_export: max_traces_per_run ({}) / db_batch_size ({}) = {} > 5, 违反单次 run DB 查询次数上限. 请调大 db_batch_size 或调小 max_traces_per_run",
             self.limits.max_traces_per_run,
             self.limits.db_batch_size,
             db_query_count

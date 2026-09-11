@@ -2,7 +2,7 @@ use cyber_jianghu_protocol::GovernanceCode;
 
 /// Server 端统一 GovernanceCode 映射
 ///
-/// 设计文档 §6.1: "Server 治理入口统一将 RawRejectionFact 映射为治理分类码"
+/// Server 治理入口统一将 RawRejectionFact 映射为治理分类码；
 /// Agent 端不自行做字符串匹配，而是接收 Server 映射后的 GovernanceCode 枚举。
 pub struct ServerGovernanceMapper;
 

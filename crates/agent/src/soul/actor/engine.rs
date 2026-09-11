@@ -665,7 +665,7 @@ impl CognitiveEngine {
         *self.current_focus_summary.write().await = summary;
     }
 
-    /// Task 9: Critical Focus Preload
+    /// Critical Focus Preload
     ///
     /// 当 FocusSummary 包含 Critical 紧急项时，预加载相关 WorldState 分区数据。
     /// 在 think_direct() 内部调用，异步读取 WorldStateStore。

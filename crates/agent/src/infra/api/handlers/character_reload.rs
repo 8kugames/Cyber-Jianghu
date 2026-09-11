@@ -1,7 +1,7 @@
 // ============================================================================
 // POST /api/v1/admin/reload-character — 从 server reload 已注册角色
 //
-// 用途：解决 Phase 4 联调发现的集成 gap——
+// 用途：解决联调发现的集成 gap——
 //
 //   server API register (POST /api/v1/agent/register) 写 DB 后不触发
 //   agent 端 WS Registered 消息，agent 端 character 状态卡死。

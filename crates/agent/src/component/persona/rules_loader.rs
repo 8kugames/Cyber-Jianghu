@@ -6,7 +6,6 @@
 //
 // 失败模式:fail-fast — 文件缺失 / YAML 损坏 / 空 rules / schema 不匹配 / 规则数 != 28
 // 都返回 Result::Err,启动失败(无静默 fallback,符合创世哲学"快速失败")。
-// 见计划书 §十六。
 // ============================================================================
 
 use anyhow::{Context, Result, bail};
@@ -50,7 +49,7 @@ pub fn load_event_trait_rules(path: &Path) -> Result<EventTraitMapper> {
 
     if parsed.rules.len() != EXPECTED_RULE_COUNT {
         bail!(
-            "persona_event_rules.yaml 规则数 {} != {} — 28 条是创世基线,若需调整请同步更新计划书 §十六",
+            "persona_event_rules.yaml 规则数 {} != {} — 28 条是创世基线,若需调整请同步更新基线",
             parsed.rules.len(),
             EXPECTED_RULE_COUNT
         );

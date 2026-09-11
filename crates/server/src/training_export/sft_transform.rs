@@ -1,6 +1,6 @@
 //! SFT transform 纯函数
 //!
-//! 契约依据 spec §4.2/§4.3/§4.4, 对齐 scripts/build_sft_data.py:158-197.
+//! 契约对齐 scripts/build_sft_data.py:158-197.
 //! 天魂筛选 (attempt 精确匹配) 在 runner 层做, 本模块只做单条 trace → SftSample 转换.
 
 use cyber_jianghu_protocol::TraceEntry;

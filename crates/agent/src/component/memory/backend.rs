@@ -1,7 +1,6 @@
 // ============================================================================
 // 记忆后端 Trait 定义
 // ============================================================================
-// 设计文档: (项目根)/docs/superpowers/specs/2025-03-15-semantic-memory-and-forgetting-design.md
 
 use crate::component::memory::types::MemoryEntry;
 use anyhow::Result;

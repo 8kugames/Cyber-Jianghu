@@ -3,7 +3,7 @@
 // ============================================================================
 //
 // 本文件两个端点是设备身份 v2 的唯一入口（设备身份 v1 的 upsert 端点
-// `POST /api/v1/agent/connect` 已彻底删除，详见 CHANGELOG [Unreleased]）：
+// `POST /api/v1/agent/connect` 已彻底删除）：
 //   * /device/verify   — 仅查询，设备不存在返回 404
 //   * /device/register — server 端生成 device_id，**不允许** client 传入
 //

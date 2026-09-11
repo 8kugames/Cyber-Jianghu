@@ -1,7 +1,7 @@
 // 托梦(Dream Injection)API
 // ============================================================================
 //
-// 从 soul_cycle.rs 拆出:dream 相关类型与 handler 单点维护(文件行数治理,AGENTS.md <800 行规则)。
+// 从 soul_cycle.rs 拆出:dream 相关类型与 handler 单点维护(文件行数治理)。
 
 use axum::{
     extract::State,

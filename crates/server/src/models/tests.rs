@@ -17,7 +17,7 @@ mod tests {
 
         let mut state = AgentState::new(Uuid::new_v4(), 1);
 
-        // 根据 PRD，白板重生初始值：HP=100, 体力=100, 饥饿=50, 口渴=50
+        // 白板重生初始值：HP=100, 体力=100, 饥饿=50, 口渴=50
         assert_eq!(state.status.get("satiation").unwrap_or(0), 50);
         assert_eq!(state.status.get("hydration").unwrap_or(0), 50);
         assert_eq!(state.status.get("hp").unwrap_or(0), 100);

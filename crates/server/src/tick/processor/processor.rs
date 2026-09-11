@@ -660,12 +660,12 @@ mod tests {
         let insert_next_60 = insert_tail.get(..60).unwrap_or(insert_tail);
         assert!(
             insert_next_60.contains("tx"),
-            "P0-2 修复缺失：batch_insert_action_logs 必须传入 `&mut tx`，\n\
+            "batch_insert_action_logs 必须传入 `&mut tx`，\n\
              而非 `&self.db_pool`。当前调用片段：\n{insert_next_60}"
         );
         assert!(
             !insert_next_60.contains("db_pool"),
-            "P0-2 修复缺失：batch_insert_action_logs 仍在用 db_pool，\n\
+            "batch_insert_action_logs 仍在用 db_pool，\n\
              必须改为 tx 以纳入 Saga 事务。当前调用片段：\n{insert_next_60}"
         );
 
@@ -676,7 +676,7 @@ mod tests {
             .expect("must call tx.commit() in production code");
         assert!(
             insert_idx < commit_idx,
-            "P0-2 修复缺失：batch_insert_action_logs (offset={insert_idx}) 必须在 tx.commit() (offset={commit_idx}) **之前**，\n\
+            "batch_insert_action_logs (offset={insert_idx}) 必须在 tx.commit() (offset={commit_idx}) **之前**，\n\
              否则 action_log 在 Saga 事务外执行，insert 失败时 state 已提交、log 丢失。"
         );
     }

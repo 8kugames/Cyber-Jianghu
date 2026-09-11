@@ -1,8 +1,7 @@
 //! 训练数据自动导出（Server 端 SFT Export）
 //!
-//! 设计文档: docs/superpowers/specs/2026-07-25-training-export-design.md
 //! 定时后台任务 + 手动 POST 触发, 产出 vLLM/Axolotl 兼容的 SFT JSONL.
-//! 绝不影响 24h 在线的热路径 (见 spec §2 干扰面矩阵).
+//! 绝不影响 24h 在线的热路径.
 
 pub mod checkpoint;
 pub mod config;

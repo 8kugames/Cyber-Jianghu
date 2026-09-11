@@ -4,7 +4,7 @@
 //! - build_conversation_messages_strips_reasoning_when_flag_set
 //! - build_conversation_messages_preserves_reasoning_when_flag_unset
 //!
-//! 生产验证: 联调测试 13h, DeepSeek system_hash 0 变化, 证明剥离生效。
+//! 生产验证确认剥离生效，DeepSeek system_hash 保持稳定。
 //! 不再需要 MockLlmClient 捕获 request body 的 e2e 测试 — unit test 已覆盖核心逻辑。
 
 use cyber_jianghu_agent::soul::actor::compute_system_hash;

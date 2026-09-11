@@ -2,7 +2,7 @@
 // GET /api/v1/agent/by-device — 设备关联的活跃 Agent 查询
 //
 // 用途：agent 端 WS 重连后从 server 拉取已注册角色，补全本地 character 状态。
-// Phase 4 联调发现：server API register 不会触发 agent WS Registered 消息，
+// 联调发现：server API register 不会触发 agent WS Registered 消息，
 // agent 端 character_not_registered 状态卡死。本端点提供「reload」通道。
 //
 // 鉴权：device token（与其他 agent 端点一致）

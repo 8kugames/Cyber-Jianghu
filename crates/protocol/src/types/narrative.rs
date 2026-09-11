@@ -335,7 +335,7 @@ where
         Ok(Some(v)) => v,
         Ok(None) => return Ok(None),
         Err(e) => {
-            // P0-AUDIT：serde 失败已纳入"LLM 容错"业务约束；非 silent error，而是
+            // serde 失败已纳入"LLM 容错"业务约束；非 silent error，而是
             // 业务允许的 fault tolerance。如需追溯具体 LLM 输出，需在 agent 端
             // LLM 响应拦截器处加日志（不在此处）。
             let _ = e; // 显式不使用，避免 dead_code 警告

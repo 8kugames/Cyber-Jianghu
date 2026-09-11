@@ -1089,7 +1089,7 @@ mod tests {
     use chrono::{Datelike, NaiveDate, TimeZone, Timelike};
     use std::io::Write;
 
-    /// 验证 P0-AUDIT：`read_file_metadata_for_hot_reload` 在文件不存在时返回 Ok(None)，
+    /// 验证：`read_file_metadata_for_hot_reload` 在文件不存在时返回 Ok(None)，
     /// 而不是 Err。约定：NotFound = 无事可做（正常 skip），不要混入"真错"路径。
     #[test]
     fn test_read_file_metadata_for_hot_reload_returns_none_for_missing_file() {
@@ -1099,15 +1099,12 @@ mod tests {
         let missing = dir.join("does_not_exist.yaml");
 
         let result = read_file_metadata_for_hot_reload(&missing).expect("NotFound must not be Err");
-        assert!(
-            result.is_none(),
-            "P0-AUDIT 修复缺失：缺失文件必须返回 Ok(None)，但返回了 Some"
-        );
+        assert!(result.is_none(), "缺失文件必须返回 Ok(None)，但返回了 Some");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 验证 P0-AUDIT：文件存在时返回 Ok(Some(modified))。
+    /// 验证：文件存在时返回 Ok(Some(modified))。
     #[test]
     fn test_read_file_metadata_for_hot_reload_returns_some_for_existing_file() {
         let dir =
@@ -1122,13 +1119,13 @@ mod tests {
             read_file_metadata_for_hot_reload(&path).expect("existing file metadata must succeed");
         assert!(
             result.is_some(),
-            "P0-AUDIT：已存在文件必须返回 Ok(Some(modified))，但返回了 None"
+            "已存在文件必须返回 Ok(Some(modified))，但返回了 None"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 验证 P0-AUDIT：NotFound 之外的 IO 错（如路径含 NUL 字节）必须返回 Err，
+    /// 验证：NotFound 之外的 IO 错（如路径含 NUL 字节）必须返回 Err，
     /// 不能吞掉。约定：除 NotFound 外的 IO 错 = 真错（权限/磁盘/文件锁/路径非法），
     /// 必须显式冒泡让 caller 决策。
     #[test]
@@ -1140,7 +1137,7 @@ mod tests {
         let result = read_file_metadata_for_hot_reload(invalid);
         assert!(
             result.is_err(),
-            "P0-AUDIT 修复缺失：非 NotFound IO 错必须返回 Err（warn + 冒泡），\
+            "非 NotFound IO 错必须返回 Err（warn + 冒泡），\
              而非吞掉返回 Ok(None)。\
              当前 is_ok={}  is_none={}",
             result.is_ok(),

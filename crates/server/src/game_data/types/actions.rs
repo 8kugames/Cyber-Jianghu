@@ -95,27 +95,27 @@ pub struct ActionConfigEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub highlight_kind: Option<HighlightKind>,
 
-    /// 原子行为类型（v6 §4.5 补字段，序列化时 lowercase）
+    /// 原子行为类型（序列化时 lowercase）
     #[serde(default)]
     pub atomic_kind: AtomicKind,
 
-    /// 执行者数量（v6 §4.5 补字段）
+    /// 执行者数量
     #[serde(default = "default_actor_arity")]
     pub actor_arity: u8,
 
-    /// 目标数量范围（v6 §4.5 补字段，序列化时 snake_case）
+    /// 目标数量范围（序列化时 snake_case）
     #[serde(default)]
     pub target_arity: TargetArity,
 
-    /// 持续 tick 数（v6 §4.5 补字段）
+    /// 持续 tick 数
     #[serde(default)]
     pub tick_span: u8,
 
-    /// 阶段数（v6 §4.5 补字段）
+    /// 阶段数
     #[serde(default = "default_phase_count")]
     pub phase_count: u8,
 
-    /// 协议编排类型（v6 §4.5 补字段，序列化时 snake_case）
+    /// 协议编排类型（序列化时 snake_case）
     #[serde(default)]
     pub protocol_kind: ProtocolKind,
 }
@@ -152,7 +152,7 @@ pub enum Transmission {
 }
 
 // ============================================================================
-// 预验证器种类（数据驱动扩展 — Phase 5 收尾）
+// 预验证器种类（数据驱动扩展）
 // ============================================================================
 
 /// 预验证器种类
@@ -164,7 +164,7 @@ pub enum ValidatorKind {
 }
 
 // ============================================================================
-// 编年史高光种类（数据驱动扩展 — Phase 5 收尾）
+// 编年史高光种类（数据驱动扩展）
 // ============================================================================
 
 /// 编年史高光种类

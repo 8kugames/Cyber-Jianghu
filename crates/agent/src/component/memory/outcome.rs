@@ -209,7 +209,7 @@ impl OutcomeMemory {
 
     /// 查询某 action_type 的近期记录
     ///
-    /// P1-3 修复：返回 `Result<Vec<_>>` 让 caller 区分"无记录"与"DB 错"。
+    /// 返回 `Result<Vec<_>>` 让 caller 区分"无记录"与"DB 错"。
     /// 之前静默返回空 Vec 会让下游把"DB 错"误判为"该 action_type 无历史"。
     pub fn query_recent(
         &self,
@@ -823,7 +823,7 @@ mod tests {
         });
         assert!(
             result.is_err(),
-            "P1-3 修复缺失：record() 在 DB 损坏时必须返回 Err，而非静默吞错。\
+            "record() 在 DB 损坏时必须返回 Err，而非静默吞错。\
              当前 is_ok={}",
             result.is_ok()
         );
@@ -841,7 +841,7 @@ mod tests {
         let result = mem.query_recent("test", 10);
         assert!(
             result.is_err(),
-            "P1-3 修复缺失：query_recent() 在 DB 损坏时必须返回 Err，\
+            "query_recent() 在 DB 损坏时必须返回 Err，\
              而非静默返回空 Vec（会让 caller 把 DB 错当成'无记录'）"
         );
         let _ = std::fs::remove_file(&db);
@@ -857,7 +857,7 @@ mod tests {
         let result = mem.query_by_target("target", 10);
         assert!(
             result.is_err(),
-            "P1-3 修复缺失：query_by_target() 在 DB 损坏时必须返回 Err"
+            "query_by_target() 在 DB 损坏时必须返回 Err"
         );
         let _ = std::fs::remove_file(&db);
     }
@@ -873,7 +873,7 @@ mod tests {
         let result = mem.success_rate("test");
         assert!(
             result.is_err(),
-            "P1-3 修复缺失：success_rate() 在 DB 损坏时必须返回 Err，\
+            "success_rate() 在 DB 损坏时必须返回 Err，\
              而非静默返回 0.0（会把 DB 错当成'全失败'）"
         );
         let _ = std::fs::remove_file(&db);
@@ -894,7 +894,7 @@ mod tests {
         // 行为契约：返回空字符串（无 records 字段）
         assert!(
             ctx.is_empty() || !ctx.contains("record:"),
-            "P1-3 修复后，to_prompt_context 在 DB 损坏时必须降级为空/部分内容，\
+            "to_prompt_context 在 DB 损坏时必须降级为空/部分内容，\
              不 panic 且无假数据。当前返回：{ctx}"
         );
         let _ = std::fs::remove_file(&db);

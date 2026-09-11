@@ -41,7 +41,7 @@ mod tests {
         }
         assert!(
             logs_contain("receiver 可能已 drop"),
-            "P0-AUDIT warn! 契约：broadcast send 失败必须 warn 且消息含 'receiver 可能已 drop'"
+            "warn! 契约：broadcast send 失败必须 warn 且消息含 'receiver 可能已 drop'"
         );
         assert!(
             logs_contain("death_event_tx"),
@@ -72,7 +72,7 @@ mod tests {
         }
         assert!(
             logs_contain("receiver 可能已 drop"),
-            "P0-AUDIT warn! 契约：mpsc send 失败必须 warn 且消息含 'receiver 可能已 drop'"
+            "warn! 契约：mpsc send 失败必须 warn 且消息含 'receiver 可能已 drop'"
         );
     }
 

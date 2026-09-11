@@ -36,7 +36,7 @@ pub async fn submit_proposal(
         .as_ref()
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Phase 0：伏羲单 soul，effect_refs 由 LLM 审议时推断，提议阶段为空
+    // 伏羲单 soul，effect_refs 由 LLM 审议时推断，提议阶段为空
     let effect_refs: Vec<String> = vec![];
     let classification =
         gov.classifier

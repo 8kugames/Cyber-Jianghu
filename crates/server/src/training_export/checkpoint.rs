@@ -1,6 +1,6 @@
 //! Checkpoint 读写 - trace_id 集合幂等去重
 //!
-//! 设计 spec §5.2/§5.2.1: 按 date=YYYY-MM-DD 分桶记录已处理 trace_id,
+//! 按 date=YYYY-MM-DD 分桶记录已处理 trace_id,
 //! 超过 N 天 (默认 7) 的桶整桶删除, 防 checkpoint 无限膨胀.
 
 use std::collections::HashMap;
@@ -40,7 +40,7 @@ impl Checkpoint {
         }
     }
 
-    /// 原子写: .tmp + rename (spec §8.3)
+    /// 原子写: .tmp + rename
     pub async fn save(&self, path: &Path) -> anyhow::Result<()> {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
@@ -81,7 +81,7 @@ impl Checkpoint {
         bucket.trace_ids.insert(trace_id);
     }
 
-    /// 退役超过 retain_days 天的桶 (spec §5.2.1)
+    /// 退役超过 retain_days 天的桶
     /// date 格式 "YYYY-MM-DD"; now_date 是当前日期 (UTC)
     pub fn retire_old_buckets(&mut self, retain_days: i64, now_date: &str) {
         let now = parse_date(now_date);
@@ -124,7 +124,7 @@ fn parse_date(s: &str) -> Option<chrono::NaiveDate> {
     chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
 }
 
-/// 扫描目录删除残留 .tmp 文件 (spec §8.3 启动 sweep)
+/// 扫描目录删除残留 .tmp 文件（启动 sweep）
 pub async fn sweep_tmp_files(dir: &Path) -> anyhow::Result<usize> {
     let mut count = 0;
     let mut entries = match tokio::fs::read_dir(dir).await {

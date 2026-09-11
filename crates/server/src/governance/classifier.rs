@@ -15,8 +15,8 @@ impl TopicClassifier {
 
     /// 基于 effect_refs 做规则匹配
     ///
-    /// Phase 0：agent 提议时 effect_refs 为空（agent 无可信数据源），
-    /// 走 fallback topic = evolution → 伏羲路由。Phase 2 多 soul 上线时
+    /// agent 提议时 effect_refs 为空（agent 无可信数据源），
+    /// 走 fallback topic = evolution → 伏羲路由。多 soul 上线时
     /// 由 LLM 推断后回填 effect_refs 做实际分类。
     pub fn classify(
         &self,

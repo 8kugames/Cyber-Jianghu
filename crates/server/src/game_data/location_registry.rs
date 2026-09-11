@@ -4,7 +4,6 @@
 //
 // LocationGraph 的服务端包装：邻接查询（显式边 + 隐式 parent-child）、
 // 时代显隐可见性（time_variants）、时代感知描述解析。
-// 图语义唯一事实文档：docs/architecture/p0_core/locations_graph.md
 // ============================================================================
 
 use cyber_jianghu_protocol::{AdjacentNode, LocationEdge, LocationGraph, LocationNode};

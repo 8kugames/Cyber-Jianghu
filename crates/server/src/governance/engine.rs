@@ -241,8 +241,8 @@ impl SoulReviewEngine {
             PolicyRule::EffectRef {
                 effect_ref_matches, ..
             } => {
-                // Phase 0：伏羲单 soul + agent 提议时无 effect_refs（LLM 审议后才有），
-                // EffectRef 规则永远不命中。Phase 2 多 soul 上线时由 LLM 推断后回填。
+                // 伏羲单 soul + agent 提议时无 effect_refs（LLM 审议后才有），
+                // EffectRef 规则永远不命中。多 soul 上线时由 LLM 推断后回填。
                 let _ = (effect_ref_matches, soul_id);
                 false
             }
@@ -759,7 +759,7 @@ mod tests {
         ReviewPolicy, SoulConfig, SoulsClassifierConfig, SoulsReviewConfig,
     };
 
-    /// Phase 0 测试配置：仅伏羲
+    /// 测试配置：仅伏羲
     fn test_souls_config() -> SoulsConfig {
         let mut souls = HashMap::new();
         souls.insert(
@@ -811,14 +811,14 @@ mod tests {
             engine.route_primary_soul(&GovernanceTopic::Evolution),
             Some("fuxi".to_string())
         );
-        // Phase 0: 仅伏羲注册，其他 topic 返回 None
+        // 仅伏羲注册，其他 topic 返回 None
         assert_eq!(engine.route_primary_soul(&GovernanceTopic::Resource), None);
     }
 
     #[test]
     fn test_route_for_topics() {
         let engine = test_engine();
-        // Phase 0: 仅 evolution → fuxi
+        // 仅 evolution → fuxi
         let result = engine.route_for_topics(&[GovernanceTopic::Evolution]);
         assert_eq!(result, Some("fuxi".to_string()));
     }

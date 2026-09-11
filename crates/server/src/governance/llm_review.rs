@@ -304,7 +304,7 @@ pub fn build_review_message(evidence: &ProposalEvidence) -> String {
 /// # 附条件过审表达
 ///
 /// 不通过新增 VoteChoice 实现，而是在 approve 的 rationale 中明示条件
-/// （由伏羲 LLM 在终审时解读）。这是 D1=C 决策：保持枚举简洁，依赖 LLM 理解力。
+/// （由伏羲 LLM 在终审时解读）。这是有意的决策：保持枚举简洁，依赖 LLM 理解力。
 pub fn build_final_review_message(
     evidence: &ProposalEvidence,
     peer_verdicts: &[ReviewVerdict],
