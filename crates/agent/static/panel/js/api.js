@@ -141,7 +141,7 @@ export async function post(path, body, options = {}) {
     return data ?? {};
 }
 
-// P0-11(b)：device auth_token 管理
+// device auth_token 管理
 // 从 setup/status 获取 token（本地信任域，API 仅绑 127.0.0.1），缓存到 localStorage
 const AUTH_TOKEN_KEY = 'cj_auth_token';
 

@@ -4,7 +4,7 @@
 #
 # 【用户数据明示】启用后，智能体的 LLM 调用（prompt+response）会被采集，
 # 用于训练专用模型。玩家输入（角色设定/托梦/私聊）在采集时自动脱敏，
-# 原文不进入训练数据。详见 docs/DATA_USAGE.md。
+# 原文不进入训练数据。
 #
 # 【Opt-out】如不希望采集，设 output.enabled: false（零开销，不影响游戏）。
 # 如仅不希望回传 server，设 upload.enabled: false（本地仍保留）。
@@ -24,7 +24,7 @@ description: "训练 Trace 配置（结构化 LLM 调用记录 + 回传）"
 output:
   enabled: true
   base_dir: "traces"
-  max_size_mb: 1024          # 日志总体积上限（MB），超过则按 LRU 删除最旧文件
+  max_size_mb: 1024 # 日志总体积上限（MB），超过则按 LRU 删除最旧文件
 
 # 回传控制：开时回传 server，关时仅本地
 upload:
