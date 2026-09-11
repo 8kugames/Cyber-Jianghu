@@ -22,7 +22,7 @@ daily:
     satiation_weight: 0.25
     hydration_weight: 0.25
   # 天魂审查分量：从 soul_cycle_record.tianhun_result 读
-  # P1 阶段 server 无法读取 agent 端 soul_cycle.db，judgment 暂为 None
+  # server 无法读取 agent 端 soul_cycle.db，judgment 暂为 None
   tianhun:
     approved_score: 0.5
     rejected_score: -0.5

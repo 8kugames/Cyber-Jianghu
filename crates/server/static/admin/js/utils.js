@@ -37,10 +37,10 @@ function isShoutAtype(at, ad) {
 // authVerified may be declared in auth.js (loaded after utils.js), so window guard needed
 var authVerified = typeof window.authVerified !== "undefined" ? window.authVerified : false;
 
-// 直达链接支持（P1-20 安全边界内）：只接受 hash fragment 形式（#token=xxx）。
+// 直达链接支持（安全边界内）：只接受 hash fragment 形式（#token=xxx）。
 // hash 不会随请求发送到服务器 —— 不进 access log / CDN 缓存 / Referer；
 // 提取后立即 replaceState 抹除，浏览器历史与复制出的链接均不再含 token。
-// ?token=xxx 仍然禁止（token 会进入服务器日志与代理缓存，P1-20 移除）。
+// ?token=xxx 仍然禁止（token 会进入服务器日志与代理缓存，故移除）。
 var hashBootstrapToken = "";
 (function extractHashToken() {
     var hash = window.location.hash;

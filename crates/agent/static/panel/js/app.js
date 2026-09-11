@@ -99,7 +99,7 @@ async function init() {
     router.register('characters', characterPage);
     router.register('settings', settingsPage);
 
-    // P0-11(b)：从 setup/status（公开端点）获取 auth_token 并缓存到 localStorage。
+    // 从 setup/status（公开端点）获取 auth_token 并缓存到 localStorage。
     // 必须在任何受保护 API 调用之前完成。refreshAuthToken 内部调用 get(SETUP_STATUS)。
     await refreshAuthToken();
 
