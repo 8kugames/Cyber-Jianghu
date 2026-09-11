@@ -110,30 +110,16 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
         .await
         .unwrap_or(0);
 
-    // 从配置读取时间参数
-    let config = crate::game_data::registry::TimeRegistry::get_config();
-    let ticks_per_hour = config
-        .as_ref()
-        .map(|c| c.ticks_per_hour as f64)
-        .unwrap_or(1.0);
-    let hours_per_day = config
-        .as_ref()
-        .map(|c| c.hours_per_day as i64)
-        .unwrap_or(24);
-    let days_per_month = 30;
-    let months_per_year = 12;
-    let hours_per_month = hours_per_day * days_per_month;
-    let hours_per_year = hours_per_month * months_per_year;
-
-    // 计算整数游戏时间（前端会自行计算平滑的小数部分）
-    let total_game_hours = current_world_tick_id as i64 / ticks_per_hour as i64;
-
-    let year = 1 + (total_game_hours / hours_per_year) as i32;
-    let remaining_after_year = total_game_hours % hours_per_year;
-    let month = 1 + (remaining_after_year / hours_per_month) as i32;
-    let remaining_after_month = remaining_after_year % hours_per_month;
-    let day = 1 + (remaining_after_month / hours_per_day) as i32;
-    let hour = (remaining_after_month % hours_per_day) as i32;
+    // 年月日展开真源 = TimeRegistry::game_datetime（与 WorldState 广播同构，
+    // 日历模型取 time.yaml；曾用自建 30×12 模型且缺 rspt 因子，按 shipped rspt=120
+    // 显示比真源快 120 倍）
+    let total_game_hours =
+        crate::game_data::registry::time_registry::TimeRegistry::game_hours(current_world_tick_id);
+    let (year, month, day, hour) =
+        crate::game_data::registry::time_registry::TimeRegistry::game_datetime(
+            current_world_tick_id,
+        )
+        .unwrap_or((1, 1, 1, 0));
 
     // 获取季节信息
     let season =
@@ -237,7 +223,9 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
         world_overview,
         tick_duration_secs,
         current_tick_id: current_world_tick_id,
-        ticks_per_hour,
+        ticks_per_hour: crate::game_data::registry::time_registry::TimeRegistry::get_config()
+            .map(|c| c.ticks_per_hour as f64)
+            .unwrap_or(1.0),
         natural_deaths_last_24h,
         abnormal_deaths_last_24h,
         offline_duration_distribution: OfflineDistribution {

@@ -6,7 +6,7 @@
 // GET /api/dashboard/reward/trends           → 寿数趋势 + 死因分布 + 平均 reward
 // GET /api/dashboard/reward/lifetime/{id}    → 单 agent 一生 reward 明细
 //
-// 数据来源：rewards/lifetime/*.jsonl 落盘文件（天道账本）
+// 数据来源：rewards/lifetime/*.jsonl 落盘文件
 // ============================================================================
 
 use axum::{

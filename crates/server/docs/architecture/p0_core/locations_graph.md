@@ -76,10 +76,10 @@ time.yaml + game_rules.yaml ──> TimeRegistry::game_day(tick)（时代基准�
 换算真源收敛现状（2026-09-11）：
 
 - 已收编：chronicle `calculate_game_days`、broadcaster `compute_game_time`、
-  decay `compute_age_years`、`collector::collect_agents` 周期日（均委托
-  `TimeRegistry::try_game_day`/`game_hours`，等价性有钉死测试）。
-- 保留（非游戏日换算）：`real_seconds_per_game_day` 仅供需要“真实秒数”
-  量纲的调用方（chronicle generator 周期窗口）。
+  decay `compute_age_years`、`collector::collect_agents` 周期日、
+  chronicle generator `format_tick_range_chinese`、dashboard stats 年月日
+  （均委托 `TimeRegistry::try_game_day`/`game_hours`/`game_datetime`，
+  等价性有钉死测试）。
 - 已知不一致（待统一）：`collect_agents` 的 daily_summary 查询用 0-based
   游戏日，而 `agent_daily_summaries.game_day` 为 1-based——历史行为，
   统一时需迁移查询语义。

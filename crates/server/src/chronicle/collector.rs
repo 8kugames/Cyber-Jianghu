@@ -131,26 +131,6 @@ async fn collect_emergence_events(
     }
 }
 
-/// 1 游戏日对应的真实秒数（generator 周期窗口计算用）
-/// 公式: real_seconds_per_tick * ticks_per_hour * hours_per_day
-/// tick→游戏日换算真源 = TimeRegistry::game_hours/try_game_day，
-/// 本函数仅保留给需要“真实秒数”量纲的调用方（非游戏日换算）。
-pub(crate) fn real_seconds_per_game_day() -> Result<i64> {
-    let time_config =
-        crate::game_data::registry::TimeRegistry::get_config().context("时间配置不可用")?;
-    let registry = crate::game_data::registry_or_error()
-        .map_err(|e| anyhow::anyhow!("游戏配置不可用: {}", e))?;
-    let rsp = registry
-        .get()
-        .game_rules
-        .data
-        .agent_state
-        .tick
-        .real_seconds_per_tick as i64;
-    let rspgd = rsp * time_config.ticks_per_hour as i64 * time_config.hours_per_day as i64;
-    Ok(rspgd)
-}
-
 /// 计算游戏日范围
 ///
 /// 换算真源 = TimeRegistry::try_game_day（配置缺失时显式失败，不接受退化值——
@@ -280,7 +260,7 @@ async fn collect_agents(
     // 批量查询：每日 LLM 日志摘要（agent_daily_summaries）
     // LEFT JOIN，agent 在本周期无摘要时不影响主查询。
     // 0-based 游戏日（既有查询语义：与 agent_daily_summaries 的 1-based game_day 差 1，
-    // 恒等式 tick/rspgd == try_game_day(tick) - 1；后续统一待定，见 locations_graph.md §5）
+    // 恒等式 tick/rspgd == try_game_day(tick) - 1；后续统一待定）
     let period_game_days = (
         crate::game_data::registry::time_registry::TimeRegistry::try_game_day(period_start)
             .context("时间配置不可用，无法计算周期游戏日")?

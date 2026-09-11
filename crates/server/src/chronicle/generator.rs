@@ -70,13 +70,16 @@ fn format_date_range(game_day_start: i32, game_day_end: i32) -> String {
 
 /// tick 区间（秒级真实时间戳）→ "x年x月x日至x年x月x日"。
 ///
-/// 涌现事件的 tick_start/tick_end 是真实秒数，必须先除以 real_seconds_per_game_day
-/// 转为 game_day，再转中文日期。配置缺失时 fallback 标注为 tick 而非"日"，避免尺度错位。
+/// 涌现事件的 tick_start/tick_end 是真实秒数，游戏日换算真源 =
+/// TimeRegistry::try_game_day（禁止内联公式）。配置缺失/非法时 fallback
+/// 标注为 tick 而非"日"，避免尺度错位。
 fn format_tick_range_chinese(tick_start: i64, tick_end: i64) -> String {
-    match super::collector::real_seconds_per_game_day() {
-        Ok(rspgd) if rspgd > 0 => {
-            let gd_start = tick_start / rspgd + 1;
-            let gd_end = tick_end / rspgd + 1;
+    use crate::game_data::registry::time_registry::TimeRegistry;
+    match (
+        TimeRegistry::try_game_day(tick_start),
+        TimeRegistry::try_game_day(tick_end),
+    ) {
+        (Some(gd_start), Some(gd_end)) => {
             format!(
                 "{}至{}",
                 super::format_game_day(gd_start),
