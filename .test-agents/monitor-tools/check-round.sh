@@ -12,7 +12,7 @@ cd "$(dirname "$0")/../.."
 
 COMPOSE=".test-agents/docker-compose.yml"
 INTERVAL_MIN=${1:-10}
-ROUND_DIR="./.tmp/check-round-$(date -u +%Y%m%dT%H%M%SZ)"
+ROUND_DIR="./tmp/check-round-$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$ROUND_DIR"
 
 # 端点发现：与 monitor-24h.sh 同一解析逻辑（service:container）
@@ -49,6 +49,8 @@ for entry in "${AGENTS[@]}"; do
     docker ps --filter "name=$c" --format "{{.Status}}" > "$ROUND_DIR/$svc.docker" 2>/dev/null
     docker logs --since "${INTERVAL_MIN}m" "$c" 2>&1 | \
       grep -E "ERROR|WARN|死亡|death|panic" | tail -20 > "$ROUND_DIR/$svc.log" 2>/dev/null
+    docker logs --since "${INTERVAL_MIN}m" "$c" 2>&1 | \
+      grep -oE "决策: \S+" | sed 's/决策: //' > "$ROUND_DIR/$svc.actions" 2>/dev/null
     true
   ) &
 done
@@ -102,7 +104,40 @@ except Exception as e:
 " 2>/dev/null
 done | sort
 
-# ── 错误日志 ──────────────────────────────────────────────────────────────────
+# ── 行为分布（决策动作 + 香农熵，行为坏缩早期信号）─────────────────────────
+echo "--- action distribution (last ${INTERVAL_MIN}m) ---"
+python3 - "$ROUND_DIR" "${AGENTS[@]}" <<'PYEOF'
+import json, math, os, sys
+from collections import Counter
+base, agents = sys.argv[1], sys.argv[2:]
+print("| Agent | 总决策 | 熵 H/Hmax | r | 判读 | 分布 |")
+print("| ----- | ------ | --------- | - | ---- | ---- |")
+for entry in agents:
+    svc, c = entry.split(":", 1)
+    acts_file = os.path.join(base, svc + ".actions")
+    try:
+        acts = [l.strip() for l in open(acts_file, encoding='utf-8') if l.strip()]
+    except Exception:
+        acts = []
+    counts = Counter(acts)
+    total = sum(counts.values())
+    if total == 0:
+        print(f"| {svc} | 0 | - | - | 无决策 | - |")
+        continue
+    h = -sum((v/total) * math.log2(v/total) for v in counts.values())
+    hmax = math.log2(len(counts)) if len(counts) > 1 else 1.0
+    ratio = h / hmax if hmax > 0 else 0.0
+    band = '健康' if ratio > 0.6 else ('收缩' if ratio >= 0.3 else '坍缩疑似')
+    dist = ','.join(f'{a}:{n}' for a, n in counts.most_common())
+    print(f"| {svc} | {total} | {h:.2f}/{hmax:.2f} | {ratio:.2f} | {band} | {dist} |")
+PYEOF
+# 保存每 agent 动作计数（Phase 4 跨轮次聚合用）
+for entry in "${AGENTS[@]}"; do
+  svc=$(echo "$entry" | cut -d: -f1)
+  [ -s "$ROUND_DIR/$svc.actions" ] && sort "$ROUND_DIR/$svc.actions" | uniq -c | awk -v svc="$svc" '{print svc "," $2 "," $1}' >> "$ROUND_DIR/actions.csv"
+done
+
+# ── 错误日志 ────────────────────────────────────────────────────────────────
 echo "--- errors/warnings (last ${INTERVAL_MIN}m) ---"
 found=0
 for f in "$ROUND_DIR"/*.log; do

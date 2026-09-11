@@ -35,7 +35,7 @@ GEN_RETRY_MAX=4
 GEN_MAX_TIME=180
 SERVER_RETIRE_RETRY=5
 SERVER_RETIRE_SLEEP=5
-TMPDIR="./.tmp/restart_$$"
+TMPDIR="./tmp/restart_$$"
 
 trap 'rm -rf "$TMPDIR" 2>/dev/null; exit 130' INT TERM
 

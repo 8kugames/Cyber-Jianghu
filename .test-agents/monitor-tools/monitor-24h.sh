@@ -18,6 +18,8 @@ START_EPOCH=$(date -u +%s)
 END_EPOCH=$((START_EPOCH + DURATION_SECS))
 
 COMPOSE=".test-agents/docker-compose.yml"
+# server 地址单一来源 = compose（换 server 只改 compose）
+SERVER_HTTP=$(grep -m1 'CYBER_JIANGHU_SERVER_HTTP_URL:' "$COMPOSE" | sed -E 's/.*CYBER_JIANGHU_SERVER_HTTP_URL:[[:space:]]*//')
 # 输出 "服务名:容器名" 对；服务名即 .test-agents/ 数据目录名，容器名供 docker exec 使用
 AGENTS=($(awk '
   BEGIN { in_svc=0; cur=""; cn="" }
@@ -51,17 +53,19 @@ collect_round() {
   # --- 2. server health ---
   {
     echo "[server_health]"
-    curl -sf --max-time 5 http://47.102.120.116:23333/health || echo "FAIL"
+    curl -sf --max-time 5 "$SERVER_HTTP/health" || echo "FAIL"
   } >> "$round_log"
 
-  # --- 3. 每 agent 角色状态 + token（容器内 127.0.0.1）---
+  # --- 3. 每 agent 角色状态 + token（容器内 127.0.0.1，token 源 = setup/status 内存权威值）---
   echo "[agents]" >> "$round_log"
   for entry in "${AGENTS[@]}"; do
     local c="${entry##*:}"
     local cdir="$LOG_BASE/agents/$c"
     mkdir -p "$cdir"
     local token
-    token=$(docker exec "$c" grep '^auth_token:' /app/data/servers/47-102-120-116-23333/device.yaml 2>/dev/null | awk '{print $2}')
+    token=$(docker exec "$c" curl -sf --max-time 5 \
+      http://127.0.0.1:23340/api/v1/setup/status 2>/dev/null | \
+      python3 -c "import json,sys; print(json.load(sys.stdin).get('auth_token',''))" 2>/dev/null)
     if [ -z "$token" ]; then
       echo "$c: NO_TOKEN" >> "$round_log"
       continue
@@ -136,6 +140,52 @@ except Exception as e: print(f'  ERR: {e}', file=sys.stderr)
       echo "  DEATH $c at $ts" >> "$round_log"
       echo "$ts" > "$cdir/death_flag"
       cat "$cdir/state.json" >> "$round_log" 2>/dev/null
+    fi
+  done
+
+  # --- 7. 行为分布（决策动作 + 香农熵，行为坏缩早期信号）---
+  echo "[actions]" >> "$round_log"
+  local entry
+  for entry in "${AGENTS[@]}"; do
+    local svc="${entry%%:*}"
+    local c="${entry##*:}"
+    local acts_file="$LOG_BASE/agents/$c/actions.log"
+    docker logs --since "${INTERVAL_SECS}s" "$c" 2>&1 \
+      | grep -oE "决策: \S+" | sed 's/决策: //' > "$acts_file" 2>/dev/null
+    python3 - "$c" "$acts_file" "$round_log" <<'PYEOF' 2>/dev/null
+import json, math, sys
+from collections import Counter
+agent, acts_file, round_log = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    acts = [l.strip() for l in open(acts_file, encoding='utf-8') if l.strip()]
+except Exception:
+    acts = []
+counts = Counter(acts)
+total = sum(counts.values())
+if total == 0 or len(counts) <= 1:
+    h = ratio = 0.0
+    hmax = 1.0 if total else 0.0
+    if total:
+        h = 0.0
+        hmax = 1.0
+else:
+    h = -sum((v/total) * math.log2(v/total) for v in counts.values())
+    hmax = math.log2(len(counts))
+    ratio = h / hmax if hmax > 0 else 0.0
+band = '健康' if ratio > 0.6 else ('收缩' if ratio >= 0.3 else '坍缩疑似')
+if total == 0:
+    band = '无决策'
+top = counts.most_common(1)[0] if counts else ('-', 0)
+dist = ','.join(f'{a}:{n}' for a, n in counts.most_common())
+line = f'  {agent} total={total} H={h:.2f}/{hmax:.2f} r={ratio:.2f} [{band}] top={top[0]}({top[1]}) | {dist}'
+with open(round_log, 'a', encoding='utf-8') as f:
+    f.write(line + '\n')
+PYEOF
+    # 累计 CSV（Phase 4 时间序列用）
+    if [ -s "$acts_file" ]; then
+      ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      sort "$acts_file" | uniq -c | awk -v svc="$svc" -v ts="$ts" '{print ts "," svc "," $2 "," $1}' \
+        >> "$LOG_BASE/actions.csv"
     fi
   done
 
