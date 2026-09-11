@@ -160,7 +160,7 @@ pub fn cluster_by_spacetime(rows: &[ActionRow]) -> BTreeMap<(i64, String), Vec<A
     clusters
 }
 
-/// 判定一个时空簇是否通过 MVP §6.1.3 阈值。
+/// 判定一个时空簇是否通过 MVP 涌现阈值。
 ///
 /// agent 去重用 DISTINCT（处理同 agent 多 pipe_seq）。
 pub fn cluster_passes_threshold(
@@ -510,6 +510,7 @@ mod tests {
                 supply_actions: vec!["用".to_string()],
                 min_survivors: 3,
                 min_supply_count: 3,
+                ..Default::default()
             },
         }
     }

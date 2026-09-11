@@ -79,7 +79,7 @@ fn default_short_uuid_len() -> usize {
     8
 }
 
-/// MVP §6.1.2 生存能力配置
+/// MVP 生存能力配置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HealthConfig {
     #[serde(default)]
@@ -88,6 +88,12 @@ pub struct HealthConfig {
     pub min_survivors: i32,
     #[serde(default = "default_min_supply_count")]
     pub min_supply_count: i32,
+    /// MVP 行为多样性：全窗口最小动作分布熵比（r = H/log2 k）下限
+    #[serde(default = "default_max_top_share")]
+    pub max_top_share: f64,
+    /// MVP 交叉判读：饱食度低于此值时，低 r 才计为行为坍缩（饱食惰性豁免）
+    #[serde(default = "default_satiation_urgent_below")]
+    pub satiation_urgent_below: i32,
 }
 
 fn default_min_survivors() -> i32 {
@@ -96,6 +102,14 @@ fn default_min_survivors() -> i32 {
 
 fn default_min_supply_count() -> i32 {
     3
+}
+
+fn default_max_top_share() -> f64 {
+    0.8
+}
+
+fn default_satiation_urgent_below() -> i32 {
+    40
 }
 
 #[cfg(test)]

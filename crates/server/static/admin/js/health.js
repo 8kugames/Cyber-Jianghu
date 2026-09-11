@@ -2,7 +2,7 @@
 // 健康度看板（MVP §6.1 验收指标视图）
 // ============================================================================
 //
-// 只读展示 MVP 验收三大维度：运行稳定性 / 生存能力 / 涌现。
+// 只读展示 MVP 验收四大维度：运行稳定性 / 生存能力 / 涌现 / 行为多样性。
 // 每项标注阈值 + pass/fail。10s 自动刷新。
 // 超时率标注"近似值"（server 端无 deadline 概念）。
 
@@ -56,6 +56,7 @@ function buildHealthHtml(d) {
     const s = d.stability;
     const sv = d.survival;
     const e = d.emergence;
+    const b = d.behavior;
 
     // 生存补给明细
     let supplyRows = '';
@@ -71,7 +72,7 @@ function buildHealthHtml(d) {
 
     return `
     <div class="health-grid">
-        <h3>MVP 健康度看板（观测窗口 ${d.tick_start} – ${d.tick_end}，${d.window_ticks} tick）</h3>
+        <h3>健康度看板（观测窗口 ${d.tick_start} – ${d.tick_end}，${d.window_ticks} tick）</h3>
 
         <div class="health-section">
             <h4>运行稳定性 ${passBadge(s.pass && s.continuous_run_hours >= s.threshold_hours)}</h4>
@@ -111,7 +112,37 @@ function buildHealthHtml(d) {
             </button>
             <div id="emergence-detail"></div>
         </div>
+
+        <div class="health-section">
+            <h4>行为多样性（最频动作占比） ${passBadge(b.pass)}</h4>
+            <table class="health-table">
+                <tr><td>全员最频动作占比上界</td><td>${b.entropy_min.toFixed(2)} / 阈值 < ${b.min_entropy_ratio}</td><td>${passBadge(b.pass)}</td></tr>
+                <tr><td>全员平均占比</td><td>${b.entropy_mean.toFixed(2)}</td><td>-</td></tr>
+                <tr><td>饱食度紧迫阈值</td><td colspan="2">< ${b.satiation_urgent_below}（低于此值时高占比才计为卡死循环）</td></tr>
+            </table>
+            ${behaviorRows(b)}
+            <p class="note">占比 = 窗口内最频动作的决策次数份额。
+            判读交叉生存状态：饱食安稳下的高占比属合理情性（豁免），
+            占比高且饱食度紧迫（< ${b.satiation_urgent_below}）才计为卡死循环。</p>
+        </div>
     </div>`;
+}
+
+function behaviorRows(b) {
+    if (!b.per_agent_behavior || b.per_agent_behavior.length === 0) {
+        return '<p class="note">窗口内无决策数据</p>';
+    }
+    const rows = b.per_agent_behavior.map(a =>
+        `<tr><td>${escapeHtml(resolveTargetName(a.agent_id))}</td>` +
+        `<td>${escapeHtml(a.top_action)}</td>` +
+        `<td>${(a.top_share * 100).toFixed(1)}%</td>` +
+        `<td>${a.distinct_actions}</td>` +
+        `<td>${a.total_decisions}</td>` +
+        `<td>饱食 ${a.satiation > 900 ? '无快照' : a.satiation.toFixed(0)}</td>` +
+        `<td>${a.exempted ? '豁免（饱食情性）' : (a.top_share >= b.max_top_share ? '❌ 卡死循环' : '✅')}</td></tr>`
+    ).join('');
+    return '<table class="health-table"><thead><tr><th>Agent</th><th>最频动作</th><th>占比</th><th>种类数</th><th>决策数</th><th>饱食度</th><th>判读</th></tr></thead>' +
+        `<tbody>${rows}</tbody></table>`;
 }
 
 // 涌现事件详情：按需拉取 /api/dashboard/emergence 的完整事件链

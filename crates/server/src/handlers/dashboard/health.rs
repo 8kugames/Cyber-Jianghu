@@ -1,16 +1,16 @@
 // ============================================================================
-// Health Dashboard Handler（MVP 健康度看板）
+// Health Dashboard Handler（健康度看板）
 // ============================================================================
 //
 // 接口契约：
 // GET /api/dashboard/health?window=240
-//   → MVP §6.1 验收指标的结构化视图
+//   → MVP 验收指标的结构化视图
 //
 // 指标覆盖：
-//   §6.1.1 运行稳定性：tick 完成率、连续运行时长、崩溃数
-//   §6.1.1 意图超时率（近似，标注非 MVP 字面30秒墙钟口径）
-//   §6.1.2 生存能力：窗口末点存活数、人均补给次数
-//   §6.1.3 涌现：causal_emergence 计数（复用 emergence 模块）
+//   运行稳定性：tick 完成率、连续运行时长、崩溃数
+//   意图超时率（近似，标注非 MVP 字面30秒墙钟口径）
+//   生存能力：窗口末点存活数、人均补给次数
+//   涌现：causal_emergence 计数（复用 emergence 模块）
 //
 // 每项标注 MVP 阈值 + pass/fail 状态。
 // ============================================================================
@@ -33,18 +33,20 @@ pub struct HealthQuery {
     pub window: Option<i64>,
 }
 
-/// MVP §6.1 验收响应
+/// MVP 验收响应
 #[derive(Serialize)]
 pub struct MvpHealth {
     pub tick_start: i64,
     pub tick_end: i64,
     pub window_ticks: i64,
-    /// MVP §6.1.1 运行稳定性
+    /// MVP 运行稳定性
     pub stability: StabilityCheck,
-    /// MVP §6.1.2 生存能力
+    /// MVP 生存能力
     pub survival: SurvivalCheck,
-    /// MVP §6.1.3 复杂交互（涌现）
+    /// MVP 复杂交互（涌现）
     pub emergence: EmergenceCheck,
+    /// MVP 行为多样性（决策动作分布熵，交叉生存状态判读）
+    pub behavior: BehaviorCheck,
 }
 
 #[derive(Serialize)]
@@ -91,9 +93,36 @@ pub struct EmergenceCheck {
     pub candidate_count: usize,
 }
 
+#[derive(Serialize)]
+pub struct AgentBehavior {
+    pub agent_id: String,
+    /// 最高频动作名
+    pub top_action: String,
+    /// 最高频动作占比 0-1
+    pub top_share: f64,
+    /// 涉及动作种类数
+    pub distinct_actions: i32,
+    /// 决策总数
+    pub total_decisions: i64,
+    /// 窗口末点饱食度（交叉判读用）
+    pub satiation: f64,
+    /// 饱食惰性豁免：占比超限但饱食安稳
+    pub exempted: bool,
+}
+
+#[derive(Serialize)]
+pub struct BehaviorCheck {
+    /// 最频动作占比上限
+    pub max_top_share: f64,
+    pub satiation_urgent_below: i32,
+    pub pass: bool,
+    pub per_agent_behavior: Vec<AgentBehavior>,
+    pub fail_agents: Vec<String>,
+}
+
 /// GET /api/dashboard/health
 ///
-/// 返回 MVP §6.1.1/6.1.2/6.1.3 全部验收指标 + pass/fail。
+/// 返回 MVP 全部验收指标 + pass/fail。
 pub async fn get_health(
     State(state): State<Arc<AppState>>,
     Query(q): Query<HealthQuery>,
@@ -120,7 +149,7 @@ pub async fn get_health(
         )
     })?;
 
-    // §6.1.1 运行稳定性阈值
+    // 运行稳定性阈值
     let tick_rate_threshold = 0.99;
     let run_hours = h.continuous_run_seconds / 3600.0;
     let timeout_threshold = 0.05;
@@ -141,7 +170,7 @@ pub async fn get_health(
         timeout_is_approximate: true,
     };
 
-    // §6.1.2 生存能力
+    // 生存能力
     let per_agent: Vec<AgentSupply> = {
         let mut v: Vec<AgentSupply> = h
             .per_agent_supply
@@ -165,13 +194,40 @@ pub async fn get_health(
         supply_pass: h.supply_pass,
     };
 
-    // §6.1.3 涌现
+    // 涌现
     let emergence_check = EmergenceCheck {
         causal_emergence_count: result.causal_emergence_count,
         threshold: 1,
         pass: result.causal_emergence_count >= 1,
         co_occurrence_count: result.co_occurrence_count,
         candidate_count: result.candidate_count,
+    };
+
+    // 行为多样性（最频动作占比，交叉生存状态判读）
+    let mut per_agent_behavior: Vec<AgentBehavior> = h
+        .per_agent_behavior
+        .iter()
+        .map(|(id, b)| AgentBehavior {
+            agent_id: id.to_string(),
+            top_action: b.top_action.clone(),
+            top_share: b.top_share,
+            distinct_actions: b.distinct_actions as i32,
+            total_decisions: b.total_decisions,
+            satiation: b.satiation,
+            exempted: b.exempted,
+        })
+        .collect();
+    per_agent_behavior.sort_by(|a, b| a.agent_id.cmp(&b.agent_id));
+    let behavior = BehaviorCheck {
+        max_top_share: config.health.max_top_share,
+        satiation_urgent_below: config.health.satiation_urgent_below,
+        pass: h.behavior_pass,
+        per_agent_behavior,
+        fail_agents: h
+            .behavior_fail_agents
+            .iter()
+            .map(|u| u.to_string())
+            .collect(),
     };
 
     Ok(Json(MvpHealth {
@@ -181,5 +237,6 @@ pub async fn get_health(
         stability,
         survival,
         emergence: emergence_check,
+        behavior,
     }))
 }
