@@ -60,8 +60,8 @@ wait
 python3 - "$ROUND_DIR" "${AGENTS[@]}" <<'PYEOF'
 import json, os, sys
 base, agents = sys.argv[1], sys.argv[2:]
-print("| Agent | 角色 | Hunger | HP | Sanity | 状态 | 位置 | Tick | 容器 |")
-print("| ----- | ---- | ------ | -- | ------ | ---- | ---- | ---- | ---- |")
+print("| Agent | 容器 | 角色 | Hunger | HP | Sanity | 状态 | 位置 | Tick | 容器状态 |")
+print("| ----- | ---- | ---- | ------ | -- | ------ | ---- | ---- | ---- | -------- |")
 for entry in agents:
     svc, c = entry.split(":", 1)
     name = hunger = hp = sanity = loc = tick = "-"

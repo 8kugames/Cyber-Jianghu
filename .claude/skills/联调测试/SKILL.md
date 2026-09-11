@@ -1,3 +1,8 @@
+---
+name: integration-test
+description: "联调测试执行与分析：通过 .test-agents/ 工具链一键部署注册（restart.sh）、24h 监控采集与健康快照（monitor-24h.sh/check-round.sh），LLM 负责读摘要、异常处置、死亡/恶性 Bug 判定与 Phase 4 结构化报告。Use when: 用户说'联调测试'、'跑测试'、'开始测试'、'生成测试报告'、或输入 /联调测试。"
+---
+
 # 联调测试 SKILL v2 — 工具化执行 + LLM 分析
 
 ## 定位分工（先读）
@@ -17,10 +22,12 @@
 | `.test-agents/monitor-tools/monitor-24h.sh` | 24h 数据底座（10min/轮，写入 `.test-agents/logs/dev24h-*/`） | `nohup bash .test-agents/monitor-tools/monitor-24h.sh > .test-agents/logs/monitor-nohup.log 2>&1 &` |
 | `.test-agents/monitor-tools/check-round.sh` | 单轮健康快照（抽查用，只观测）                               | `.test-agents/monitor-tools/check-round.sh 10`                                                      |
 
+参数语义：`check-round.sh` 的参数 = 日志回看窗口分钟数（默认 10）；`monitor-24h.sh` 可用 `MON_INTERVAL`（默认 600s）与 `MON_DURATION`（默认 86400s）覆盖采集节奏，调试期可临时缩短间隔。
+
 ### restart.sh 语义
 
 - `--build`：离线构建（本地基镜像通道，自动自举缺失的基镜像；无需外网；全量编译约 15-25 分钟）
-- `--register`：server 端归隐旧角色（幂等）→ LLM 生成新角色（5 次重试）→ 注册 → 查询验证 → 汇总表
+- `--register`：server 端归隐旧角色（幂等）→ LLM 生成新角色（最多 5 次尝试）→ 注册 → 查询验证 → 汇总表
 - `--no-register`：仅重启（保留现有角色）
 - 定向模式：`restart.sh --register agent-3` 只处理单个 agent
 - 退出码：0 = 全部成功；1 = 有失败（读汇总表定位）
@@ -47,7 +54,7 @@ nohup bash .test-agents/monitor-tools/monitor-24h.sh > .test-agents/logs/monitor
 .test-agents/monitor-tools/check-round.sh 10
 ```
 
-读健康表：Hunger 持续下降属正常（生存压力）；重点看 status 非 alive、Sanity 骤降、错误日志新增模式。
+读健康表（列序：Agent/容器/角色/Hunger/HP/Sanity/状态/位置/Tick/容器状态）：Hunger 持续下降属正常（生存压力）；重点看「状态」列非 alive、Sanity 骤降、错误日志新增模式。
 
 ### 停止监控
 
@@ -60,7 +67,7 @@ pkill -f monitor-24h.sh
 ### 1. token mismatch / 401 瞬时拒绝
 
 - **根源**：server 在 device verify/WS 重连时轮换 token；agent 内存值与 device.yaml 文件值不一致
-- **规则**：一切调用 token 源 = `GET localhost:<port>/api/v1/setup/status` 的 `auth_token`（内存权威值）。device.yaml 文件 token 禁止用作调用凭证（已从脚本全部移除）
+- **规则**：token 以脚本内建通道为准：主通道 = `GET localhost:<port>/api/v1/setup/status` 的 `auth_token`（内存权威值，调用点现读）；check-round.sh 在仓库根存在 `.agent-static-token` 时优先用之；server 端操作（归隐）经 `POST /api/v1/device/verify` 现取权威值。人工 curl 同样从 setup/status 或静态 token（`.agent-static-token` / `.env` 的 `CYBER_JIANGHU_AGENT_TOKEN`）取值。device.yaml 文件 token 会因 server 端轮换而滞后，禁止用作调用凭证（已从脚本全部移除）
 - **注意**：agent 本地 `has_character=false` 但 server 仍有活跃角色时，agent 侧 rebirth 会自拒（"无法读取角色状态"）——此时用 server 端 retire（restart.sh 已内置）
 
 ### 2. 注册返回 500 空体「服务器拒绝」
@@ -91,12 +98,16 @@ pkill -f monitor-24h.sh
 
 ### 5. 死亡处理（Phase 3.4）
 
-- 检测：check-round.sh 表格 status 非 alive，或 monitor 轮日志死亡事件
-- 处置：记录（agent/tick/hunger/HP/死亡前行为）→ agent 配置 auto_rebirth 时等待自动重生；否则 rebirth → `restart.sh --register agent-N`（定向注册）→ 记入死亡事件表
+- 检测：check-round.sh 健康表「状态」列非 alive，或 monitor 轮日志 DEATH 事件
+- 处置：先记录（agent/tick/hunger/HP/死亡前行为）→ 按 agent 的 auto_rebirth 配置分流：
+  - 配置了 auto_rebirth：等待自动重生，超时未重生再走定向注册
+  - 未配置：定向注册 `restart.sh --register agent-N`（server 端归隐 + 新建，工具链唯一路径）
+  - agent 侧 rebirth（POST /api/v1/character/rebirth）仅在「本地有角色且 server 无活跃角色」时可用（见 §1），与定向注册互斥，不可都做
+  - 最后统一记入死亡事件表
 
 ### 6. 恶性 Bug 判定（Phase 3.5）
 
-满足任一 → `pkill -f monitor-24h.sh; .test-agents/restart.sh`（停止监控与容器）→ 记录复现步骤 → 报告用户：
+满足任一 → `pkill -f monitor-24h.sh; .test-agents/restart.sh --no-register`（停监控 + 重启容器，保留现有角色；restart.sh 无停止模式，需完全停容器用 `docker compose -f .test-agents/docker-compose.yml stop`）→ 记录复现步骤 → 报告用户：
 
 - 关键流程无法推进（注册链路死锁 / action 死循环）
 - 数据损坏不可恢复
@@ -135,7 +146,9 @@ pkill -f monitor-24h.sh
 4. §9.4 Token 消耗：per agent/model 增量表（注意 token_cost_count.tmp 为累计值，需差分）
 5. §9.5 异常与缺陷：按 agent/server/config 分层，附日志证据
 6. §9.6 行为分布熵：actions.csv 时间序列 → 每 agent 决策分布熵曲线，
-   标记 r<0.3 坍缩疑似窗口，并与生存状态/认知失败率交叉判读（见异常手册 §7）
+   标记 r<0.3 坍缩疑似窗口，并与生存状态/认知失败率交叉判读（见异常手册 §7）。
+   注意格式差异：monitor 版 csv 含时间戳列（ts,svc,action,count），check-round 版为
+   svc,action,count 无时间戳（时间戳取自轮次目录名）
 7. §9.7 稳定性结论：认知成功率、429 频次、冷却自愈触发次数
 8. §9.8 改进建议
 
