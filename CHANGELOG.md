@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.1.309] - 2026-09-11
+
 ### Refactoring
 
 - **时间换算真源收敛完结 + 全局措辞清理**（server）：`try_game_day` 补 `ticks_per_hour` 非法校验（fail-fast 契约闭合）；新增 `TimeRegistry::game_datetime`（年月日展开唯一真源，日历模型 = time.yaml），收编最后两处内联换算——chronicle generator `format_tick_range_chinese` 与 dashboard stats（stats 原自建 30×12 日历且缺 rspt 因子，按 shipped rspt=120 显示比真源快 120 倍，本修为与 WorldState 同构）；broadcaster `compute_game_time` 改为真源委托；`real_seconds_per_game_day` 随调用方归零删除；860 行 `decay.rs` 拆分为 `decay/{mod,death,age}.rs`（衰减引擎/死亡通知/年龄换算，re-export 保持 `tick::decay::*` 路径不变）；全仓清除 Reward 模块旧标签措辞（reward.yaml/reward 模块/summary 等 7 处，统一为「生存 Reward」）；修正 skill_mutator 指向已删 broadcaster.rs 的注释路径。（终审建议项 1-7 落地）
