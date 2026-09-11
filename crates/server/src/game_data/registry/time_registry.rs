@@ -174,6 +174,14 @@ impl TimeRegistry {
             );
             return None;
         }
+        let ticks_per_hour = config.ticks_per_hour as i64;
+        if ticks_per_hour <= 0 {
+            tracing::warn!(
+                "time.yaml ticks_per_hour={} 非法，游戏日无法计算",
+                ticks_per_hour
+            );
+            return None;
+        }
         // rspt 非法同样 fail-fast：退化解会让 chronicle 周期分区以错误游戏日入库
         // （牵动 chronicle period 唯一性），不接受静默退化值。
         let rspt_valid = registry_or_error()
@@ -193,6 +201,43 @@ impl TimeRegistry {
             return None;
         }
         Some(Self::game_hours(current_tick) / hours_per_day + 1)
+    }
+
+    /// tick（秒级时间戳）→ 游戏年月日时（与 WorldState 广播同构的日历展开）
+    ///
+    /// 年月日展开唯一真源（broadcaster WorldState 与 dashboard stats 共用），
+    /// 日历模型 = time.yaml（days_per_season/seasons_per_year），禁止各处自建 30×12 等独立模型。
+    /// 配置缺失/非法时返回 None，调用方回落 (1, 1, 1, 0)。
+    pub fn game_datetime(current_tick: i64) -> Option<(i32, i32, i32, i32)> {
+        let config = Self::get_config()?;
+        let hours_per_day = config.hours_per_day as i64;
+        let days_per_season = config.days_per_season as i64;
+        let seasons_per_year = config.seasons_per_year as i64;
+        if hours_per_day <= 0 || days_per_season <= 0 || seasons_per_year <= 0 {
+            tracing::warn!(
+                "time.yaml 参数非法（hours_per_day={} days_per_season={} seasons_per_year={}），年月日无法展开",
+                hours_per_day,
+                days_per_season,
+                seasons_per_year
+            );
+            return None;
+        }
+        let days_per_year = seasons_per_year * days_per_season;
+
+        // 换算真源：TimeRegistry::game_hours（禁止内联复制公式）
+        let game_hours = Self::game_hours(current_tick);
+
+        let hours_per_year = days_per_year * hours_per_day;
+        let hours_per_month = days_per_season * hours_per_day;
+
+        let year = 1 + (game_hours / hours_per_year) as i32;
+        let rem_after_year = game_hours % hours_per_year;
+        let month = 1 + (rem_after_year / hours_per_month) as i32;
+        let rem_after_month = rem_after_year % hours_per_month;
+        let day = 1 + (rem_after_month / hours_per_day) as i32;
+        let hour = (rem_after_month % hours_per_day) as i32;
+
+        Some((year, month, day, hour))
     }
 
     /// 根据 tick 获取当前天气显示文本

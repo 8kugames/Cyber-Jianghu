@@ -1,5 +1,5 @@
 // ============================================================================
-// 生存 Reward 数据结构（天道账本）
+// 生存 Reward 数据结构
 // ============================================================================
 //
 // 哲学锚点：天道无为。reward 纯锚定生存因果。
@@ -21,7 +21,7 @@ pub struct DailyReward {
     pub survival: f64,
     /// 生理分量：satiation/hydration 当日末值映射
     pub physiological: f64,
-    /// 天魂审查分量（P1 阶段 server 读不到 agent 端，暂为 None）
+    /// 天魂审查分量（server 读不到 agent 端，暂为 None）
     pub tianhun_judgment: Option<f64>,
     /// 合计
     pub total: f64,

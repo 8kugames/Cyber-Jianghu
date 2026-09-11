@@ -66,6 +66,6 @@ pub struct GameData {
     pub rules_json: serde_json::Value,
 
     /// 生存 Reward 配置 (reward.yaml)
-    /// 天道账本：reward 纯锚定生存因果，配置驱动，零硬编码
+    /// reward 纯锚定生存因果，配置驱动，零硬编码
     pub reward: RewardConfig,
 }

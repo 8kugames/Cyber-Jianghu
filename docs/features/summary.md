@@ -72,7 +72,7 @@
 > 哲学锚点：天道无为——reward 纯锚定生存因果，声望/关系/心境是众生主观认知不进 reward。
 > 日期：2026-06-28
 
-### Reward 天道账本（server 侧）
+### Reward（server 侧）
 
 - **每日结算**（每游戏日=12tick）：生存分量 + 生理分量（satiation/hydration）+ 天魂审查分量（approved/rejected）
 - **一生结算**（死亡时）：寿数 + 统一死亡 penalty（不分死因）；不完整日按完整 `compute_daily_reward` 补算（生存按比例+生理死亡真值+天魂真值）

@@ -44,7 +44,7 @@
 //   - 注册表：game_data/registry/skill_registry.rs → SkillRegistry
 //   - 类型定义：game_data/types/skills.rs → SkillDefinition
 //   - 加载器：game_data/loaders/skills_loader.rs → load_skills()
-//   - 下发映射：tick/broadcaster.rs → state.skills → SkillInfo
+//   - 下发映射：tick/broadcaster/world_state.rs → state.skills → SkillInfo
 //   - 经验阈值：tick/processor/processor.rs → check_skill_acquisition()
 //   - 推送逻辑：tick/realtime.rs → 新增技能时 ConfigUpdate 推送
 //   - Agent 消费：agent/soul/actor/engine_prompts.rs → build_skill_instructions()

@@ -6,7 +6,8 @@
 
 ### Refactoring
 
-- **地点/时间换算单源化 + 广播器拆分**（server）：新增 `TimeRegistry::game_hours`/`try_game_day` 作为全仓唯一 tick→游戏时/日换算真源，收编 chronicle `calculate_game_days`、broadcaster `compute_game_time`、decay `compute_age_years` 的四处内联公式拷贝（补等价性钉死测试）；修复 `from_config` 丢弃节点级 `implicit_travel_cost` 的既有 bug（shipped 配置无此字段，零行为变更）；`resolved_description` 接线 dashboard `GET /api/dashboard/locations`（additive：`game_day` + `resolved_descriptions`）；947 行基线 `broadcaster.rs` 拆分为 `broadcaster/{mod,world_state,time,recipes}.rs`（对外路径不变），`cache.rs` 同步拆出 `location_registry.rs`（两文件均回落 800 行上限内）。
+- **时间换算真源收敛完结 + 全局措辞清理**（server）：`try_game_day` 补 `ticks_per_hour` 非法校验（fail-fast 契约闭合）；新增 `TimeRegistry::game_datetime`（年月日展开唯一真源，日历模型 = time.yaml），收编最后两处内联换算——chronicle generator `format_tick_range_chinese` 与 dashboard stats（stats 原自建 30×12 日历且缺 rspt 因子，按 shipped rspt=120 显示比真源快 120 倍，本修为与 WorldState 同构）；broadcaster `compute_game_time` 改为真源委托；`real_seconds_per_game_day` 随调用方归零删除；860 行 `decay.rs` 拆分为 `decay/{mod,death,age}.rs`（衰减引擎/死亡通知/年龄换算，re-export 保持 `tick::decay::*` 路径不变）；全仓清除 Reward 模块旧标签措辞（reward.yaml/reward 模块/summary 等 7 处，统一为「生存 Reward」）；修正 skill_mutator 指向已删 broadcaster.rs 的注释路径。（终审建议项 1-7 落地）
+- **地点/时间换算单源化 + 广播器拆分**（server）：新增 `TimeRegistry::game_hours`/`try_game_day` 作为全仓唯一 tick→游戏时/日换算真源，收编业务侧 4 处内联公式拷贝（chronicle `calculate_game_days`/`collect_agents` 周期日、broadcaster `compute_game_time`、decay `compute_age_years`，另 time_registry 内部 3 处归一；补等价性钉死测试）；修复 `from_config` 丢弃节点级 `implicit_travel_cost` 的既有 bug（shipped 配置无此字段，零行为变更）；`resolved_description` 接线 dashboard `GET /api/dashboard/locations`（additive：`game_day` + `resolved_descriptions`）；947 行基线 `broadcaster.rs` 拆分为 `broadcaster/{mod,world_state,time,recipes}.rs`（对外路径不变），`cache.rs` 同步拆出 `location_registry.rs`（两文件均回落 800 行上限内）。
 
 ### Features
 
@@ -80,7 +81,7 @@
 
 ### Tooling
 
-- **验收 run 观测快照脚本**（`scripts/acceptance_snapshot.sh`）：定时抓取 MVP 健康度看板与涌现检测端点落盘 JSON 快照，只读观测不干预；配套 `docs/reports/acceptance-run-config-2026-09.md` 验收配置锁定与 run 纪律（涌现基线回溯报告按项目约定留盘 docs/reports/，不进 git）
+- **验收 run 观测快照脚本**（`scripts/acceptance_snapshot.sh`）：定时抓取 健康度看板与涌现检测端点落盘 JSON 快照，只读观测不干预；配套 `docs/reports/acceptance-run-config-2026-09.md` 验收配置锁定与 run 纪律（涌现基线回溯报告按项目约定留盘 docs/reports/，不进 git）
 
 ## [0.1.291] - 2026-08-06
 
@@ -108,7 +109,7 @@
   - 训练 Trace 结构化落盘（agent）：人魂/天魂 LLM 调用 JSONL（含 agent_id+tick_id+prompt/response 全文+soul_stage+persona+wall_clock），persona 字段替代 system_prompt 全文（~200B vs ~15KB），日志滚动覆盖（`max_size_mb` 配置，LRU 删旧）
   - **SFT 导出管线**（`src/training_export/`）：config 加载（复刻 action_evolution 模式 + env 覆盖）+ db 查询（`fetch_soul_cycle_metadata`，DISTINCT ON + UNNEST + SET LOCAL）+ runner（`run_once` 五步数据流）+ scheduler 后台 task（双层 timeout + sweep + shutdown）+ sft_transform 纯函数（对齐 Python `--no-db-filter`）+ checkpoint trace_id 集合与日期分桶 TTL；6 个 HTTP 端点（`/api/v1/training/export|exports|exports/{run_id}|exports/{run_id}/download|checkpoint`，写/读权限按 method 隔离）；cancel-aware 原子写 + 全量 env 覆盖 + per-bucket 容量 + 黄金对照测试基线
 - **关系图谱（C1-C4 数据可达性）**：`agent_relationships` 表（迁移 022）+ Strategy B 全量快照同步（Agent 每游戏日上报，天然幂等）+ 关系/世界快照/地点/对话/死亡 dashboard 端点 + C2 鉴权档（`require_client_read_token`，`CLIENT_READ_TOKEN` 与 admin read 分离）
-- **涌现检测接入 server**：causal_emergence / co_occurrence 检测 + MVP 健康度看板 + Chronicle 叙事打磨；Validator 增强（物品/人员 ID 存在性校验，三端打通）
+- **涌现检测接入 server**：causal_emergence / co_occurrence 检测 + 健康度看板 + Chronicle 叙事打磨；Validator 增强（物品/人员 ID 存在性校验，三端打通）
 - **三魂元数据随 intent 提交**：消除独立 SoulCycleReport 的丢失风险（与 intent 同消息到达），执行结果回填
 
 ### Refactors（数据诚实化 / protocol 为唯一真相源）
