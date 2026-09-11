@@ -62,6 +62,9 @@ sync_dirty_to_server() {
 }
 
 BIN="$PROJECT_ROOT/target/$TARGET/release/cyber-jianghu-server"
+echo "[同步] config/ → 服务端（防二进制新/配置旧错配）"
+rsync -az --delete "$PROJECT_ROOT/crates/server/config/" "$SERVER:$REMOTE_PROJECT/crates/server/config/"     && echo "[ sync ] config/ 全量同步"
+
 echo "[构建] zigbuild $TARGET"
 RUSTC="$(rustup which rustc)" cargo zigbuild --release --target "$TARGET" \
     --manifest-path "$PROJECT_ROOT/Cargo.toml" -p cyber-jianghu-server
