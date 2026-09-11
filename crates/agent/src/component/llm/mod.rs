@@ -194,7 +194,7 @@ fn build_direct_client_with_max_tokens(
         .with_max_tokens(max_tokens)
         .with_enable_thinking(enable_thinking)
         .with_context_window_tokens(context_window_tokens)
-        // P1-F6 端到端：从 LlmConfig 透传 timeout，agent.yaml 改值即可生效
+        // 从 LlmConfig 透传 timeout，agent.yaml 改值即可生效
         .with_request_timeout_secs(llm_config.request_timeout_secs)
         .with_connect_timeout_secs(llm_config.connect_timeout_secs);
 
@@ -212,7 +212,7 @@ mod tests {
     use crate::config::LlmConfig;
     use std::sync::Arc;
 
-    /// 验证 P1-F6 端到端：`LlmConfig` 的 `request_timeout_secs` / `connect_timeout_secs`
+    /// 验证：`LlmConfig` 的 `request_timeout_secs` / `connect_timeout_secs`
     /// 必须从 yaml/json 一路传到 `DirectLlmClient` 的 `build_http_client`。
     /// 之前 DirectLlmClientConfig 自己有字段但 LlmConfig 缺字段 → 用户改 agent.yaml 不生效。
     #[test]
@@ -237,7 +237,7 @@ mod tests {
             narrative_window_size: 100,
             enable_streaming: true,
             enable_thinking: None,
-            request_timeout_secs: 90, // P1-F6：自定义非默认值，断言端到端传播
+            request_timeout_secs: 90, // 自定义非默认值，断言端到端传播
             connect_timeout_secs: 15,
             cache_diagnostics: crate::config::CacheDiagnosticsConfig::default(),
         };
@@ -258,16 +258,16 @@ mod tests {
         assert_eq!(
             client.config().request_timeout_secs,
             90,
-            "P1-F6 端到端：LlmConfig.request_timeout_secs 必须传到 DirectLlmClient.config"
+            "LlmConfig.request_timeout_secs 必须传到 DirectLlmClient.config"
         );
         assert_eq!(
             client.config().connect_timeout_secs,
             15,
-            "P1-F6 端到端：LlmConfig.connect_timeout_secs 必须传到 DirectLlmClient.config"
+            "LlmConfig.connect_timeout_secs 必须传到 DirectLlmClient.config"
         );
     }
 
-    /// 验证 P1-F6：`LlmConfig` 缺这两个字段时，serde 反序列化会因字段缺失失败
+    /// 验证：`LlmConfig` 缺这两个字段时，serde 反序列化会因字段缺失失败
     /// （前提：使用 `#[serde(default)]`），保证向前兼容。
     /// 这是兜底回归测试：未来如果有人不小心删掉字段，反序列化也不会静默丢配置。
     #[test]
@@ -280,11 +280,11 @@ model: test-model
         let cfg: LlmConfig = serde_yaml::from_str(yaml).expect("must parse without timeout fields");
         assert_eq!(
             cfg.request_timeout_secs, 120,
-            "P1-F6：缺省值必须回退到 DEFAULT_LLM_REQUEST_TIMEOUT_SECS=120（与 Server 对齐）"
+            "缺省值必须回退到 DEFAULT_LLM_REQUEST_TIMEOUT_SECS=120（与 Server 对齐）"
         );
         assert_eq!(
             cfg.connect_timeout_secs, 30,
-            "P1-F6：缺省值必须回退到 DEFAULT_LLM_CONNECT_TIMEOUT_SECS=30（与 Server 对齐）"
+            "缺省值必须回退到 DEFAULT_LLM_CONNECT_TIMEOUT_SECS=30（与 Server 对齐）"
         );
     }
 }

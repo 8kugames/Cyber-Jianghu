@@ -412,7 +412,7 @@ impl super::Agent {
                         };
 
                         if let Some(new_id) = new_agent_id {
-                            // P2 fix: 更新 HttpApiState.agent_id
+                            // 更新 HttpApiState.agent_id
                             if let Some(ref api_state) = self.http_api_state {
                                 *api_state.agent_id.write().await = new_id;
                             }
@@ -870,7 +870,7 @@ impl super::Agent {
                                         results[0].tick_id, success_count, total
                                     );
 
-                                    // Phase 2: 执行结果回填 SoulCycleRecord
+                                    // 执行结果回填 SoulCycleRecord
                                     if let Some(recorder) = self.soul_recorder().await {
                                         use std::collections::HashMap;
                                         let tick_id = results[0].tick_id;

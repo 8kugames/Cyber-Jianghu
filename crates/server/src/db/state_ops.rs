@@ -74,7 +74,7 @@ pub async fn get_all_alive_agents_latest_states(pool: &PgPool) -> Result<Vec<Age
     // 不能在 DISTINCT ON 之前加 WHERE is_alive = true，
     // 否则会忽略最新的死亡记录、找到旧的存活记录，导致已死亡 agent 被加载
     //
-    // P2 fix (#49): 同时过滤 agents.status='active'，避免 retired/dead 的历史 agent
+    // 同时过滤 agents.status='active'，避免 retired/dead 的历史 agent
     // 被加载进 DashMap（其 agent_states 最新记录可能仍 is_alive=true，因为
     // 死亡/退役时不写新的 agent_states 记录）。
     let states = sqlx::query_as::<Postgres, AgentState>(

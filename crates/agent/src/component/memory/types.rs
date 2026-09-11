@@ -1,7 +1,6 @@
 // ============================================================================
 // 记忆系统公共类型
 // ============================================================================
-// 设计文档: (项目根)/docs/superpowers/specs/2025-03-15-semantic-memory-and-forgetting-design.md
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

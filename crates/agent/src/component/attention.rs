@@ -79,7 +79,7 @@ impl AttentionController {
         }
     }
 
-    /// Phase 1: 规则过滤 (零 token)
+    /// 规则过滤 (零 token)
     /// 返回 (auto_focus, candidates)
     fn phase1_rule_filter(&self, changes: &[StateChange]) -> (Vec<StateChange>, Vec<StateChange>) {
         let mut auto_focus = Vec::new();

@@ -19,8 +19,8 @@ const BYTES_PER_GIB: u64 = 1024 * 1024 * 1024;
 /// 从 DB 查每个 (agent_id, tick_id) 的 soul_cycle_metadata (取最大 pipe_seq).
 ///
 /// SQL 对齐 scripts/build_sft_data.py:84-92 (DISTINCT ON + pipe_seq DESC).
-/// IN 子句用 UNNEST($1::uuid[], $2::bigint[]) 避免 sqlx 复合类型映射 (spec §5.3.1).
-/// statement_timeout 用 SET LOCAL 在短事务内 (防 GUC 泄漏, spec §5.3.1).
+/// IN 子句用 UNNEST($1::uuid[], $2::bigint[]) 避免 sqlx 复合类型映射.
+/// statement_timeout 用 SET LOCAL 在短事务内 (防 GUC 泄漏).
 pub async fn fetch_soul_cycle_metadata(
     pool: &PgPool,
     keys: &[(Uuid, i64)],
@@ -97,7 +97,7 @@ pub struct RunResult {
     pub samples: Vec<SftSample>,
 }
 
-/// 执行一次完整 run (spec §4.1 五步).
+/// 执行一次完整 run (五步).
 pub async fn run_once(
     config: &TrainingExportConfig,
     pool: &PgPool,
@@ -679,8 +679,8 @@ mod tests {
         );
     }
 
-    // ---- lookup_attempt_match fixture 测试 (spec §11 验收 #1) ----
-    // spec §4.4: attempt 精确匹配是有意偏离 Python 的核心逻辑, 必须独立 fixture 覆盖.
+    // ---- lookup_attempt_match fixture 测试 ----
+    // attempt 精确匹配是有意偏离 Python 的核心逻辑, 必须独立 fixture 覆盖.
 
     fn make_trace(agent: Uuid, tick: i64, attempt: i32) -> TraceEntry {
         TraceEntry {

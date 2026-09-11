@@ -12,7 +12,7 @@
 
 pub mod episodic;
 pub mod working;
-// 语义记忆 (Phase 2)
+// 语义记忆
 pub mod semantic;
 
 // 重导出

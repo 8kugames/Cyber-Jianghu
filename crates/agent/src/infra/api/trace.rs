@@ -7,7 +7,6 @@
 //
 // 当前覆盖：人魂 + 天魂（三要素中语义+全文可得，token 标 None）。
 // 地魂不做：run_tool_loop 无 agent_id + 共享路径无法区分 soul_stage（架构限制）。
-// 详见 docs/plans/2026-06-26-training-trace-structured-logging.md。
 // ============================================================================
 
 use anyhow::{Context, Result};
@@ -215,7 +214,7 @@ pub fn set_upload_sender(sender: tokio::sync::mpsc::Sender<cyber_jianghu_protoco
 /// 调用方记录 trace（同步 Vec push，非阻塞——O(1)，无 I/O）。
 ///
 /// fire-and-forget：失败只丢 trace，不 panic，不影响 agent tick。
-/// 直接记录原文——角色行为由 LLM 驱动；但玩家手写的角色设定/托梦文本会随 prompt 原文保留（见 docs/DATA_USAGE.md）。
+/// 直接记录原文——角色行为由 LLM 驱动；但玩家手写的角色设定/托梦文本会随 prompt 原文保留。
 pub fn record(trace: LlmTrace) {
     // 配置未加载或未启用 → 空操作
     let cfg = match TRACE_CONFIG.get().and_then(|c| c.as_ref()) {

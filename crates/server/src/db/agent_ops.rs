@@ -18,7 +18,7 @@ use crate::models::{Agent, AgentState};
 use super::common::generate_secure_token;
 
 // ============================================================================
-// 设备连接（Phase 3）
+// 设备连接
 // ============================================================================
 
 /// 设备连接结果
@@ -263,7 +263,7 @@ pub async fn rotate_device_token(pool: &PgPool, device_id: Uuid) -> Result<Strin
         .context("轮换设备 token 失败")?;
     match row {
         Some((token,)) => {
-            info!("P1-12：设备 token 已轮换: {}", device_id);
+            info!("设备 token 已轮换: {}", device_id);
             Ok(token)
         }
         None => anyhow::bail!("轮换失败：device_id {} 不存在", device_id),
@@ -781,7 +781,7 @@ pub async fn retire_agent(
         // 归隐已成功，仅记 error，不阻断主流程。
         // 客户端下次 connect_device 时会拿到新 token（重试或重新注册可恢复）。
         tracing::error!(
-            "P1-12：retire_agent 后轮换 device token 失败: device={}, err={}",
+            "retire_agent 后轮换 device token 失败: device={}, err={}",
             device_id,
             e
         );
@@ -1209,7 +1209,7 @@ mod tests {
         );
         assert!(
             lower.contains("and device_id = $2"),
-            "P1-10 F2 修复：fetch SQL 必须 AND device_id = $2 过滤，避免跨设备转世；got:\n{REBIRTH_FETCH_OLD_AGENT_SQL}"
+            "fetch SQL 必须 AND device_id = $2 过滤，避免跨设备转世；got:\n{REBIRTH_FETCH_OLD_AGENT_SQL}"
         );
         assert!(
             lower.contains("and status = 'dead'"),
@@ -1223,7 +1223,7 @@ mod tests {
         let lower = REBIRTH_MARK_RETIRED_SQL.to_lowercase();
         assert!(
             lower.contains("and retired_at is null"),
-            "P1-10 F3 修复：mark retired SQL 必须 AND retired_at IS NULL 守卫，阻断 agent retry 重复重生；got:\n{REBIRTH_MARK_RETIRED_SQL}"
+            "mark retired SQL 必须 AND retired_at IS NULL 守卫，阻断 agent retry 重复重生；got:\n{REBIRTH_MARK_RETIRED_SQL}"
         );
     }
 
@@ -1239,23 +1239,23 @@ mod tests {
         );
         assert!(
             lower.contains("set auth_token = $2"),
-            "P1-12：必须 bind 新 token 到 $2，got:\n{ROTATE_DEVICE_TOKEN_SQL}"
+            "必须 bind 新 token 到 $2，got:\n{ROTATE_DEVICE_TOKEN_SQL}"
         );
         assert!(
             lower.contains("token_created_at = now"),
-            "P1-12：必须重置 token_created_at = NOW()，got:\n{ROTATE_DEVICE_TOKEN_SQL}"
+            "必须重置 token_created_at = NOW()，got:\n{ROTATE_DEVICE_TOKEN_SQL}"
         );
         assert!(
             lower.contains("token_rotated_at = now"),
-            "P1-12：必须写 token_rotated_at = NOW()，got:\n{ROTATE_DEVICE_TOKEN_SQL}"
+            "必须写 token_rotated_at = NOW()，got:\n{ROTATE_DEVICE_TOKEN_SQL}"
         );
         assert!(
             lower.contains("returning auth_token"),
-            "P1-12：必须 RETURNING auth_token 让调用方拿到新值，got:\n{ROTATE_DEVICE_TOKEN_SQL}"
+            "必须 RETURNING auth_token 让调用方拿到新值，got:\n{ROTATE_DEVICE_TOKEN_SQL}"
         );
         assert!(
             lower.contains("where device_id = $1"),
-            "P1-12：必须按 device_id 过滤，got:\n{ROTATE_DEVICE_TOKEN_SQL}"
+            "必须按 device_id 过滤，got:\n{ROTATE_DEVICE_TOKEN_SQL}"
         );
     }
 }

@@ -263,7 +263,7 @@ mod tests {
 
     #[test]
     fn witnessed_death_of_other_is_not_self_death() {
-        // P0 回归锁定：目击他人死亡不得触发自身死亡报告（否则目击者永久假死）
+        // 回归锁定：目击他人死亡不得触发自身死亡报告（否则目击者永久假死）
         let self_id = Uuid::new_v4();
         let other_id = Uuid::new_v4();
         let log = vec![

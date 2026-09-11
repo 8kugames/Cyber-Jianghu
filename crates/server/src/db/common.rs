@@ -326,13 +326,8 @@ mod tests {
         let migration = manifest_dir
             .join("migrations")
             .join("019_agent_daily_summaries_fk.sql");
-        let sql = std::fs::read_to_string(&migration).unwrap_or_else(|e| {
-            panic!(
-                "P1-17 修复缺失：未找到迁移文件 {}（{}）",
-                migration.display(),
-                e
-            )
-        });
+        let sql = std::fs::read_to_string(&migration)
+            .unwrap_or_else(|e| panic!("未找到迁移文件 {}（{}）", migration.display(), e));
 
         let lower = sql.to_lowercase();
         assert!(
@@ -358,13 +353,8 @@ mod tests {
         let migration = manifest_dir
             .join("migrations")
             .join("020_device_token_rotation.sql");
-        let sql = std::fs::read_to_string(&migration).unwrap_or_else(|e| {
-            panic!(
-                "P1-12 修复缺失：未找到迁移文件 {}（{}）",
-                migration.display(),
-                e
-            )
-        });
+        let sql = std::fs::read_to_string(&migration)
+            .unwrap_or_else(|e| panic!("未找到迁移文件 {}（{}）", migration.display(), e));
 
         let lower = sql.to_lowercase();
         assert!(

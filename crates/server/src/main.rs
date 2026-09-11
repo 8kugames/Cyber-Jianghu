@@ -423,10 +423,10 @@ async fn init_governance(
 #[tokio::main]
 #[allow(clippy::await_holding_lock)]
 async fn main() -> Result<()> {
-    // 1. 先加载 .env，确保 RUST_LOG 等环境变量对日志 subscriber 生效（P1-F2 修复）
+    // 1. 先加载 .env，确保 RUST_LOG 等环境变量对日志 subscriber 生效
     let _ = dotenv::dotenv();
 
-    // 2. 初始化日志（P1-F2 修复：EnvFilter::try_from_default_env 消费 RUST_LOG，替代硬编码 Level::INFO）
+    // 2. 初始化日志（EnvFilter::try_from_default_env 消费 RUST_LOG，替代硬编码 Level::INFO）
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     // JSON 切换：CYBER_JIANGHU_LOG_JSON=1 → .json()；默认 .compact() 输出人可读
     let log_json = std::env::var("CYBER_JIANGHU_LOG_JSON").ok().as_deref() == Some("1");
@@ -716,7 +716,7 @@ async fn main() -> Result<()> {
             "/api/v1/device/register",
             post(handlers::device::device_register),
         )
-        // 角色注册（Phase 4）- 创建游戏角色
+        // 角色注册 - 创建游戏角色
         .route(
             "/api/v1/agent/register",
             post(handlers::agent::agent_register),
@@ -1454,14 +1454,14 @@ mod tests {
         let next_400 = tail.get(..400).unwrap_or(tail);
         assert!(
             next_400.contains(".with_graceful_shutdown("),
-            "P1-9 修复缺失：axum::serve 必须链式调用 .with_graceful_shutdown(...)，\n\
+            "axum::serve 必须链式调用 .with_graceful_shutdown(...)，\n\
              否则 SIGTERM/SIGINT 触发时 in-flight HTTP 请求会被截断，\n\
              DB 写入半完成、Saga 状态不一致。\n\
              当前 axum::serve 后续 400 字符片段：\n{next_400}"
         );
     }
 
-    /// 验证 P1-F2：tracing subscriber 必须消费 `RUST_LOG` 环境变量，
+    /// 验证：tracing subscriber 必须消费 `RUST_LOG` 环境变量，
     /// 而不是硬编码 `Level::INFO`。同时 `.env` 加载必须在 subscriber init 之前，
     /// 否则 `.env` 里的 `RUST_LOG=debug` 不会生效。
     #[test]
@@ -1477,13 +1477,13 @@ mod tests {
         // 1. 必须使用 EnvFilter::try_from_default_env
         assert!(
             prod.contains("EnvFilter::try_from_default_env"),
-            "P1-F2 修复缺失：tracing subscriber 必须消费 RUST_LOG；\
+            "tracing subscriber 必须消费 RUST_LOG；\
              用 `EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(\"info\"))` 替代硬编码 `Level::INFO`"
         );
         // 2. 不应在生产路径上继续用 FmtSubscriber::builder().with_max_level(Level::INFO) 硬编码
         assert!(
             !prod.contains(".with_max_level(Level::INFO)"),
-            "P1-F2 修复：禁止继续用 `.with_max_level(Level::INFO)` 硬编码日志级别"
+            "禁止继续用 `.with_max_level(Level::INFO)` 硬编码日志级别"
         );
 
         // 3. dotenv 必须在 tracing subscriber 初始化之前
@@ -1498,13 +1498,13 @@ mod tests {
             .expect("must initialize tracing subscriber");
         assert!(
             dotenv_idx < init_idx,
-            "P1-F2 修复：dotenv::dotenv() 必须在 tracing subscriber 初始化之前调用，\
+            "dotenv::dotenv() 必须在 tracing subscriber 初始化之前调用，\
              否则 .env 里的 RUST_LOG 不会生效。\
              dotenv_idx={dotenv_idx}, init_idx={init_idx}"
         );
     }
 
-    /// 验证 P1-F2：workspace Cargo.toml 的 tracing-subscriber 必须启用 `json` feature，
+    /// 验证：workspace Cargo.toml 的 tracing-subscriber 必须启用 `json` feature，
     /// 否则代码里写 `.json()` 编译失败。
     #[test]
     fn test_p1_f2_workspace_tracing_subscriber_enables_json_feature() {
@@ -1523,7 +1523,7 @@ mod tests {
             .expect("workspace must declare tracing-subscriber");
         assert!(
             ts_line.contains("\"json\""),
-            "P1-F2 修复：workspace Cargo.toml 的 tracing-subscriber 必须启用 \"json\" feature（用于 JSON 化日志），当前行：\n{ts_line}"
+            "workspace Cargo.toml 的 tracing-subscriber 必须启用 \"json\" feature（用于 JSON 化日志），当前行：\n{ts_line}"
         );
     }
 

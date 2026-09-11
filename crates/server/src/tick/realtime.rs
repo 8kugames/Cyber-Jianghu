@@ -177,8 +177,8 @@ impl IntentWorker {
             return Ok(());
         }
 
-        // 2.1 P1 fix (#50): 校验 agents.status='active'
-        // DashMap 可能残留 retired/dead 的历史 agent（#49 启动加载已修，
+        // 2.1 校验 agents.status='active'
+        // DashMap 可能残留 retired/dead 的历史 agent（启动加载已修，
         // 但运行期 rebirth 后旧 agent_id 仍可能在 DashMap 中残留），
         // 此处对 DB 二次校验，拒绝非 active 的 intent。
         let agent_db_status: Option<String> =
@@ -642,7 +642,7 @@ impl IntentWorker {
             }
         }
 
-        // P0 修复（subsequent 路径）：与 process_single_intent step 11 对齐。
+        // subsequent 路径：与 process_single_intent step 11 对齐。
         // 历史 bug：action 致死（HP 归零、stamina 归零等）只在主 intent 末尾检测，
         // subsequent intent（pipe_seq > 0）中的死亡漏检，导致 status='active' 卡死、
         // auto_rebirth 永久拒绝。复用 handle_deaths 完成统一善后。

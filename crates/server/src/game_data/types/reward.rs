@@ -71,7 +71,7 @@ fn default_hydration_weight() -> f64 {
     0.25
 }
 
-/// 天魂审查分量配置（P1 阶段 server 读不到 agent 端 soul_cycle.db，judgment 暂为 None）
+/// 天魂审查分量配置（server 读不到 agent 端 soul_cycle.db，judgment 暂为 None）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TianhunConfig {
     #[serde(default = "default_approved_score")]

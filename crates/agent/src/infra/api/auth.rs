@@ -98,7 +98,7 @@ pub fn check_auth(
 
     if expected_tokens.is_empty() {
         warn!(
-            "P0-11(b) 认证拒绝：无可用 token（既无静态 token 也未注册设备），path={}（fail-closed: 503）",
+            "认证拒绝：无可用 token（既无静态 token 也未注册设备），path={}（fail-closed: 503）",
             path
         );
         return Err(StatusCode::SERVICE_UNAVAILABLE);
@@ -110,7 +110,7 @@ pub fn check_auth(
             return Ok(());
         }
         warn!(
-            "P0-11(b) 认证拒绝：token 不匹配，path={}（提供的前 4 字符：{:?}）",
+            "认证拒绝：token 不匹配，path={}（提供的前 4 字符：{:?}）",
             path,
             provided.chars().take(4).collect::<String>()
         );
@@ -134,17 +134,14 @@ pub fn check_auth(
                 if expected_tokens.contains(&provided.as_str()) {
                     return Ok(());
                 }
-                warn!(
-                    "P0-11(b) 认证拒绝（SSE query token）：token 不匹配，path={}",
-                    path
-                );
+                warn!("认证拒绝（SSE query token）：token 不匹配，path={}", path);
                 return Err(StatusCode::UNAUTHORIZED);
             }
         }
     }
 
     debug!(
-        "P0-11(b) 认证拒绝：缺少或格式错误的 Authorization header，path={}",
+        "认证拒绝：缺少或格式错误的 Authorization header，path={}",
         path
     );
     Err(StatusCode::UNAUTHORIZED)
@@ -189,7 +186,7 @@ pub async fn require_device_token(
     match auth_result {
         Ok(()) => Ok(next.run(req).await),
         Err(status) => {
-            warn!("P0-11(b) API 认证拒绝: path={}, status={}", path, status);
+            warn!("API 认证拒绝: path={}, status={}", path, status);
             Err(status)
         }
     }

@@ -76,7 +76,7 @@ pub(crate) fn normalize_llm_content(content: &str) -> Cow<'_, str> {
         return Cow::Borrowed(content);
     }
 
-    // Phase 1: DeepSeek DSML 标签剥离
+    // DeepSeek DSML 标签剥离
     let after_dsml = strip_dsml_tags(content);
     let content = match &after_dsml {
         Cow::Owned(s) => s.as_str(),

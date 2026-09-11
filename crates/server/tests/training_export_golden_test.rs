@@ -1,4 +1,4 @@
-//! 黄金对照测试 (spec §4.4 / §11 验收 #1)
+//! 黄金对照测试
 //!
 //! 对照基准: crates/server/tests/sft_golden/expected_samples.jsonl
 //! 该基准由 generate_golden.py 产出, 逐字复刻 scripts/build_sft_data.py:158-197
@@ -66,7 +66,7 @@ fn test_rust_transform_matches_python_golden() {
 
 #[test]
 fn test_golden_fixtures_cover_all_four_boundaries() {
-    // 确认 fixture 真的覆盖了 spec §4.3 的四种边界, 避免 fixture 退化
+    // 确认 fixture 真的覆盖了四种边界, 避免 fixture 退化
     let inputs = parse_input_traces();
     assert!(
         inputs.len() >= 5,

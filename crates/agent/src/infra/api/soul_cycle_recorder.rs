@@ -1144,7 +1144,7 @@ mod tests {
     }
 
     // ========================================================================
-    // P0-AUDIT 闭环：7 个 query 方法必须返回 Result，DB 错时 caller 显式处理
+    // 闭环：7 个 query 方法必须返回 Result，DB 错时 caller 显式处理
     // 模式同（outcome.rs）：init → DROP TABLE → assert Err
     // 之前静默返回 None / 空 Vec / (空, 0) 会让 caller 误以为"无数据"
     // ========================================================================
@@ -1164,7 +1164,7 @@ mod tests {
         let result = recorder.get_last_recorded_tick(100).await;
         assert!(
             result.is_err(),
-            "P0-AUDIT：get_last_recorded_tick 在 DB 损坏时必须返回 Err，caller 显式处理"
+            "get_last_recorded_tick 在 DB 损坏时必须返回 Err，caller 显式处理"
         );
     }
 
@@ -1175,7 +1175,7 @@ mod tests {
         let result = recorder.get_last_renhun_narrative(100).await;
         assert!(
             result.is_err(),
-            "P0-AUDIT：get_last_renhun_narrative 在 DB 损坏时必须返回 Err"
+            "get_last_renhun_narrative 在 DB 损坏时必须返回 Err"
         );
     }
 
@@ -1186,7 +1186,7 @@ mod tests {
         let result = recorder.get_by_tick(1).await;
         assert!(
             result.is_err(),
-            "P0-AUDIT：get_by_tick 在 DB 损坏时必须返回 Err，caller 显式处理"
+            "get_by_tick 在 DB 损坏时必须返回 Err，caller 显式处理"
         );
     }
 
@@ -1197,7 +1197,7 @@ mod tests {
         let result = recorder.get_tick_ids_page(1, 10).await;
         assert!(
             result.is_err(),
-            "P0-AUDIT：get_tick_ids_page 在 DB 损坏时必须返回 Err"
+            "get_tick_ids_page 在 DB 损坏时必须返回 Err"
         );
     }
 
@@ -1206,10 +1206,7 @@ mod tests {
         let (dir, recorder) = make_recorder();
         break_db(&dir.path().join("soul_cycle.db"));
         let result = recorder.get_by_ticks(&[1, 2, 3]).await;
-        assert!(
-            result.is_err(),
-            "P0-AUDIT：get_by_ticks 在 DB 损坏时必须返回 Err"
-        );
+        assert!(result.is_err(), "get_by_ticks 在 DB 损坏时必须返回 Err");
     }
 
     #[tokio::test]
@@ -1219,7 +1216,7 @@ mod tests {
         let result = recorder.get_immediate_by_ticks(&[1, 2, 3]).await;
         assert!(
             result.is_err(),
-            "P0-AUDIT：get_immediate_by_ticks 在 DB 损坏时必须返回 Err"
+            "get_immediate_by_ticks 在 DB 损坏时必须返回 Err"
         );
     }
 
@@ -1230,7 +1227,7 @@ mod tests {
         let result = recorder.get_immediate_by_tick(1).await;
         assert!(
             result.is_err(),
-            "P0-AUDIT：get_immediate_by_tick 在 DB 损坏时必须返回 Err"
+            "get_immediate_by_tick 在 DB 损坏时必须返回 Err"
         );
     }
 }

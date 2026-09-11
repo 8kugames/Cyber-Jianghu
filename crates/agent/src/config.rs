@@ -591,21 +591,21 @@ pub struct LlmConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_thinking: Option<bool>,
 
-    /// P1-F6 端到端：LLM HTTP 请求整体超时（秒）。Agent 端 LLM 调用最坏耗时 = `max_retries × request_timeout_secs`，
+    /// LLM HTTP 请求整体超时（秒）。Agent 端 LLM 调用最坏耗时 = `max_retries × request_timeout_secs`，
     /// 默认 120s（与 Server LlmConfig 对齐），用户改 `agent.yaml` 即生效。
     #[serde(default = "default_llm_request_timeout_secs")]
     pub request_timeout_secs: u64,
 
-    /// P1-F6 端到端：LLM HTTP 连接超时（秒），默认 30s。
+    /// LLM HTTP 连接超时（秒），默认 30s。
     #[serde(default = "default_llm_connect_timeout_secs")]
     pub connect_timeout_secs: u64,
 
-    /// Cache 诊断配置 (Phase 0 测量用)
+    /// Cache 诊断配置 (测量用)
     #[serde(default)]
     pub cache_diagnostics: CacheDiagnosticsConfig,
 }
 
-/// Cache 诊断配置 (Phase 0 测量用)
+/// Cache 诊断配置 (测量用)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheDiagnosticsConfig {
     pub enabled: bool,               // env var: CYBER_JIANGHU_CACHE_DIAGNOSTICS_ENABLED
