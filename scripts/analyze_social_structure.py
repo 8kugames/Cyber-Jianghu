@@ -3,7 +3,7 @@
 离线社会结构分析 —— 江湖涌现观察工具（观察 ≠ 干预）
 
 哲学定位：
-  关系/声望是众生主观认知，不进天道 reward（Phase 1 已定）。
+  关系/声望是众生主观认知，不进天道 reward（既定设计）。
   本脚本是研究者的"望远镜"——一次性读取所有 agent 的关系快照，
   做恩怨分图 PageRank，观察"谁被公认是大侠/魔头"。
   只读 SQLite，不写回任何 agent 状态，不进运行时。
@@ -34,18 +34,20 @@ import sqlite3
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Tuple
 
-Graph = Dict[str, Dict[str, float]]  # source -> {target: weight}
+Graph = dict[str, dict[str, float]]  # source -> {target: weight}
 
 
-def load_all_edges(data_dir: Path) -> List[Tuple[str, str, int]]:
+def load_all_edges(data_dir: Path) -> list[tuple[str, str, int]]:
     """遍历所有 relationships_{agent_id}.db，收集有向边 (source, target, favorability)。"""
-    edges: List[Tuple[str, str, int]] = []
+    edges: list[tuple[str, str, int]] = []
     db_files = sorted(data_dir.glob("relationships_*.db"))
 
     if not db_files:
-        print(f"[警告] 未在 {data_dir} 找到 relationships_*.db 文件", file=sys.stderr)
+        print(
+            f"[警告] 未在 {data_dir} 找到 relationships_*.db 文件",
+            file=sys.stderr,
+        )
         return edges
 
     for db_path in db_files:
@@ -70,8 +72,8 @@ def load_all_edges(data_dir: Path) -> List[Tuple[str, str, int]]:
 
 
 def build_favor_ire_graphs(
-    edges: List[Tuple[str, str, int]]
-) -> Tuple[Graph, Graph]:
+    edges: list[tuple[str, str, int]],
+) -> tuple[Graph, Graph]:
     """构建恩图（正 favorability）和怨图（负 favorability）。"""
     favor_graph: Graph = defaultdict(dict)
     ire_graph: Graph = defaultdict(dict)
@@ -87,7 +89,7 @@ def build_favor_ire_graphs(
 
 def pagerank(
     graph: Graph, damping: float = 0.85, max_iter: int = 100, tol: float = 1e-6
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """带权有向图 PageRank。返回归一化到 [0,1] 的分数。"""
     nodes: set[str] = set(graph.keys())
     for targets in graph.values():
@@ -118,7 +120,9 @@ def pagerank(
             for tgt, weight in outs.items():
                 new_scores[tgt] += damping * scores[src] * weight
 
-        diff = sum(abs(new_scores[node] - scores[node]) for node in nodes_sorted)
+        diff = sum(
+            abs(new_scores[node] - scores[node]) for node in nodes_sorted
+        )
         scores = new_scores
         if diff < tol:
             break
@@ -126,10 +130,10 @@ def pagerank(
     return scores
 
 
-def analyze_asymmetry(edges: List[Tuple[str, str, int]]) -> Dict[str, int]:
+def analyze_asymmetry(edges: list[tuple[str, str, int]]) -> dict[str, int]:
     """统计关系不对称模式：单向仰慕、双向仇恨、双向好感等。"""
     # source -> {target: favorability} 的正向查找
-    edge_map: Dict[str, Dict[str, int]] = defaultdict(dict)
+    edge_map: dict[str, dict[str, int]] = defaultdict(dict)
     for s, t, f in edges:
         edge_map[s][t] = f
 
@@ -193,7 +197,7 @@ def main() -> None:
         print(f"[错误] 数据目录不存在: {data_dir}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"=== 江湖社会结构分析 ===")
+    print("=== 江湖社会结构分析 ===")
     print(f"数据目录: {data_dir}")
     print()
 
@@ -217,7 +221,9 @@ def main() -> None:
 
     # 4. 恩望排行（公认正派）
     print(f"--- 恩望 PageRank Top {args.top}（公认正派领袖 / 德高望重者）---")
-    favor_ranked = sorted(favor_scores.items(), key=lambda x: x[1], reverse=True)
+    favor_ranked = sorted(
+        favor_scores.items(), key=lambda x: x[1], reverse=True
+    )
     for i, (agent_id, score) in enumerate(favor_ranked[: args.top], 1):
         print(f"  {i:>2}. {agent_id[:8]}...  恩望={score:.4f}")
     print()

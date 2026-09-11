@@ -23,7 +23,7 @@
 #    docker compose logs -f agent
 #
 # 多 Agent 实例：
-# 参见 QuickStart-Client-SDK.md
+# 多次启动 agent 服务并以不同 name 区分实例。
 # ============================================================================
 
 services:
@@ -43,7 +43,15 @@ services:
     volumes:
       - embedding_data:/app/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "--max-time", "10", "http://localhost:23350/api/health"]
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "--max-time",
+          "10",
+          "http://localhost:23350/api/health",
+        ]
       interval: 30s
       timeout: 30s
       retries: 3

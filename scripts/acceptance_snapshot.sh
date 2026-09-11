@@ -22,7 +22,7 @@ set -eu
 SERVER_URL="${SERVER_URL:-http://localhost:23333}"
 INTERVAL_SECS="${INTERVAL_SECS:-3600}"
 OUT_DIR="${OUT_DIR:-./tmp/acceptance_logs}"
-WINDOW=240  # MVP 观测窗口（PRD §6.1）
+WINDOW=240  # MVP 观测窗口
 
 if [ -z "${ADMIN_READ_TOKEN:-}" ]; then
     echo "[错误] 未设置 ADMIN_READ_TOKEN（dashboard read 端点需要 Bearer token）" >&2
