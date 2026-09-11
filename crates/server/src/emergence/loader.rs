@@ -94,7 +94,8 @@ pub async fn current_max_tick(db_pool: &crate::db::DbPool) -> Result<i64> {
     Ok(max_tick)
 }
 
-/// 读取 MVP §6.1.1/§6.1.2 健康度。
+/// 读取 MVP 运行稳定性/生存能力/行为多样性健康度。
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_health(
     db_pool: &crate::db::DbPool,
     tick_start: i64,
@@ -102,8 +103,10 @@ pub async fn fetch_health(
     supply_actions: &[String],
     min_survivors: i32,
     min_supply_count: i32,
+    max_top_share: f64,
+    satiation_urgent_below: i32,
 ) -> Result<HealthMetrics> {
-    use crate::emergence::HealthMetrics;
+    use crate::emergence::{BehaviorStat, HealthMetrics};
     let mut h = HealthMetrics {
         min_survivors_required: min_survivors,
         min_supply_required: min_supply_count,
@@ -272,6 +275,107 @@ pub async fn fetch_health(
             && alive_ids
                 .iter()
                 .all(|id| *h.per_agent_supply.get(id).unwrap_or(&0) >= min_supply_count);
+    }
+
+    // MVP 行为多样性：窗口内 per-agent 决策动作分布熵（含被拒决策，
+    let sat_rows = sqlx::query(
+            r#"
+            SELECT agent_id, COALESCE((attributes->>'satiation')::float8, 999.0) as satiation
+            FROM agent_states s
+            WHERE s.tick_id = (SELECT MAX(tick_id) FROM agent_states WHERE tick_id BETWEEN $1 AND $2)
+            "#,
+        )
+        .bind(tick_start)
+        .bind(tick_end)
+        .fetch_all(db_pool)
+        .await
+        .context("查询饱食度失败")?;
+    let satiation: HashMap<Uuid, f64> = sat_rows
+        .into_iter()
+        .map(|r| (r.get::<Uuid, _>("agent_id"), r.get::<f64, _>("satiation")))
+        .collect();
+    h.per_agent_satiation = satiation.clone();
+
+    // MVP 行为多样性：窗口内 per-agent 最频动作占比统计（含被拒决策，
+    // agent_action_logs 在事务内入库覆盖全部提交）。
+    // 回答的问题只有一个：agent 是否卡在单一动作循环里？
+    // 判读：top_share ≥ max_top_share 且生存紧迫（饱食度低）→ 卡死循环；
+    //       饱食安稳下的高占比属合理惰性，豁免。
+    {
+        let dist_rows = sqlx::query(
+            r#"
+            SELECT agent_id, action_type, COUNT(*) as cnt
+            FROM agent_action_logs
+            WHERE tick_id BETWEEN $1 AND $2
+            GROUP BY agent_id, action_type
+            "#,
+        )
+        .bind(tick_start)
+        .bind(tick_end)
+        .fetch_all(db_pool)
+        .await
+        .context("查询行为分布失败")?;
+
+        let mut dist: HashMap<Uuid, Vec<(String, i64)>> = HashMap::new();
+        for r in &dist_rows {
+            let aid: Uuid = r.get("agent_id");
+            let at: String = r.get("action_type");
+            let cnt: i64 = r.get("cnt");
+            dist.entry(aid).or_default().push((at, cnt));
+        }
+
+        // 窗口末点快照的饱食度（attributes->>'satiation'，无快照视为安稳）
+        let sat_rows = sqlx::query(
+            r#"
+            SELECT agent_id, COALESCE((attributes->>'satiation')::float8, 999.0) as satiation
+            FROM agent_states s
+            WHERE s.tick_id = (SELECT MAX(tick_id) FROM agent_states WHERE tick_id BETWEEN $1 AND $2)
+            "#,
+        )
+        .bind(tick_start)
+        .bind(tick_end)
+        .fetch_all(db_pool)
+        .await
+        .context("查询饱食度失败")?;
+        let satiation: HashMap<Uuid, f64> = sat_rows
+            .into_iter()
+            .map(|r| (r.get::<Uuid, _>("agent_id"), r.get::<f64, _>("satiation")))
+            .collect();
+        h.per_agent_satiation = satiation.clone();
+
+        let min_decisions = 5i64; // 样本不足不判读，避免误报
+        let mut fail_agents: Vec<Uuid> = Vec::new();
+        for (aid, dist_list) in &dist {
+            let total: i64 = dist_list.iter().map(|(_, c)| c).sum();
+            let (top_action, top_cnt) = dist_list
+                .iter()
+                .max_by_key(|(_, c)| *c)
+                .map(|(a, c)| (a.clone(), *c))
+                .unwrap_or_default();
+            let top_share = if total > 0 {
+                top_cnt as f64 / total as f64
+            } else {
+                0.0
+            };
+            let sat = satiation.get(aid).copied().unwrap_or(999.0);
+            // 豁免：饱食安稳（≥ satiation_urgent_below）时的高占比属合理惰性
+            let exempted = top_share >= max_top_share && sat >= satiation_urgent_below as f64;
+            let stuck = top_share >= max_top_share && !exempted && total >= min_decisions;
+            let stat = BehaviorStat {
+                top_action,
+                top_share,
+                distinct_actions: dist_list.len(),
+                total_decisions: total,
+                satiation: sat,
+                exempted,
+            };
+            h.per_agent_behavior.insert(*aid, stat);
+            if stuck {
+                fail_agents.push(*aid);
+            }
+        }
+        h.behavior_fail_agents = fail_agents;
+        h.behavior_pass = h.behavior_fail_agents.is_empty();
     }
 
     Ok(h)

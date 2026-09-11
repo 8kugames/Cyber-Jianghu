@@ -3,7 +3,7 @@
 // ============================================================================
 //
 // 机器可验证地回答项目核心假设："在生存压力下，AI 智能体会自发涌现
-// 结盟、背叛、交易、厮杀等社会行为吗？"（白皮书 / MVP §6.1.3）
+// 结盟、背叛、交易、厮杀等社会行为吗？”
 //
 // 两阶段检测：
 //   阶段 1 形态筛选：按 tick+node 聚类时空簇，阈值判定候选事件。
@@ -54,10 +54,10 @@ pub struct DetectionResult {
     pub health: Option<HealthMetrics>,
 }
 
-/// MVP §6.1.1/§6.1.2 健康度
+/// MVP 健康度
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HealthMetrics {
-    // §6.1.1 运行稳定性
+    // 运行稳定性
     pub ticks_total: i64,
     pub ticks_completed: i64,
     pub ticks_failed: i64,
@@ -68,13 +68,42 @@ pub struct HealthMetrics {
     pub timeout_rate_approx: f64,
     pub agents_expected: i32,
     pub agents_submitted: i32,
-    // §6.1.2 生存能力
+    // 生存能力
     pub agents_alive: i32,
     pub min_survivors_required: i32,
     pub survivors_pass: bool,
     pub per_agent_supply: HashMap<Uuid, i32>,
     pub min_supply_required: i32,
     pub supply_pass: bool,
+    /// MVP 行为多样性：窗口内 per-agent 最频动作占比统计。
+    /// 回答的问题只有一个：agent 是否卡在单一动作循环里？
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub per_agent_behavior: HashMap<Uuid, BehaviorStat>,
+    /// 窗口末点 per-agent 饱食度（交叉判读用）
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub per_agent_satiation: HashMap<Uuid, f64>,
+    /// 判读通过的 agent（非坍缩，或饱食惰性豁免 / 样本不足）
+    pub behavior_pass: bool,
+    /// 判读失败的 agent（最频动作占比超限且生存紧迫）
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub behavior_fail_agents: Vec<Uuid>,
+}
+
+/// 单 agent 行为统计（窗口内决策动作分布的朴素统计，无信息论抽象）
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BehaviorStat {
+    /// 最高频动作名
+    pub top_action: String,
+    /// 最高频动作占比 0-1
+    pub top_share: f64,
+    /// 涉及动作种类数
+    pub distinct_actions: usize,
+    /// 决策总数（含被拒；< 5 时判读无意义）
+    pub total_decisions: i64,
+    /// 窗口末点饱食度（无快照为 f64::MAX，视为不紧迫）
+    pub satiation: f64,
+    /// 饱食惰性豁免：占比超限但饱食度安稳
+    pub exempted: bool,
 }
 
 // ============================================================================
@@ -157,6 +186,8 @@ pub async fn detect_window(
                 &config.health.supply_actions,
                 config.health.min_survivors,
                 config.health.min_supply_count,
+                config.health.max_top_share,
+                config.health.satiation_urgent_below,
             )
             .await?,
         )

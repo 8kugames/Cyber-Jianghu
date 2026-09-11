@@ -5,7 +5,7 @@
 // 接口契约：
 // GET /api/dashboard/emergence?window=240&start=&end=&health=1
 //   → 两阶段涌现检测结果（causal_emergence + co_occurrence 事件链）
-//   → 可选 health=1 附带 MVP §6.1 健康度
+//   → 可选 health=1 附带 MVP 健康度
 //
 // 数据来源：agent_action_logs / agent_states / agents（只读查询）
 // 架构定位：观察者职责，只读，不侵入 tick 热路径。
