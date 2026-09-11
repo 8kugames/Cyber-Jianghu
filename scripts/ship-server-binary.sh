@@ -62,6 +62,27 @@ sync_dirty_to_server() {
 }
 
 BIN="$PROJECT_ROOT/target/$TARGET/release/cyber-jianghu-server"
+
+# 远端必须能解析 rsync（rsync over ssh 要求两端都有二进制，否则远端 fish/bash
+# 把 "rsync --server" 当未知命令，pipe 早断报 "unexpected end of file"）。
+# 默认仅自检报错；AUTO_INSTALL_DEPS=1 时探测包管理器并自动 sudo 安装。
+if ! ssh -o BatchMode=yes "$SERVER" 'command -v rsync >/dev/null'; then
+    if [ "${AUTO_INSTALL_DEPS:-0}" = "1" ]; then
+        echo "[自检] 远端缺 rsync，AUTO_INSTALL_DEPS=1 启用自动安装"
+        ssh -o BatchMode=yes "$SERVER" '
+            if command -v dnf >/dev/null; then PM=dnf
+            elif command -v yum >/dev/null; then PM=yum
+            elif command -v apt-get >/dev/null; then PM=apt-get
+            else echo "[错误] 未识别包管理器，请手动安装 rsync" >&2; exit 1; fi
+            sudo "$PM" install -y rsync
+            command -v rsync >/dev/null || { echo "[错误] 安装后仍未找到 rsync" >&2; exit 1; }
+        ' || { echo "[错误] 自动安装 rsync 失败（检查 sudo NOPASSWD / 源可达性）"; exit 1; }
+    else
+        echo "[错误] 远端缺 rsync，请执行: ssh $SERVER 'sudo yum install -y rsync'，或重跑时带 AUTO_INSTALL_DEPS=1"
+        exit 1
+    fi
+fi
+
 echo "[同步] config/ → 服务端（防二进制新/配置旧错配）"
 rsync -az --delete "$PROJECT_ROOT/crates/server/config/" "$SERVER:$REMOTE_PROJECT/crates/server/config/"     && echo "[ sync ] config/ 全量同步"
 
