@@ -227,6 +227,75 @@ pub fn extract_ids_from_world_state(ws: &WorldState) -> (Vec<String>, Vec<String
     (items, nodes)
 }
 
+/// 移动目标规范化：LLM 常用叙事短名（如"厨房"）、 AdjacentNode 名称、或复合写法
+/// （如"龙门客栈-厨房"）填 target_location，而规则校验与 server 均要求精确 node_id。
+///
+/// 匹配顺序：精确 node_id → 相邻节点 name → node_id 后缀/前缀/包含。唯一候选命中时
+/// 原位改写为精确 node_id（提交给 server 的意图即携带精确 ID，端到端打通）；
+/// 零候选或多候选保持原值（照常驳回，驳回反馈中的可达 ID 列表供 self-correction 使用）。
+///
+/// 返回 Some((旧值, 新值)) 表示发生了改写。
+pub fn canonicalize_move_target(intent: &mut Intent, ws: &WorldState) -> Option<(String, String)> {
+    if intent.action_type.as_str() != "移动" {
+        return None;
+    }
+    let value = intent
+        .action_data
+        .as_ref()?
+        .get("target_location")?
+        .as_str()?
+        .trim()
+        .to_string();
+    if value.is_empty() {
+        return None;
+    }
+    let reachable: Vec<(String, String)> = ws
+        .location
+        .adjacent_nodes
+        .iter()
+        .map(|n| (n.node_id.clone(), n.name.clone()))
+        .collect();
+
+    // 精确命中：无需改写
+    if reachable.iter().any(|(id, _)| *id == value) {
+        return None;
+    }
+
+    // 模糊候选：名称相等 / node_id 后缀 / 前缀 / 包含
+    let mut candidates: Vec<String> = Vec::new();
+    for (id, name) in &reachable {
+        let name_hit = !name.is_empty() && name == &value;
+        if name_hit || id.ends_with(&value) || value.ends_with(id) || value.contains(id) {
+            candidates.push(id.clone());
+        }
+    }
+    candidates.dedup();
+
+    match candidates.len() {
+        1 => {
+            let new_id = candidates.remove(0);
+            let old = value;
+            if let Some(obj) = intent.action_data.as_mut().and_then(|d| d.as_object_mut()) {
+                obj.insert(
+                    "target_location".to_string(),
+                    serde_json::Value::String(new_id.clone()),
+                );
+            }
+            tracing::info!("移动目标规范化: {} → {}", old, new_id);
+            Some((old, new_id))
+        }
+        0 => None,
+        _ => {
+            tracing::warn!(
+                "移动目标 {:?} 匹配到多个可达地点 {:?}，保持原值驳回",
+                value,
+                candidates
+            );
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -420,5 +489,150 @@ mod tests {
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].id, "test_rule");
         assert!(matches!(rules[0].condition, RuleCondition::Or(_)));
+    }
+
+    // ===== canonicalize_move_target 单测 =====
+
+    /// 构造带相邻节点的最小 WorldState（仿 state_store 测试模板）
+    fn make_ws(adjacent: Vec<(&str, &str)>) -> cyber_jianghu_protocol::WorldState {
+        use cyber_jianghu_protocol::{AdjacentNode, Location, WorldTime};
+        use std::collections::HashMap;
+        cyber_jianghu_protocol::WorldState {
+            event_type: "world_state".to_string(),
+            tick_id: 1,
+            agent_id: Some(uuid::Uuid::new_v4()),
+            world_time: WorldTime {
+                year: 1,
+                month: 1,
+                day: 1,
+                hour: 3,
+                minute: 0,
+                second: 0,
+                weather: String::new(),
+            },
+            location: Location {
+                node_id: "龙门大堂".to_string(),
+                name: "大堂".to_string(),
+                node_type: "inn".to_string(),
+                adjacent_nodes: adjacent
+                    .into_iter()
+                    .map(|(id, name)| AdjacentNode {
+                        node_id: id.to_string(),
+                        name: name.to_string(),
+                        travel_cost: 1,
+                    })
+                    .collect(),
+                gatherable_items: vec![],
+            },
+            self_state: cyber_jianghu_protocol::AgentSelfState {
+                attributes: HashMap::new(),
+                derived_attributes: HashMap::new(),
+                attribute_descriptions: HashMap::new(),
+                survival_drives: vec![],
+                status_effects: vec![],
+                inventory: vec![],
+                skills: vec![],
+                recipe_details: vec![],
+                age_years: None,
+                max_age: None,
+            },
+            entities: vec![],
+            nearby_items: vec![],
+            events_log: vec![],
+            private_dialogue_log: vec![],
+            last_execution_summary: None,
+        }
+    }
+
+    fn make_move_intent(target: &str) -> crate::models::Intent {
+        use uuid::Uuid;
+        Intent::new(
+            Uuid::new_v4(),
+            1,
+            "移动",
+            Some(serde_json::json!({"target_location": target})),
+        )
+    }
+
+    #[test]
+    fn test_canonicalize_short_name_suffix() {
+        // 仿龙门客栈地图：node_id 带前缀，LLM 写短名
+        let ws = make_ws(vec![
+            ("龙门客栈", "客栈"),
+            ("龙门后院", "后院"),
+            ("龙门厨房", "厨房"),
+        ]);
+        let mut intent = make_move_intent("厨房");
+        let r = canonicalize_move_target(&mut intent, &ws);
+        assert_eq!(r, Some(("厨房".to_string(), "龙门厨房".to_string())));
+        assert_eq!(
+            intent.action_data.unwrap()["target_location"],
+            serde_json::json!("龙门厨房")
+        );
+    }
+
+    #[test]
+    fn test_canonicalize_exact_id_no_rewrite() {
+        let ws = make_ws(vec![("龙门客栈", "客栈")]);
+        let mut intent = make_move_intent("龙门客栈");
+        assert_eq!(canonicalize_move_target(&mut intent, &ws), None);
+    }
+
+    #[test]
+    fn test_canonicalize_adjacent_name_match() {
+        let ws = make_ws(vec![("龙门客栈", "客栈")]);
+        let mut intent = make_move_intent("客栈");
+        assert_eq!(
+            canonicalize_move_target(&mut intent, &ws),
+            Some(("客栈".to_string(), "龙门客栈".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_canonicalize_compound_write() {
+        // 实测案例：LLM 输出"龙门客栈-厨房"复合写法（从厨房回客栈）
+        let ws = make_ws(vec![("龙门客栈", "客栈")]);
+        let mut intent = make_move_intent("龙门客栈-厨房");
+        assert_eq!(
+            canonicalize_move_target(&mut intent, &ws),
+            Some(("龙门客栈-厨房".to_string(), "龙门客栈".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_canonicalize_no_match_keeps_original() {
+        // 实测案例："内院"不是任何可达节点 → 不改写，照常驳回
+        let ws = make_ws(vec![
+            ("龙门客栈", "客栈"),
+            ("龙门后院", "后院"),
+            ("龙门厨房", "厨房"),
+        ]);
+        let mut intent = make_move_intent("内院");
+        assert_eq!(canonicalize_move_target(&mut intent, &ws), None);
+        assert_eq!(
+            intent.action_data.unwrap()["target_location"],
+            serde_json::json!("内院")
+        );
+    }
+
+    #[test]
+    fn test_canonicalize_ambiguous_keeps_original() {
+        // 名称重名 → 多候选 → 不改写
+        let ws = make_ws(vec![("甲院", "院子"), ("乙院", "院子")]);
+        let mut intent = make_move_intent("院子");
+        assert_eq!(canonicalize_move_target(&mut intent, &ws), None);
+    }
+
+    #[test]
+    fn test_canonicalize_non_move_ignored() {
+        let ws = make_ws(vec![("龙门厨房", "厨房")]);
+        use uuid::Uuid;
+        let mut intent = Intent::new(
+            Uuid::new_v4(),
+            1,
+            "观察",
+            Some(serde_json::json!({"target_location": "厨房"})),
+        );
+        assert_eq!(canonicalize_move_target(&mut intent, &ws), None);
     }
 }

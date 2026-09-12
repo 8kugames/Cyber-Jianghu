@@ -94,6 +94,7 @@ async function completeLogin(token, tokenType) {
     authVerified = true;
     authTokenType = tokenType || "read";
     localStorage.setItem("admin_token_type", authTokenType);
+    applyHealthTabVisibility();
     hideAuthModal();
     if (Object.keys(locationNames).length === 0) {
         await initLocationMapping();
@@ -208,6 +209,17 @@ function getAuthHeaders() {
     return { "Authorization": "Bearer " + authToken };
 }
 
+// 只读 Token UI 门控：健康度看板（内部验收观测视图）仅对 write Token 展示。
+// authTokenType 由 utils.js 从 localStorage 初始化，登录/换 Token 后经 completeLogin 刷新。
+function applyHealthTabVisibility() {
+    var healthTab = document.querySelector('.nav-tab[data-tab-id="health"]');
+    if (healthTab) {
+        healthTab.style.display = authTokenType === "write" ? "" : "none";
+    }
+}
+
 // 自举不等待页面入口：settings / history 等子页面不调用 initAuth()，
 // 任何页面直达 #token= 均可在此触发登录（与 initAuth 共用防重入守卫）。
 startHashBootstrapIfPending();
+// 脚本置于 body 末尾，加载时导航栏 DOM 已就绪；无健康度页签的页面此调用为空操作。
+applyHealthTabVisibility();
