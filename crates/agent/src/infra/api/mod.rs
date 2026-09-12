@@ -682,7 +682,12 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
         local_addr.port()
     );
 
-    axum::serve(listener, app).await?;
+    // connect_info：setup/status 据此做 loopback 信任判定（auth_token 暴露门控）
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 

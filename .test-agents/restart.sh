@@ -16,7 +16,8 @@
 #     device.yaml 中的 auth_token 会因 server 端轮换而滞后，禁止用作调用凭证
 #   - 归隐 = server 端 POST /api/v1/agent/retire（幂等），先于注册执行，
 #     满足 server 0.1.296+ 的「单设备单活跃角色」约束
-#   - server 地址从 docker-compose.yml 解析；换 server 只改 compose，本脚本零修改
+#   - server 地址从各实例 config/agent.yaml 的 server 段解析（4 实例须一致，
+#     异构 FATAL：全局归隐按该地址执行，错配会误伤）；换 server 改全部 agent.yaml，脚本零修改
 
 set -uo pipefail
 cd "$(dirname "$0")"
@@ -39,12 +40,25 @@ TMPDIR="./tmp/restart_$$"
 
 trap 'rm -rf "$TMPDIR" 2>/dev/null; exit 130' INT TERM
 
-# ── server 配置解析（单一来源 = compose）─────────────────────────────────────
-SERVER_HTTP=$(grep -m1 'CYBER_JIANGHU_SERVER_HTTP_URL:' "$COMPOSE" | sed -E 's/.*CYBER_JIANGHU_SERVER_HTTP_URL:[[:space:]]*//')
-if [ -z "$SERVER_HTTP" ]; then
-  echo "FATAL: 无法从 $COMPOSE 解析 CYBER_JIANGHU_SERVER_HTTP_URL" >&2
-  exit 1
-fi
+# ── server 配置解析（单一来源 = 实例挂载的 agent.yaml server 段）──────────────
+# compose 环境变量已移除（agent 从未消费，server 地址仅在 agent.yaml 配置）。
+# 全局操作（归隐/verify）按该地址执行，4 实例 server 段必须一致，异构即 FATAL
+SERVER_HTTP=""
+for entry in "${AGENTS[@]}"; do
+  aname="${entry%%:*}"
+  url=$(grep -m1 '^  http_url:' "${aname}/config/agent.yaml" 2>/dev/null \
+    | sed -E 's/^  http_url:[[:space:]]*//' | tr -d '"' | tr -d '[:space:]')
+  if [ -z "$url" ]; then
+    echo "FATAL: ${aname}/config/agent.yaml 缺少 server.http_url（或文件缺失）" >&2
+    exit 1
+  fi
+  if [ -z "$SERVER_HTTP" ]; then
+    SERVER_HTTP="$url"
+  elif [ "$url" != "$SERVER_HTTP" ]; then
+    echo "FATAL: 实例 server 段不一致：首个=${SERVER_HTTP} vs ${aname}=${url}（全局归隐将错配）" >&2
+    exit 1
+  fi
+done
 # server_key 与 agent 端 config.rs 的 server_key() 规则一致: host 点转横线 + -port
 SERVER_HOST=$(echo "$SERVER_HTTP" | sed -E 's|https?://||; s|:[0-9]+$||')
 SERVER_PORT=$(echo "$SERVER_HTTP" | sed -E 's|.*:([0-9]+)$|\1|')
@@ -100,16 +114,25 @@ emit() {
   echo -e "${GRAY}${ts}${NC} ${BOLD}[${aname}]${NC} ${phase} ${msg}"
 }
 
-# ── token（内存权威值，来自 setup/status 公开端点）───────────────────────────
+# ── token（.env 静态值优先，回退容器内 setup/status 内存权威值）──────────────
 current_token() {
-  local port=$1
-  # 静态 token（不轮换）优先，源自 .env；回退 setup/status 内存值
+  local port=$1 aname=$2
+  # 静态 token（不轮换）优先，源自 .env
   if [ -s ".env" ]; then
     grep '^CYBER_JIANGHU_AGENT_TOKEN=' ".env" | head -1 | cut -d= -f2-
     return 0
   fi
-  curl -sf "http://localhost:${port}/api/v1/setup/status" --max-time 5 2>/dev/null | \
-    python3 -c "import json,sys; print(json.load(sys.stdin).get('auth_token',''))" 2>/dev/null
+  # 回退：容器内 curl（容器内 127.0.0.1 为真 loopback，可取 setup/status 内存权威值）。
+  # 勿改回宿主 curl：setup/status 的 auth_token 已按对端地址门控（loopback-only），
+  # Docker 端口发布下宿主对端非 loopback，宿主侧取不到；device.yaml 文件值会因
+  # server 端轮换滞后，禁止用作调用凭证（SKILL.md 既有规则）。
+  local cid
+  cid=$(docker compose -f "$COMPOSE" ps -q "$aname" 2>/dev/null | head -1)
+  if [ -n "$cid" ]; then
+    docker exec "$cid" curl -sf --max-time 5 \
+      http://localhost:23340/api/v1/setup/status 2>/dev/null | \
+      python3 -c "import json,sys; print(json.load(sys.stdin).get('auth_token',''))" 2>/dev/null
+  fi
 }
 
 device_id_of() {
@@ -260,7 +283,7 @@ do_generate_register() {
   local gen_file="$TMPDIR/${aname}.gen.json"
 
   # token 启动后可能被轮换，调用点现读（setup/status 权威值）
-  token=$(current_token "$port")
+  token=$(current_token "$port" "$aname")
 
   local gen_ok=false attempt
   for attempt in $(seq 1 $((GEN_RETRY_MAX + 1))); do
@@ -290,7 +313,7 @@ do_generate_register() {
   emit "$aname" "${GREEN}GEN${NC}" "生成角色: ${gen_name}"
 
   # 注册前现读 token（generate 耗时期间 token 可能再次轮换）
-  token=$(current_token "$port")
+  token=$(current_token "$port" "$aname")
 
   emit "$aname" "${CYAN}REG${NC}" "注册到服务器..."
   local reg_result
@@ -308,7 +331,7 @@ do_generate_register() {
 
   # 注册后验证：character 可查询且 alive
   sleep 2
-  token=$(current_token "$port")
+  token=$(current_token "$port" "$aname")
   local verify
   verify=$(curl -sf --max-time 15 -H "Authorization: Bearer ${token}" \
     "http://localhost:${port}/api/v1/character" 2>/dev/null | \
@@ -492,7 +515,7 @@ for entry in "${AGENTS[@]}"; do
     continue
   fi
 
-  token=$(current_token "$port")
+  token=$(current_token "$port" "$aname")
   process_agent "$aname" "$port" "$token" &
   pids+=($!)
 done

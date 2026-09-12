@@ -37,6 +37,7 @@ pub(super) fn empty_world_state() -> cyber_jianghu_protocol::WorldState {
             node_type: String::new(),
             adjacent_nodes: vec![],
             gatherable_items: vec![],
+            parent_chain: Vec::new(),
         },
         self_state: AgentSelfState {
             attributes: Default::default(),

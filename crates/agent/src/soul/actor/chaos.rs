@@ -398,6 +398,7 @@ mod tests {
                     travel_cost: 1,
                 }],
                 gatherable_items: vec![],
+                parent_chain: Vec::new(),
             },
             entities: vec![Entity {
                 id: uuid::Uuid::new_v4(),

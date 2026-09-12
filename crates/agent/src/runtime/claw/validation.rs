@@ -446,6 +446,7 @@ mod tests {
                     node_type: "inn".to_string(),
                     adjacent_nodes: vec![],
                     gatherable_items: vec![],
+                    parent_chain: Vec::new(),
                 },
                 self_state: cyber_jianghu_protocol::AgentSelfState {
                     attributes: std::collections::HashMap::new(),

@@ -65,7 +65,7 @@ pub use resolve::{
 /// - 无契约影响的修复 → bump patch
 ///
 /// Client 启动握手按 major 号判断兼容性（major 不一致即拒绝连接）。
-pub const PROTOCOL_VERSION: &str = "3.1.0";
+pub const PROTOCOL_VERSION: &str = "3.2.0";
 
 // ============================================================================
 // LLM 配置默认值（agent + server 共享唯一来源）

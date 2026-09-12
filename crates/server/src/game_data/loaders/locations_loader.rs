@@ -12,6 +12,7 @@
 use crate::game_data::loaders::config_format::load_config;
 use crate::game_data::types::UnifiedLocationsConfig;
 use anyhow::{Context, Result};
+use cyber_jianghu_protocol::LocationNodeType;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -45,6 +46,9 @@ pub fn load_locations<P: AsRef<Path>>(config_dir: P) -> Result<UnifiedLocationsC
 ///
 /// - 边端点必须引用已定义节点（悬空边 = 断头路，直接报错）
 /// - parent_id 必须引用已定义节点（层级引用悬空 = 孤儿子场景）
+/// - 根节点类型必须为 region（地图分层模型 Region → Map → SubScene；
+///   WorldState.parent_chain 链首恒为区域级、agent 端层级表述去首级的假设依赖此不变量）
+/// - 父链不得成环（成环会让祖先链上溯悬挂/错乱）
 /// - time_variants 闭区间必须自洽（from_game_day <= to_game_day）
 /// - 非对称边（A→B 有、B→A 无）是合法特性（如"回程更累"），仅告警提示
 pub fn validate_locations(config: &UnifiedLocationsConfig) -> Result<()> {
@@ -79,6 +83,15 @@ pub fn validate_locations(config: &UnifiedLocationsConfig) -> Result<()> {
                 parent
             );
         }
+        if node.parent_id.as_deref().unwrap_or("").is_empty()
+            && node.node_type != LocationNodeType::Region
+        {
+            anyhow::bail!(
+                "根节点 {} 的类型必须为 region（地图分层模型 Region → Map → SubScene），当前为 {}",
+                node.node_id,
+                node.node_type
+            );
+        }
         for (i, v) in node.time_variants.iter().enumerate() {
             if let (Some(from), Some(to)) = (v.from_game_day, v.to_game_day)
                 && from > to
@@ -108,6 +121,28 @@ pub fn validate_locations(config: &UnifiedLocationsConfig) -> Result<()> {
                 edge.from,
                 edge.to
             );
+        }
+    }
+
+    // 父链成环会让任何上溯逻辑（WorldState.parent_chain、dashboard 层级）悬挂/错乱，
+    // 环是非法树结构，坏图拒绝启动（与悬空 parent 同等对待）
+    let nodes_by_id: HashMap<&str, &cyber_jianghu_protocol::LocationNode> = config
+        .data
+        .nodes
+        .iter()
+        .map(|n| (n.node_id.as_str(), n))
+        .collect();
+    for node in &config.data.nodes {
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut cursor = node.parent_id.as_deref().filter(|p| !p.is_empty());
+        while let Some(pid) = cursor {
+            if !seen.insert(pid) {
+                anyhow::bail!("位置父链成环: {} 的祖先链在 {} 处闭环", node.node_id, pid);
+            }
+            cursor = nodes_by_id
+                .get(pid)
+                .and_then(|n| n.parent_id.as_deref())
+                .filter(|p| !p.is_empty());
         }
     }
 
@@ -147,7 +182,7 @@ data:
   nodes:
     - node_id: "inn"
       name: "客栈"
-      type: "map"
+      type: "region"
       parent_id: ""
     - node_id: "lobby"
       name: "大堂"
@@ -306,7 +341,7 @@ data:
             r#"    - node_id: "ruins"
       name: "废墟"
       type: "map"
-      parent_id: ""
+      parent_id: "inn"
       time_variants:
         - from_game_day: 100
           to_game_day: 50
@@ -338,7 +373,7 @@ data:
             r#"    - node_id: "ruins"
       name: "废墟"
       type: "map"
-      parent_id: ""
+      parent_id: "inn"
       time_variants:
         - from_game_day: 1
           to_game_day: 50
@@ -349,5 +384,42 @@ data:
         );
         let config = parse(&yaml).unwrap();
         assert!(validate_locations(&config).is_ok());
+    }
+
+    #[test]
+    fn test_validate_rejects_non_region_root() {
+        // 地图分层模型要求根节点必为 region：非 region 根会使
+        // WorldState.parent_chain 链首区域假设失效，坏图拒绝启动
+        let yaml = base_yaml(
+            r#"    - node_id: "wild"
+      name: "荒野"
+      type: "map"
+      parent_id: """#,
+            "",
+        );
+        let config = parse(&yaml).unwrap();
+        let err = validate_locations(&config).unwrap_err();
+        assert!(
+            err.to_string().contains("wild") && err.to_string().contains("region"),
+            "应拒绝非 region 根节点: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_rejects_parent_cycle() {
+        let yaml = base_yaml(
+            r#"    - node_id: "a"
+      name: "甲"
+      type: "sub_scene"
+      parent_id: "b"
+    - node_id: "b"
+      name: "乙"
+      type: "sub_scene"
+      parent_id: "a""#,
+            "",
+        );
+        let config = parse(&yaml).unwrap();
+        let err = validate_locations(&config).unwrap_err();
+        assert!(err.to_string().contains("成环"), "应拒绝父链成环: {err}");
     }
 }

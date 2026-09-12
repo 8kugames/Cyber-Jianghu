@@ -81,13 +81,9 @@ services:
 
       # WebSocket 连接配置
       # 允许非 localhost 连接（Docker 部署时允许宿主机访问）
+      # 注：游戏服务器地址不被环境变量覆盖，统一在挂载的 config/agent.yaml
+      # 的 server.ws_url / server.http_url 中配置
       CYBER_JIANGHU_WS_ALLOW_EXTERNAL: ${AGENT_WS_ALLOW_EXTERNAL:-1}
-
-      # 游戏服务器 WebSocket URL
-      CYBER_JIANGHU_SERVER_WS_URL: ${SERVER_WS_URL:-ws://cyber-jianghu-server:23333/ws}
-
-      # 游戏服务器 HTTP URL
-      CYBER_JIANGHU_SERVER_HTTP_URL: ${SERVER_HTTP_URL:-http://cyber-jianghu-server:23333}
 
       # Embedding 服务 URL（Docker 部署默认使用远程 embedding 服务）
       CYBER_JIANGHU_EMBEDDER_REMOTE_URL: ${EMBEDDER_REMOTE_URL:-http://cyber-jianghu-embedding:23350}

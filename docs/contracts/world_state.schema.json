@@ -41,7 +41,12 @@
           "description": "节点类型,如 shrine/inn/street"
         },
         "adjacent_nodes": { "type": "array" },
-        "gatherable_items": { "type": "array" }
+        "gatherable_items": { "type": "array" },
+        "parent_chain": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "祖先名称链(根区域→直接父级,不含当前节点;空链时字段省略)。层级上下文用途,不保证唯一性,唯一定位以 node_id 为准。protocol 3.2.0 新增。"
+        }
       }
     },
     "self_state": {

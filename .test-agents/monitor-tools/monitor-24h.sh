@@ -18,8 +18,14 @@ START_EPOCH=$(date -u +%s)
 END_EPOCH=$((START_EPOCH + DURATION_SECS))
 
 COMPOSE=".test-agents/docker-compose.yml"
-# server 地址单一来源 = compose（换 server 只改 compose）
-SERVER_HTTP=$(grep -m1 'CYBER_JIANGHU_SERVER_HTTP_URL:' "$COMPOSE" | sed -E 's/.*CYBER_JIANGHU_SERVER_HTTP_URL:[[:space:]]*//')
+# server 地址单一来源 = 实例挂载的 agent.yaml server 段（compose 环境变量已移除）。
+# 空值必须 FATAL：否则 curl 相对 URL 静默失败，每轮都会把 server 记为 FAIL，污染监控结论
+SERVER_HTTP=$(grep -m1 '^  http_url:' .test-agents/agent-1/config/agent.yaml 2>/dev/null \
+  | sed -E 's/^  http_url:[[:space:]]*//' | tr -d '"' | tr -d '[:space:]')
+if [ -z "$SERVER_HTTP" ]; then
+  echo "FATAL: 无法从 .test-agents/agent-1/config/agent.yaml 解析 server.http_url" >&2
+  exit 1
+fi
 # 输出 "服务名:容器名" 对；服务名即 .test-agents/ 数据目录名，容器名供 docker exec 使用
 AGENTS=($(awk '
   BEGIN { in_svc=0; cur=""; cn="" }

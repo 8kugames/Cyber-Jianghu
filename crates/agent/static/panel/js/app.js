@@ -74,8 +74,13 @@ function startSSE() {
         eventSource = null;
         sseRetryCount += 1;
         if (sseRetryCount > SSE_MAX_RETRIES) {
-            // 连续失败超过上限：很可能是认证/配置问题，停止重连避免死循环刷日志
+            // 连续失败超过上限：很可能是认证/配置问题，停止重连避免死循环刷日志。
+            // 轻提示（底部，避让顶部认证横幅）替代纯 console：用户可感知实时流已停
             console.error(`[SSE] 连续 ${sseRetryCount - 1} 次失败，已停止重连。请检查 auth_token / 服务端状态。`);
+            showDismissibleBanner('sse-stopped-warning',
+                '实时事件流（SSE）连接失败已停止重连，面板数据可能滞后。'
+                + '常见原因：访问令牌无效或服务端不可达；刷新页面重试，若持续失败请检查 agent 状态。',
+                'bottom:0', '#8a6d1f');
             updateNavStatus(false);
             return;
         }
@@ -93,6 +98,42 @@ function updateNavStatus(connected) {
         : '<span class="status-dot disconnected"></span>';
 }
 
+// 访问对端未获授权 token（远程浏览器 / Docker 端口发布形态下 setup/status 不返回 token）。
+// 显式提示替代静默 401：本机原生部署可自动获取；容器/远程形态请编辑 agent.yaml 后重启。
+const AUTH_WARNING_MISSING = '未获得访问令牌：当前访问形态（远程浏览器或 Docker 端口发布）下 '
+    + 'setup/status 不返回 token，认证 API 将被拒绝。本机原生部署可自动获取；'
+    + '容器/远程部署请编辑 agent.yaml 后重启实例。';
+
+// 可关闭的全屏宽横幅工厂：认证类用顶部红，SSE 新提示用底部 Qualcomm 色避免与认证横幅重叠
+function showDismissibleBanner(id, message, cssPosition, background) {
+    if (document.getElementById(id)) return;
+    const el = document.createElement('div');
+    el.id = id;
+    el.style.cssText = `position:fixed;${cssPosition};left:0;right:0;z-index:9999;`
+        + `background:${background};`
+        + 'color:#fff;padding:8px 32px 8px 12px;font-size:13px;line-height:1.5;';
+    el.textContent = message;
+    const close = document.createElement('button');
+    close.textContent = '×';
+    close.setAttribute('aria-label', '关闭');
+    close.style.cssText = 'position:absolute;right:6px;top:4px;background:none;border:none;'
+        + 'color:#fff;font-size:16px;cursor:pointer;';
+    close.onclick = () => el.remove();
+    el.appendChild(close);
+    document.body.appendChild(el);
+}
+
+function showAuthTokenWarning(message) {
+    showDismissibleBanner('auth-token-warning', message, 'top:0', '#7a2e2e');
+}
+
+// 令牌失效（服务端轮换等）：清缓存动作在 api.js 的 handleUnauthorized 内完成，
+// 这里接收事件并以横幅提示，替代静默 401 空数据
+window.addEventListener('cj:unauthorized', () => showAuthTokenWarning(
+    '访问令牌无效或已失效（可能已被服务端轮换），已清除本地缓存。'
+    + '刷新页面将重新获取；若持续失败，当前访问形态（远程浏览器或 Docker 端口发布）下 '
+    + '请编辑 agent.yaml 后重启实例。'));
+
 async function init() {
     // Register routes
     router.register('dashboard', dashboardPage);
@@ -102,6 +143,7 @@ async function init() {
     // 从 setup/status（公开端点）获取 auth_token 并缓存到 localStorage。
     // 必须在任何受保护 API 调用之前完成。refreshAuthToken 内部调用 get(SETUP_STATUS)。
     await refreshAuthToken();
+    if (!getStoredAuthToken()) showAuthTokenWarning(AUTH_WARNING_MISSING);
 
     // Check setup status
     try {

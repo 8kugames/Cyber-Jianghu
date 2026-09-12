@@ -124,7 +124,10 @@ export async function get(path, options = {}) {
         headers: buildHeaders(),
     }, retries, timeout);
     const data = await parseResponse(response);
-    if (!response.ok) throw new Error(data?.message || data?.error || `服务器错误: ${response.status}`);
+    if (!response.ok) {
+        if (response.status === 401) handleUnauthorized();
+        throw new Error(data?.message || data?.error || `服务器错误: ${response.status}`);
+    }
     return data ?? {};
 }
 
@@ -137,12 +140,15 @@ export async function post(path, body, options = {}) {
         body: JSON.stringify(body),
     }, retries, timeout);
     const data = await parseResponse(response);
-    if (!response.ok) throw new Error(data?.message || data?.error || `服务器错误: ${response.status}`);
+    if (!response.ok) {
+        if (response.status === 401) handleUnauthorized();
+        throw new Error(data?.message || data?.error || `服务器错误: ${response.status}`);
+    }
     return data ?? {};
 }
 
 // device auth_token 管理
-// 从 setup/status 获取 token（本地信任域，API 仅绑 127.0.0.1），缓存到 localStorage
+// 从 setup/status 获取 token（仅 loopback 对端返回），缓存到 localStorage
 const AUTH_TOKEN_KEY = 'cj_auth_token';
 
 function buildHeaders() {
@@ -170,6 +176,13 @@ export function setStoredAuthToken(token) {
     } catch (_) {
         // localStorage 不可用（隐私模式），忽略——后续 API 调用会被 401 拒绝
     }
+}
+
+// 401 处理：令牌无效/已被服务端轮换时清除缓存并广播事件（app.js 监听后显示横幅），
+// 避免失效 token 静默驻留 localStorage 造成持续 401 的空数据面板
+function handleUnauthorized() {
+    if (getStoredAuthToken()) setStoredAuthToken(null);
+    window.dispatchEvent(new CustomEvent('cj:unauthorized'));
 }
 
 /// 从 /api/v1/setup/status（公开端点）拉取 auth_token 并缓存。

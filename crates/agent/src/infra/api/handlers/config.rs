@@ -2,11 +2,12 @@
 // ============================================================================
 
 use axum::{
-    extract::State,
+    extract::{ConnectInfo, State},
     http::StatusCode,
     response::{IntoResponse, Json},
 };
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 use tracing::{error, info};
 
 use crate::config::CharacterStatus;
@@ -217,15 +218,39 @@ pub(crate) async fn get_actions_handler() -> impl IntoResponse {
     Json(map)
 }
 
+/// 判断 `/api/v1/setup/status` 是否可向该对端暴露 device auth_token。
+///
+/// 仅信任 loopback 对端（本机 Web 面板 / 本机客户端）。agent HTTP API 绑定
+/// 0.0.0.0，远程部署（公网 / 反向代理后）时该端点属于不可信面，token 一律
+/// 不返回（fail-closed：对端信息缺失同样拒绝），token 经带外渠道交付
+/// （如静态 CYBER_JIANGHU_AGENT_TOKEN）。
+fn expose_auth_token_to_peer(peer: Option<SocketAddr>) -> bool {
+    match peer {
+        // to_canonical：IPv4-mapped IPv6（如 ::ffff:127.0.0.1）归一化为 IPv4 后判定，
+        // 防未来改绑 [::] 双栈时本机对端被误拒（误拒方向是可用性，非安全）
+        Some(addr) => addr.ip().to_canonical().is_loopback(),
+        None => false,
+    }
+}
+
 /// GET /api/v1/setup/status - 返回引导状态
-pub(crate) async fn setup_status_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
-    // 暴露 auth_token 供本地 Web 面板后续 API 调用认证
-    let auth_token = state
-        .device_config
-        .read()
-        .await
-        .as_ref()
-        .map(|c| c.auth_token.clone());
+pub(crate) async fn setup_status_handler(
+    State(state): State<HttpApiState>,
+    // axum 0.8 的 ConnectInfo 未实现 OptionalFromRequestParts，
+    // 用 Result 提取，Err（未接 connect_info / 扩展缺失）视为对端信息缺失
+    peer: Result<ConnectInfo<SocketAddr>, axum::extract::rejection::ExtensionRejection>,
+) -> impl IntoResponse {
+    // 暴露 auth_token 供本机 Web 面板后续 API 调用认证（仅 loopback 对端可见）
+    let auth_token = if expose_auth_token_to_peer(peer.ok().map(|c| c.0)) {
+        state
+            .device_config
+            .read()
+            .await
+            .as_ref()
+            .map(|c| c.auth_token.clone())
+    } else {
+        None
+    };
 
     let config = match crate::config::Config::from_file(&state.config_path) {
         Ok(c) => c,
@@ -640,3 +665,51 @@ pub(crate) async fn set_server_handler(
 }
 
 // ============================================================================
+
+#[cfg(test)]
+mod setup_token_exposure_tests {
+    use super::expose_auth_token_to_peer;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
+    #[test]
+    fn loopback_ipv4_peer_is_trusted() {
+        let peer = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 23340);
+        assert!(expose_auth_token_to_peer(Some(peer)));
+    }
+
+    #[test]
+    fn loopback_ipv6_peer_is_trusted() {
+        let peer = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 23340);
+        assert!(expose_auth_token_to_peer(Some(peer)));
+    }
+
+    #[test]
+    fn v4_mapped_loopback_peer_is_trusted() {
+        // ::ffff:127.0.0.1 经 to_canonical 归一化后应判 loopback（双栈绑定形态的本机对端）
+        let mapped = "::ffff:127.0.0.1".parse::<IpAddr>().unwrap();
+        assert!(expose_auth_token_to_peer(Some(SocketAddr::new(
+            mapped, 23340
+        ))));
+    }
+
+    #[test]
+    fn v4_mapped_lan_peer_is_denied() {
+        let mapped = "::ffff:192.168.1.5".parse::<IpAddr>().unwrap();
+        assert!(!expose_auth_token_to_peer(Some(SocketAddr::new(
+            mapped, 51000
+        ))));
+    }
+
+    #[test]
+    fn lan_and_public_peers_are_denied() {
+        let lan = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 5)), 51000);
+        let public = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 51000);
+        assert!(!expose_auth_token_to_peer(Some(lan)));
+        assert!(!expose_auth_token_to_peer(Some(public)));
+    }
+
+    #[test]
+    fn missing_peer_info_fails_closed() {
+        assert!(!expose_auth_token_to_peer(None));
+    }
+}

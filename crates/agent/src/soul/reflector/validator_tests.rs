@@ -64,6 +64,7 @@ pub(super) fn test_world_state() -> WorldState {
                 travel_cost: 1,
             }],
             gatherable_items: vec![],
+            parent_chain: Vec::new(),
         },
         self_state: AgentSelfState {
             attributes,

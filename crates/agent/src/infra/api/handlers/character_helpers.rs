@@ -80,4 +80,18 @@ pub(crate) async fn get_device_id(state: &HttpApiState) -> Result<(Uuid, String)
     Ok((d.device_id, d.auth_token.clone()))
 }
 
+/// 位置层级表述：父链去掉区域级后与当前名以「·」连接（如 "龙门客栈·大堂"）。
+///
+/// 替代旧的 "名 (类型词)" 拼装：类型词（如 SubScene）对跨地图同名子场景无消歧力，
+/// 层级链才能唯一定位。区域级不进表述（世界级上下文，顶栏保持紧凑）；
+/// 无父链（地图/区域级位置）回落当前名。
+pub(crate) fn hierarchical_location_name(location: &cyber_jianghu_protocol::Location) -> String {
+    let chain = &location.parent_chain;
+    if chain.len() > 1 {
+        format!("{}·{}", chain[1..].join("·"), location.name)
+    } else {
+        location.name.clone()
+    }
+}
+
 // ============================================================================
