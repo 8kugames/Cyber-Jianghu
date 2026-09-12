@@ -721,6 +721,12 @@ impl Agent {
             ERR_DRINK_INVALID_ITEM, ERR_EAT_INVALID_ITEM, ERR_MOVE_INVALID_TARGET,
         };
 
+        // 意图组逐项标记反馈（含通过/驳回明细与可达 ID 列表）原样透传，
+        // 不得被下方叙事化分支吞掉——逐项裁决正是 self-correction 最需要的输入。
+        if reason.starts_with("意图组审查结果：") {
+            return reason.to_string();
+        }
+
         // F2: RuleEngine 增强驳回（含上下文选项）直接透传
         if reason.starts_with(ERR_EAT_INVALID_ITEM)
             || reason.starts_with(ERR_DRINK_INVALID_ITEM)

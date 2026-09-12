@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### Features
+
+- **移动目标规范化 + 意图组逐项裁决反馈**（agent）：`canonicalize_move_target` 在 validate_pipeline 单一收口点下沉 LLM 写的叙事短名/AdjacentNode 名/复合写法（如"龙门客栈-厨房"）到精确 node_id（匹配顺序：精确 ID → 相邻节点名 → 后缀/前缀/包含，唯一候选原位改写，零候选或多候选保持原值照常驳回；7 个单测覆盖短名/精确/邻接名/复合/无匹配/多候选/非移动动作共 7 路径）；soul_cycle 逐 intent 记录通过/驳回（带动作名 + 序号），驳回反馈前缀"意图组审查结果：..."，含通过项明细 + 驳回详情；agent.rs 短路该前缀避免被下游叙事化分支吞掉。实测：移动"厨房"/"客栈"从全量驳回变为端到端 node_id 携带通过；意图组 self-correction 现在能精确知道是第 N 项哪个动作被驳回。
+
+### Bug Fixes
+
+- **健康度看板只读 Token 不可见**（server）：admin 前端 auth.js 新增 `applyHealthTabVisibility`，健康度页签（data-tab-id="health"）仅对 write Token 展示；只读 Token 隐藏该内部验收观测视图。登录/换 Token 后由 completeLogin 刷新；脚本置于 body 末尾，加载时导航栏 DOM 已就绪，无健康度页签的页面为空操作。
+
+### Chore
+
+- **本地留存 server 二进制产物副本**（deploy）：ship-server-binary.sh 在 scp 前 mkdir -p .bin && cp $BIN .bin/server-bin（与远端 .bin/server-bin 同名同内容），便于本地核对 md5 与回滚；备份失败仅警告，不阻塞部署。
+
 ## [0.1.309] - 2026-09-11
 
 ### Refactoring

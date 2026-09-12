@@ -139,6 +139,7 @@ impl super::super::Agent {
                 .map(|b| b.llm_validation.clone());
 
             let mut approved_intents = Vec::new();
+            let mut intent_verdicts: Vec<String> = Vec::new();
             let mut batch_rejection: Option<String> = None;
             let mut batch_layers: Vec<crate::soul::reflector::LayerResult> = Vec::new();
             let mut used_chaos_fallback = false;
@@ -284,7 +285,10 @@ impl super::super::Agent {
             }
 
             // 逐 intent 审查 + self-correction（优化模式）
-            for intent in all_raw_intents {
+            // 移动目标规范化已下沉到 validate_pipeline（normalize 块后单一收口点，
+            // 覆盖 raw/自纠正/别名/Claw/HTTP 全入口）
+            for (intent_idx, intent) in all_raw_intents.into_iter().enumerate() {
+                let intent_action_label = intent.action_type.as_str().to_string();
                 let intent_for_summary = intent.clone();
                 match self
                     .validate_with_reflector(
@@ -338,6 +342,11 @@ impl super::super::Agent {
                         }
                         batch_layers = layers;
                         approved_intents.push(approved);
+                        intent_verdicts.push(format!(
+                            "第{}项[{}]通过",
+                            intent_idx + 1,
+                            intent_action_label
+                        ));
                     }
                     crate::soul::reflector::PipelineValidationResult::Rejected {
                         reason,
@@ -350,8 +359,19 @@ impl super::super::Agent {
                             engine.push_summary_to_window(chain, &intent_for_summary, false);
                         }
                         batch_layers = layers;
-                        let rejection_reason = reason.clone();
-                        self.set_rejection_feedback(reason.clone());
+                        intent_verdicts.push(format!(
+                            "第{}项[{}]驳回",
+                            intent_idx + 1,
+                            intent_action_label
+                        ));
+                        // 反馈明确标记意图组内逐项通过/驳回结果，供 self-correction 精准纠错
+                        let marked_feedback = format!(
+                            "意图组审查结果：{}；驳回详情：{}",
+                            intent_verdicts.join("；"),
+                            reason
+                        );
+                        let rejection_reason = marked_feedback;
+                        self.set_rejection_feedback(rejection_reason.clone());
                         warn!(
                             "Tick {} attempt {} 天魂审查驳回: {}",
                             world_state.tick_id, attempt, rejection_reason

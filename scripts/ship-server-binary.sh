@@ -2,8 +2,9 @@
 # 跨平台编译 → SCP → 服务器重建 image → 验证 → 还原 Dockerfile
 #
 # 用途：本地 Mac ARM 编译 linux/amd64 二进制，绕过小内存服务器 cargo OOM。
-# 流程：zigbuild → scp → 远端 patch Dockerfile 用 COPY 替代 cargo →
-#       docker compose build → up -d → health check → 还原 Dockerfile → 输出 Admin 凭证。
+# 流程：zigbuild → 本地备份 .bin/server-bin → scp → 远端 patch Dockerfile 用
+#       COPY 替代 cargo → docker compose build → up -d → health check →
+#       还原 Dockerfile → 输出 Admin 凭证。
 #
 # 用法：
 #   SERVER=user@host ./scripts/ship-server-binary.sh
@@ -91,6 +92,10 @@ RUSTC="$(rustup which rustc)" cargo zigbuild --release --target "$TARGET" \
     --manifest-path "$PROJECT_ROOT/Cargo.toml" -p cyber-jianghu-server
 BIN_HASH="$(md5 -q "$BIN" 2>/dev/null || md5sum "$BIN" | cut -d' ' -f1)"
 echo "[构建完成] md5=$BIN_HASH"
+
+# 本地留存一份产物副本（与远端 .bin/server-bin 同名同内容），便于核对 md5 / 回滚
+mkdir -p "$PROJECT_ROOT/.bin" && cp "$BIN" "$PROJECT_ROOT/.bin/server-bin" \
+    || echo "[警告] 本地备份失败(不阻塞部署)"
 
 echo "[上传] scp + 远端 patch + build + up + verify"
 scp -q "$BIN" "$SERVER:~/cyber-jianghu-server"

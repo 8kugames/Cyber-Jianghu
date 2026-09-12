@@ -18,7 +18,10 @@ use crate::soul::actor::prompt_template::PromptTemplateConfig;
 use cyber_jianghu_protocol::{GradedValidationConfig, WorldBuildingRules, WorldState};
 
 use super::prompt::ReflectorPrompt;
-use super::rule_engine::{RuleEngine, RuleValidationContext, types::extract_ids_from_world_state};
+use super::rule_engine::{
+    RuleEngine, RuleValidationContext, types::canonicalize_move_target,
+    types::extract_ids_from_world_state,
+};
 use super::types::{
     LayerResult, LlmValidationResponse, PersonaInfo, PipelineValidationResult, RejectionType,
     ValidationRequest, ValidationResult,
@@ -348,6 +351,14 @@ impl ReflectorSoul {
                 );
                 si.action_type = normalized.into();
             }
+        }
+
+        // 移动目标规范化：LLM 常用叙事短名/复合写法填 target_location，而规则与
+        // server 均要求精确 node_id。唯一候选时原位改写，之后的 layer0/1/2 与
+        // 提交对象全部携带精确 ID。必须在 normalize_action_type 之后（动作名已归一），
+        // 且处于本收口点可覆盖 raw/自纠正/别名/Claw/HTTP 全部入口。
+        if let Some(ws) = request.world_state.as_ref() {
+            let _ = canonicalize_move_target(&mut request.intent, ws);
         }
 
         let graded_config = request.runtime.graded_config.clone();
