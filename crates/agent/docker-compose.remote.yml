@@ -1,0 +1,177 @@
+# ============================================================================
+# Cyber-Jianghu Agent 远程部署模板（多实例，每用户一实例）
+# ============================================================================
+#
+# 与 docker-compose.yml（单实例开发环境）的区别：
+#   - 面向 agent 与游戏服务器异机/云端部署：游戏服务器地址写在各实例的 agent.yaml
+#     （注意：CYBER_JIANGHU_SERVER_*_URL 环境变量不被 agent 代码消费，勿依赖）
+#   - 多实例：每实例独立 config 目录、独立数据卷、独立宿主端口、独立静态 token
+#
+# 使用方式：
+#   1. 准备实例配置（必须预置 agent.yaml：agent 启动强依赖该文件，缺失会直接
+#      退出而非自动生成设备身份）：
+#        mkdir -p instances/agent-1/config instances/agent-2/config
+#        cp ../config/agent.yaml.example instances/agent-1/config/agent.yaml
+#        cp ../config/agent.yaml.example instances/agent-2/config/agent.yaml
+#      编辑每个 agent.yaml：
+#        - server.ws_url / server.http_url 指向游戏服务器
+#        - llm 段填 provider / api_key / model（cognitive 模式必需）
+#        - runtime.mode 无需修改：启动命令未带 --mode 时 CLI 默认 cognitive
+#   2. 导出每实例访问 token（openssl rand -hex 32 生成，逐实例不同）：
+#        export CJ_AGENT1_TOKEN=<token-1>
+#        export CJ_AGENT2_TOKEN=<token-2>
+#   3. 全新服务器需先创建外部网络（与游戏服务器 compose 共用）：
+#        docker network create cyber-jianghu-network
+#   4. 启动：
+#        docker compose -f docker-compose.remote.yml up -d
+#   5. 验证（服务器本机）：
+#        curl http://127.0.0.1:23340/api/v1/health
+#
+# LLM / 配置变更：编辑 instances/agent-N/config/agent.yaml 后重启对应实例。
+#
+# 访问链接（分发给对应使用者）：
+#   HTTP API  : http://<本机外网IP>:23340/api/v1
+#   认证      : REST 用 Authorization: Bearer <token>；SSE 用 ?token=<token>
+#   注意：token 不会经 setup/status 端点返回给远程访问者（仅 loopback 对端可见），
+#         必须经带外渠道（二维码/深链/私信）交付。
+#
+# 安全提醒：
+#   - 反向代理与 agent 同机部署时，agent 看到的对端是代理（loopback），会误判为
+#     可信，必须在代理层封禁 /api/v1/setup/（见 QuickStart-Remote-Deployment.md）
+#   - Docker 端口发布后，宿主浏览器访问面板时容器内对端不是 loopback，
+#     面板自动取 token 不可用（详见 QuickStart-Remote-Deployment.md 安全模型节）
+#   - 生产/上架环境必须上 TLS（移动端 iOS ATS 默认拒绝明文 HTTP）
+#   - 本模板固定 cognitive 模式；如需 claw 模式须另行评估 /ws 端口暴露面
+# ============================================================================
+
+services:
+  # ============================================================================
+  # Embedding 服务（向量嵌入 HTTP API，多 Agent 实例共享，避免重复加载模型）
+  # ============================================================================
+  embedding:
+    build:
+      context: ../..
+      dockerfile: ./crates/embedding/Dockerfile
+    container_name: cyber-jianghu-embedding
+    restart: unless-stopped
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      EMBEDDING_PORT: "23350"
+    volumes:
+      - embedding_data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "--max-time",
+          "10",
+          "http://localhost:23350/api/health",
+        ]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 30s
+    networks:
+      - cyber-jianghu-network
+
+  # ============================================================================
+  # Agent 实例 1（宿主端口默认 23340）
+  # ============================================================================
+  agent-1:
+    build:
+      context: ../..
+      dockerfile: ./crates/agent/Dockerfile
+    container_name: cyber-jianghu-agent-1
+    restart: unless-stopped
+    environment:
+      # 远程访问静态 token（与设备 auth_token 取并集，远程客户端必备）
+      CYBER_JIANGHU_AGENT_TOKEN: ${CJ_AGENT1_TOKEN:?CJ_AGENT1_TOKEN is required}
+      RUST_LOG: ${RUST_LOG:-info}
+      PORT: 23340
+      # 共享 Embedding 服务
+      CYBER_JIANGHU_EMBEDDER_REMOTE_URL: http://cyber-jianghu-embedding:23350
+      # 数据持久化目录（token 统计、SQLite、记忆等）
+      CYBER_JIANGHU_DATA_DIR: /app/data
+    ports:
+      - "${AGENT1_PORT:-23340}:23340"
+    volumes:
+      # 每实例独立配置目录（device_id / agent.yaml / 身份隔离的关键，必须预置 agent.yaml）
+      - ./instances/agent-1/config:/app/config
+      - agent1_data:/app/data
+    command: ["sh", "-c", "./agent run --port $${PORT:-23340}"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "curl -f --max-time 10 http://localhost:$${PORT:-23340}/api/v1/health",
+        ]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      embedding:
+        condition: service_healthy
+    networks:
+      - cyber-jianghu-network
+
+  # ============================================================================
+  # Agent 实例 2（宿主端口默认 23341，按需复制更多实例并递增端口）
+  # ============================================================================
+  agent-2:
+    build:
+      context: ../..
+      dockerfile: ./crates/agent/Dockerfile
+    container_name: cyber-jianghu-agent-2
+    restart: unless-stopped
+    environment:
+      CYBER_JIANGHU_AGENT_TOKEN: ${CJ_AGENT2_TOKEN:?CJ_AGENT2_TOKEN is required}
+      RUST_LOG: ${RUST_LOG:-info}
+      PORT: 23340
+      CYBER_JIANGHU_EMBEDDER_REMOTE_URL: http://cyber-jianghu-embedding:23350
+      CYBER_JIANGHU_DATA_DIR: /app/data
+    ports:
+      - "${AGENT2_PORT:-23341}:23340"
+    volumes:
+      - ./instances/agent-2/config:/app/config
+      - agent2_data:/app/data
+    command: ["sh", "-c", "./agent run --port $${PORT:-23340}"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "curl -f --max-time 10 http://localhost:$${PORT:-23340}/api/v1/health",
+        ]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      embedding:
+        condition: service_healthy
+    networks:
+      - cyber-jianghu-network
+
+# ============================================================================
+# 网络配置（与游戏服务器 compose 共用外部网络；如服务器在异机，改用 host 端口直连）
+# ============================================================================
+networks:
+  cyber-jianghu-network:
+    external: true
+
+# ============================================================================
+# 数据卷配置
+# ============================================================================
+volumes:
+  agent1_data:
+    name: cyber-jianghu-agent-1-data
+  agent2_data:
+    name: cyber-jianghu-agent-2-data
+  embedding_data:
+    name: cyber-jianghu-embedding-data

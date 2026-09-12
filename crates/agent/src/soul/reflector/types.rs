@@ -267,6 +267,7 @@ mod tests {
                         travel_cost: 1,
                     }],
                     gatherable_items: vec![],
+                    parent_chain: Vec::new(),
                 },
                 self_state: AgentSelfState {
                     attributes: HashMap::new(),

@@ -43,9 +43,7 @@ services:
     container_name: cyber-jianghu-agent
     restart: unless-stopped
     environment:
-      # 服务端连接配置
-      CYBER_JIANGHU_SERVER_WS_URL: ${AGENT_SERVER_URL:-ws://cyber-jianghu-server:23333/ws}
-      CYBER_JIANGHU_SERVER_HTTP_URL: ${AGENT_SERVER_HTTP_URL:-http://cyber-jianghu-server:23333}
+      # 服务端连接：地址统一在挂载的 config/agent.yaml 的 server.ws_url / server.http_url 配置
 
       # Agent 运行配置
       CYBER_JIANGHU_RUNTIME_MODE: ${AGENT_RUNTIME_MODE:-cognitive}
@@ -66,7 +64,13 @@ services:
       # 数据持久化 - SQLite 数据库和记忆存储
       - agent_data:/app/data
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl -f http://localhost:$${PORT:-23340}/api/v1/health"]
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "curl -f http://localhost:$${PORT:-23340}/api/v1/health",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3

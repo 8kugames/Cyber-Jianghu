@@ -474,6 +474,7 @@ mod tests {
             node_type: "inn".to_string(),
             adjacent_nodes: vec![],
             gatherable_items: vec![],
+            parent_chain: Vec::new(),
         }
     }
 
@@ -806,6 +807,7 @@ mod tests {
             node_type: "street".to_string(),
             adjacent_nodes: vec![],
             gatherable_items: vec![],
+            parent_chain: Vec::new(),
         };
 
         let prev = build_world_state(HashMap::new(), vec![], vec![], vec![], prev_loc);

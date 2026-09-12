@@ -10,6 +10,7 @@
 
 use crate::component::persona::dynamic_persona::DynamicPersona;
 use crate::component::social::RelationshipStore;
+use crate::infra::api::handlers::hierarchical_location_name;
 use cyber_jianghu_protocol::{AvailableAction, WorldState};
 use serde::{Deserialize, Serialize};
 
@@ -316,9 +317,8 @@ impl CognitiveContextBuilder {
         );
 
         let environment = format!(
-            "你正位于{}({})，天气{}",
-            world_state.location.name,
-            world_state.location.node_type,
+            "你正位于{}，天气{}",
+            hierarchical_location_name(&world_state.location),
             world_state.world_time.weather
         );
 

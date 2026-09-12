@@ -240,6 +240,7 @@ mod tests {
                 node_type: "shrine".to_string(),
                 adjacent_nodes: vec![],
                 gatherable_items: vec![],
+                parent_chain: Vec::new(),
             },
             self_state: AgentSelfState {
                 attributes: HashMap::from([("hp".to_string(), 85)]),

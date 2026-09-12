@@ -334,6 +334,14 @@ pub struct Location {
     /// 当前位置可采集的资源（含名称，数据驱动）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gatherable_items: Vec<GatherableItem>,
+
+    /// 祖先名称链（根区域 → 直接父级，不含当前节点；区域根为空链）
+    /// 逐级显示契约：客户端舆图分层布局与位置层级表述的上下文来源。
+    /// 注意：名称链不保证唯一性（极端同名场景仍歧义），唯一定位以 node_id 为准。
+    /// 消费契约：客户端以链尾名称（或节点 ID）在 adjacent_nodes 中匹配直接父级。
+    /// 约定同一父级的邻接集内节点名称唯一（装载配置约定保障）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parent_chain: Vec<String>,
 }
 
 #[cfg(test)]

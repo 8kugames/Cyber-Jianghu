@@ -8,6 +8,7 @@
 mod basic;
 mod biography;
 mod character_helpers;
+pub(crate) use character_helpers::hierarchical_location_name;
 mod character_info;
 mod character_register;
 mod character_reload;

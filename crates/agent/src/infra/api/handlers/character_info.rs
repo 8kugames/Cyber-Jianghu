@@ -15,7 +15,9 @@ use crate::config::CharacterStatus;
 
 use super::HttpApiState;
 use super::basic::ErrorResponse;
-use super::character_helpers::{get_active_character, get_character_by_id_sync};
+use super::character_helpers::{
+    get_active_character, get_character_by_id_sync, hierarchical_location_name,
+};
 
 /// 角色信息响应（合并配置文件 + WorldState 实时数据）
 #[derive(Debug, Serialize)]
@@ -128,7 +130,7 @@ pub(crate) async fn get_character_handler(State(state): State<HttpApiState>) -> 
                 let agent_id = ws.agent_id.map(|id| id.to_string());
                 let attrs = serde_json::to_value(&ws.self_state.attributes).ok();
                 let inv = serde_json::to_value(&ws.self_state.inventory).ok();
-                let loc = Some(format!("{} ({})", ws.location.name, ws.location.node_type));
+                let loc = Some(hierarchical_location_name(&ws.location));
                 let time = enrich_world_time_json(&ws.world_time);
                 (agent_id, attrs, inv, loc, Some(ws.tick_id), time)
             }
@@ -269,7 +271,7 @@ pub(crate) async fn get_character_by_id_handler(
             Some(ws) => {
                 let attrs = serde_json::to_value(&ws.self_state.attributes).ok();
                 let inv = serde_json::to_value(&ws.self_state.inventory).ok();
-                let loc = Some(format!("{} ({})", ws.location.name, ws.location.node_type));
+                let loc = Some(hierarchical_location_name(&ws.location));
                 let time = enrich_world_time_json(&ws.world_time);
                 (attrs, inv, loc, Some(ws.tick_id), time)
             }
@@ -599,6 +601,49 @@ fn enrich_derived_attributes(
         None
     } else {
         Some(serde_json::Value::Object(enriched))
+    }
+}
+
+#[cfg(test)]
+mod hierarchical_location_tests {
+    use super::hierarchical_location_name;
+    use cyber_jianghu_protocol::Location;
+
+    fn loc(name: &str, parent_chain: &[&str]) -> Location {
+        Location {
+            node_id: name.to_string(),
+            name: name.to_string(),
+            node_type: "sub_scene".to_string(),
+            adjacent_nodes: vec![],
+            gatherable_items: vec![],
+            parent_chain: parent_chain.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn empty_or_region_only_chain_falls_back_to_bare_name() {
+        // 区域根本身：空链；地图级（直接挂区域下）：链仅含区域级。均回落裸名
+        assert_eq!(
+            hierarchical_location_name(&loc("河西走廊", &[])),
+            "河西走廊"
+        );
+        assert_eq!(
+            hierarchical_location_name(&loc("酒泉", &["河西走廊"])),
+            "酒泉"
+        );
+    }
+
+    #[test]
+    fn chain_beyond_region_joins_with_middle_dot() {
+        // 链超出区域级后：去首级区域，余下层级以「·」连接
+        assert_eq!(
+            hierarchical_location_name(&loc("大堂", &["河西走廊", "龙门客栈"])),
+            "龙门客栈·大堂"
+        );
+        assert_eq!(
+            hierarchical_location_name(&loc("地窖", &["河西走廊", "龙门客栈", "大堂"])),
+            "龙门客栈·大堂·地窖"
+        );
     }
 }
 

@@ -47,6 +47,7 @@ fn create_test_world_state() -> WorldState {
                 },
             ],
             gatherable_items: vec![],
+            parent_chain: Vec::new(),
         },
         self_state: AgentSelfState {
             attributes,
@@ -139,6 +140,19 @@ fn test_build_with_world_state() {
 
     assert!(!ctx.perception.self_status.is_empty());
     assert!(ctx.perception.environment.contains("江湖客栈"));
+}
+
+#[test]
+fn test_environment_uses_hierarchical_location_name() {
+    // 层级表述：链超出区域级后去首级、以「·」连接（hierarchical_location_name 契约），
+    // 环境串不得再出现类型词括号拼装
+    let mut world_state = create_test_world_state();
+    world_state.location.name = "大堂".to_string();
+    world_state.location.parent_chain = vec!["河西走廊".to_string(), "龙门客栈".to_string()];
+    let builder = CognitiveContextBuilder::default();
+    let ctx = builder.build(&world_state);
+    assert!(ctx.perception.environment.contains("龙门客栈·大堂"));
+    assert!(!ctx.perception.environment.contains("("));
 }
 
 #[test]

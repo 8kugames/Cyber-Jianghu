@@ -179,6 +179,7 @@ pub(super) fn build_world_state_for_agent(
             node_id: current_node_id.clone(),
             name: location_name,
             node_type: location_type,
+            parent_chain: location_registry.ancestor_names(current_node_id),
             adjacent_nodes,
             gatherable_items: location_node
                 .map(|n| {
@@ -382,6 +383,7 @@ pub fn build_reactive_world_state(
             node_id: current_node_id.clone(),
             name: location_name,
             node_type: location_type,
+            parent_chain: location_registry.ancestor_names(current_node_id),
             adjacent_nodes,
             gatherable_items,
         },
@@ -526,6 +528,7 @@ pub fn build_initial_world_state(
             node_id: current_node_id.clone(),
             name: location_name,
             node_type: location_type,
+            parent_chain: location_registry.ancestor_names(current_node_id),
             adjacent_nodes,
             gatherable_items,
         },

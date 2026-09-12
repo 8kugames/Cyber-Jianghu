@@ -1,7 +1,8 @@
 //! HTTP API 认证中间件
 //!
-//! 背景：Agent HTTP API 之前完全无认证。bind 已改为 127.0.0.1，
-//! 但本机任何进程仍可调用 `POST /api/v1/config/llm` 改 LLM endpoint（玩家大脑劫持）。
+//! 背景：Agent HTTP API 之前完全无认证，且实际绑定 0.0.0.0（api/mod.rs bind），
+//! 任何可达端口的进程（含远程对端）都可调用 `POST /api/v1/config/llm` 改 LLM
+//! endpoint（玩家大脑劫持）。历史版本曾以"仅绑 127.0.0.1"为安全前提，该前提不成立。
 //!
 //! 修复：镜像 server 端 `axum::middleware::from_fn_with_state` + `Authorization: Bearer <token>`
 //! 模式。可接受 token 为两者并集：
@@ -32,7 +33,8 @@ pub const AGENT_TOKEN_ENV: &str = "CYBER_JIANGHU_AGENT_TOKEN";
 /// - `/api/v1`、`/api/v1/`：API 根（端点列表），不含敏感数据
 /// - `/api/v1/health`：健康检查（容器编排探针用）
 /// - `/api/v1/version`：协议握手（version 属公开信息，与 client mock 契约一致）
-/// - `/api/v1/setup`：设备注册引导（未认证前的引导端点，若存在）
+/// - `/api/v1/setup`：设备注册引导（未认证前的引导端点，若存在；
+///   setup/status 的 auth_token 仅对 loopback 对端返回，见 setup_status_handler）
 /// - 静态资源：CSS/JS/图标（`/static/`、`/assets/`、`.js`、`.css`、`.ico` 等）
 pub fn is_public_path(path: &str) -> bool {
     // 精确匹配

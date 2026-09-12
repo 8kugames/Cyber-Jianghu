@@ -31,7 +31,7 @@ description: "联调测试执行与分析：通过 .test-agents/ 工具链一键
 - `--no-register`：仅重启（保留现有角色）
 - 定向模式：`restart.sh --register agent-3` 只处理单个 agent
 - 退出码：0 = 全部成功；1 = 有失败（读汇总表定位）
-- server 地址自动从 `docker-compose.yml` 解析（`CYBER_JIANGHU_SERVER_HTTP_URL`），换 server 零脚本改动
+- server 地址自动从各实例 `agent-N/config/agent.yaml` 的 server 段解析（4 实例须一致，异构 FATAL），换 server 改全部 agent.yaml，脚本零改动
 
 ## 标准流程
 
@@ -67,7 +67,7 @@ pkill -f monitor-24h.sh
 ### 1. token mismatch / 401 瞬时拒绝
 
 - **根源**：server 在 device verify/WS 重连时轮换 token；agent 内存值与 device.yaml 文件值不一致
-- **规则**：token 以脚本内建通道为准：主通道 = `GET localhost:<port>/api/v1/setup/status` 的 `auth_token`（内存权威值，调用点现读）；check-round.sh 在仓库根存在 `.agent-static-token` 时优先用之；server 端操作（归隐）经 `POST /api/v1/device/verify` 现取权威值。人工 curl 同样从 setup/status 或静态 token（`.agent-static-token` / `.env` 的 `CYBER_JIANGHU_AGENT_TOKEN`）取值。device.yaml 文件 token 会因 server 端轮换而滞后，禁止用作调用凭证（已从脚本全部移除）
+- **规则**：token 以脚本内建通道为准：主通道 = `docker exec <容器> curl localhost:23340/api/v1/setup/status` 的 `auth_token`（内存权威值，调用点现读；setup/status 的 auth_token 已按对端 loopback 门控，宿主侧 curl 取不到，须在容器内取）；check-round.sh 在仓库根存在 `.agent-static-token` 时优先用之；server 端操作（归隐）经 `POST /api/v1/device/verify` 现取权威值。人工 curl 同样从容器内 setup/status 或静态 token（`.agent-static-token` / `.env` 的 `CYBER_JIANGHU_AGENT_TOKEN`）取值。device.yaml 文件 token 会因 server 端轮换而滞后，禁止用作调用凭证（已从脚本全部移除）
 - **注意**：agent 本地 `has_character=false` 但 server 仍有活跃角色时，agent 侧 rebirth 会自拒（"无法读取角色状态"）——此时用 server 端 retire（restart.sh 已内置）
 
 ### 2. 注册返回 500 空体「服务器拒绝」
@@ -160,7 +160,7 @@ pkill -f monitor-24h.sh
 
 ## 环境备忘
 
-- 远程 server：`http://47.102.120.116:23333`（地址唯一来源 = `.test-agents/docker-compose.yml`）
+- 远程 server：`http://47.102.120.116:23333`（地址唯一来源 = 各实例 `agent-N/config/agent.yaml` 的 server.http_url）
 - 远程日志/部署：`ssh admin@47.102.120.116`，容器名 `cyber-jianghu-server`，远端目录 `/home/admin/Cyber-Jianghu`
 - 本机构建网络对 Docker Hub/BuildKit 不可靠：一律走 restart.sh --build 的离线通道
 - 离线构建基镜像：`local-rust-trixie:builder` / `local-debian-slim:runtime`（脚本自动自举，勿手工删除）

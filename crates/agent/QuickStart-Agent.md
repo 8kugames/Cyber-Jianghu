@@ -12,10 +12,10 @@
 
 Agent 核心逻辑（认知流转、三层记忆、多重人格）均在同一套架构下运行。唯一的区别是 LLM（大语言模型）的调用位置：
 
-| 模式 | 描述 | LLM 客户端实现 | 启动命令 |
-|------|------|---------------|----------|
-| **Cognitive** (默认) | 完全自治。Agent 内部直接调用大模型，闭环生成 Intent。 | `FallbackLlmClient` | `cyber-jianghu-agent run` |
-| **Claw** | 外部大脑。通过 OpenClaw 桥接外部大模型，Agent 本身只提供上下文，决策由 OpenClaw 注入。 | `OpenClawBridge` | `cyber-jianghu-agent run --mode claw` |
+| 模式                 | 描述                                                                                   | LLM 客户端实现      | 启动命令                              |
+| -------------------- | -------------------------------------------------------------------------------------- | ------------------- | ------------------------------------- |
+| **Cognitive** (默认) | 完全自治。Agent 内部直接调用大模型，闭环生成 Intent。                                  | `FallbackLlmClient` | `cyber-jianghu-agent run`             |
+| **Claw**             | 外部大脑。通过 OpenClaw 桥接外部大模型，Agent 本身只提供上下文，决策由 OpenClaw 注入。 | `OpenClawBridge`    | `cyber-jianghu-agent run --mode claw` |
 
 ## 安装与部署
 
@@ -62,11 +62,11 @@ Agent 会启动一个本地的 HTTP API 服务，用于管理面板、状态查�
 
 - **默认端口范围**：`23340-23999`
 - **指定端口**：设置环境变量 `CYBER_JIANGHU_PORT=23340`。若设置为 `0` 或未设置，Agent 会自动在范围内分配可用端口。
-- **服务端连接**：必须确保 `CYBER_JIANGHU_SERVER_WS_URL` 正确指向服务端的 WebSocket 端点（如 `ws://localhost:23333/ws`）。
+- **服务端连接**：在 `agent.yaml` 的 `server.ws_url` / `server.http_url` 中配置服务端地址（如 `ws://localhost:23333/ws`），或启动时用 `--server ws://host:23333/ws` 参数覆盖。`CYBER_JIANGHU_SERVER_WS_URL` 环境变量不被 agent 消费。
 
 ## 多 Agent 部署 (设备与角色分离)
 
-Agent SDK 支持在同一个设备（进程）上托管多个角色。同时，也支持启动多个 Agent 进程，分别映射到不同端口。
+Agent SDK 支持在同一个设备（进程）上托管多个角色。同时，也支持启动多个 Agent 进程，分别映射到不同端口。远程部署（手机端/评审组）场景请参见 [QuickStart-Remote-Deployment.md](QuickStart-Remote-Deployment.md)。
 
 ```yaml
 # docker-compose.multi.yml 示例
@@ -124,4 +124,10 @@ llm:
     - qwen2.5:7b
     - qwen2.5:3b
 ```
+
 也可以通过 Agent 的内置 Web 面板 (`http://localhost:23340/settings.html`) 直接修改并热重载。
+
+注意：面板自动认证依赖 setup/status 对 loopback 对端返回 token，仅原生（非容器）
+本机部署满足；Docker 端口发布形态下宿主浏览器经 NAT 访问，token 不会返回，
+面板将无法通过认证（详见 [QuickStart-Remote-Deployment.md](QuickStart-Remote-Deployment.md)
+安全模型节）。容器部署请直接编辑 `agent.yaml` 后重启实例。

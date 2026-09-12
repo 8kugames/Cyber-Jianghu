@@ -523,6 +523,7 @@ mod tests {
                     })
                     .collect(),
                 gatherable_items: vec![],
+                parent_chain: Vec::new(),
             },
             self_state: cyber_jianghu_protocol::AgentSelfState {
                 attributes: HashMap::new(),

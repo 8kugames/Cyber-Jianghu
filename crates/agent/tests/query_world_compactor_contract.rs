@@ -49,6 +49,7 @@ fn make_world_with_n_entities(n: usize) -> WorldState {
             node_type: "town".to_string(),
             adjacent_nodes: vec![],
             gatherable_items: vec![],
+            parent_chain: Vec::new(),
         },
         self_state: AgentSelfState {
             attributes: HashMap::new(),
@@ -106,6 +107,7 @@ fn make_world_with_n_inventory(n: usize) -> WorldState {
             node_type: "town".to_string(),
             adjacent_nodes: vec![],
             gatherable_items: vec![],
+            parent_chain: Vec::new(),
         },
         self_state: AgentSelfState {
             attributes: HashMap::new(),

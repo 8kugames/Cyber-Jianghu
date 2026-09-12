@@ -113,6 +113,49 @@ impl LocationRegistry {
             .collect()
     }
 
+    /// 祖先名称链（根区域 → 直接父级，不含自身；区域根返回空链）
+    ///
+    /// WorldState.parent_chain 下发用：客户端舆图分层布局与位置层级上下文。
+    /// 层级不变量由 loader 保证（根必为 region、父链无环、无悬空 parent）；
+    /// 深度护栏仅作旁路构造（绕过 loader 直建 registry）的悬挂保护，命中时告警。
+    pub fn ancestor_names(&self, node_id: &str) -> Vec<String> {
+        const MAX_ANCESTOR_DEPTH: usize = 16;
+        let mut chain_rev: Vec<String> = Vec::new();
+        let mut cursor = self
+            .graph
+            .nodes
+            .get(node_id)
+            .and_then(|n| n.parent_id.clone());
+        while let Some(pid) = cursor {
+            if chain_rev.len() >= MAX_ANCESTOR_DEPTH {
+                tracing::warn!(
+                    node_id = %node_id,
+                    max_depth = MAX_ANCESTOR_DEPTH,
+                    "ancestor_names: chain truncated (pathological depth or cyclic config)"
+                );
+                break;
+            }
+            match self.graph.nodes.get(&pid) {
+                Some(node) => {
+                    chain_rev.push(node.name.clone());
+                    cursor = node.parent_id.clone();
+                }
+                None => {
+                    // 防御路径：loader 已 fail-fast 拒绝悬空 parent，仅旁路构造可达。
+                    // 链中途断裂，返回已收集的部分链——与深度护栏同样保持可观测
+                    tracing::warn!(
+                        "位置 {} 的祖先链在 {} 处断裂(父节点未定义,返回部分链)",
+                        node_id,
+                        pid
+                    );
+                    break;
+                }
+            }
+        }
+        chain_rev.reverse();
+        chain_rev
+    }
+
     /// 各节点在指定游戏日的解析描述（时代变体命中优先，回落基础；无描述节点不入表）
     ///
     /// dashboard locations 端点消费（天道全知视角下的时代感知描述）。
@@ -345,6 +388,90 @@ data:
         assert_eq!(
             region_edge.travel_cost, 7,
             "节点级 implicit_travel_cost 应生效而非被丢弃"
+        );
+    }
+}
+
+#[cfg(test)]
+mod ancestor_names_tests {
+    use super::*;
+    use cyber_jianghu_protocol::{LocationGraph, LocationNode, LocationNodeType};
+
+    fn node(id: &str, name: &str, parent: Option<&str>) -> LocationNode {
+        LocationNode {
+            node_id: id.to_string(),
+            name: name.to_string(),
+            node_type: LocationNodeType::SubScene,
+            parent_id: parent.map(|p| p.to_string()),
+            description: None,
+            environmental_damage: None,
+            gatherable_items: vec![],
+            implicit_travel_cost: None,
+            time_variants: vec![],
+        }
+    }
+
+    #[test]
+    fn ancestor_chain_walks_root_to_parent_and_excludes_self() {
+        let mut graph = LocationGraph::new();
+        graph
+            .nodes
+            .insert("河西走廊".to_string(), node("河西走廊", "河西走廊", None));
+        graph.nodes.insert(
+            "龙门客栈".to_string(),
+            node("龙门客栈", "龙门客栈", Some("河西走廊")),
+        );
+        graph.nodes.insert(
+            "龙门大堂".to_string(),
+            node("龙门大堂", "大堂", Some("龙门客栈")),
+        );
+        let registry = LocationRegistry { graph };
+        assert_eq!(
+            registry.ancestor_names("龙门大堂"),
+            vec!["河西走廊".to_string(), "龙门客栈".to_string()]
+        );
+        assert!(registry.ancestor_names("龙门客栈").len() == 1);
+        assert!(registry.ancestor_names("河西走廊").is_empty());
+    }
+
+    #[test]
+    fn ancestor_chain_unknown_or_dangling_node_returns_empty() {
+        let mut graph = LocationGraph::new();
+        graph
+            .nodes
+            .insert("孤点".to_string(), node("孤点", "孤点", Some("缺失的父")));
+        let registry = LocationRegistry { graph };
+        assert!(registry.ancestor_names("不存在").is_empty());
+        assert!(registry.ancestor_names("孤点").is_empty());
+    }
+
+    #[test]
+    fn ancestor_chain_midway_dangling_returns_partial_chain() {
+        // 锁定防御性语义：链中途断裂时返回已收集的部分链。
+        // 正常配置经 loader fail-fast 不会出现悬空 parent，此分支仅防御
+        // 绕过 loader 直建 registry 的旁路构造。
+        let mut graph = LocationGraph::new();
+        graph
+            .nodes
+            .insert("龙门客栈".to_string(), node("龙门客栈", "龙门客栈", None));
+        graph
+            .nodes
+            .insert("大堂".to_string(), node("大堂", "大堂", Some("龙门客栈")));
+        graph
+            .nodes
+            .insert("后院".to_string(), node("后院", "后院", Some("幽灵厨房")));
+        graph
+            .nodes
+            .insert("柴房".to_string(), node("柴房", "柴房", Some("后院")));
+        let registry = LocationRegistry { graph };
+        // 直接父悬空 → 空链
+        assert!(registry.ancestor_names("后院").is_empty());
+        // 链中途断裂（后院→幽灵厨房未定义）→ 保留已收集的部分链
+        assert_eq!(registry.ancestor_names("柴房"), vec!["后院".to_string()]);
+        // 完整链不受影响
+        assert_eq!(
+            registry.ancestor_names("大堂"),
+            vec!["龙门客栈".to_string()]
         );
     }
 }

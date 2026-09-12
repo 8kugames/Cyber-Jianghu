@@ -9,6 +9,7 @@
 
 use crate::component::social::RelationshipStore;
 use crate::infra::api::cognitive_context::load_available_actions_from_file;
+use crate::infra::api::handlers::hierarchical_location_name;
 use cyber_jianghu_protocol::WorldState;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -190,8 +191,8 @@ fn generate_impl(
     sections.push("".to_string());
     sections.push("## 位置".to_string());
     sections.push(format!(
-        "- **{}** ({})",
-        state.location.name, state.location.node_type
+        "- **{}**",
+        hierarchical_location_name(&state.location)
     ));
 
     // 自身状态 - 使用 server 提供的 attribute_descriptions（数据驱动）

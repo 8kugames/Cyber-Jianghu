@@ -349,7 +349,7 @@ pub fn init_test_registry() {
                         {
                             "node_id": "inn",
                             "name": "龙门客栈",
-                            "type": "map",
+                            "type": "region",
                             "parent_id": ""
                         },
                         {

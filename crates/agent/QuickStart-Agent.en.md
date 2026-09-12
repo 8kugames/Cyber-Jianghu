@@ -12,10 +12,10 @@ Since the Agent is the bridge to the server, **the server must already be runnin
 
 The agent's core logic (cognitive flow, three-tier memory, multi-persona) runs on the same architecture. The only difference is where the LLM call happens:
 
-| Mode | Description | LLM Client | Startup Command |
-|------|-------------|-----------|-----------------|
-| **Cognitive** (default) | Fully autonomous. The Agent calls the LLM internally and generates Intents in a closed loop. | `FallbackLlmClient` | `cyber-jianghu-agent run` |
-| **Claw** | External brain. The Agent bridges an external LLM via OpenClaw; the Agent itself only provides context, while the decision is injected by OpenClaw. | `OpenClawBridge` | `cyber-jianghu-agent run --mode claw` |
+| Mode                    | Description                                                                                                                                         | LLM Client          | Startup Command                       |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | ------------------------------------- |
+| **Cognitive** (default) | Fully autonomous. The Agent calls the LLM internally and generates Intents in a closed loop.                                                        | `FallbackLlmClient` | `cyber-jianghu-agent run`             |
+| **Claw**                | External brain. The Agent bridges an external LLM via OpenClaw; the Agent itself only provides context, while the decision is injected by OpenClaw. | `OpenClawBridge`    | `cyber-jianghu-agent run --mode claw` |
 
 ## Installation and Deployment
 
@@ -62,7 +62,7 @@ The Agent starts a local HTTP API service for the dashboard, state queries, and 
 
 - **Default port range**: `23340-23999`
 - **Specify a port**: set the environment variable `CYBER_JIANGHU_PORT=23340`. If set to `0` or unset, the Agent auto-allocates an available port in the range.
-- **Server connection**: ensure `CYBER_JIANGHU_SERVER_WS_URL` correctly points to the server's WebSocket endpoint (e.g. `ws://localhost:23333/ws`).
+- **Server connection**: configure `server.ws_url` / `server.http_url` in the agent's `agent.yaml` (e.g. `ws://localhost:23333/ws`), or override at startup with the `--server ws://host:23333/ws` flag. The `CYBER_JIANGHU_SERVER_WS_URL` environment variable is not consumed by the agent.
 
 ## Multi-Agent Deployment (Device-Character Separation)
 
