@@ -234,6 +234,10 @@ function layerDetailText(detail) {
     return detail === 'llm validation skipped' ? '低风险行为，跳过 LLM 审查' : detail;
 }
 
+function isLlmSkipDetail(detail) {
+    return detail === 'llm validation skipped' || detail === '低风险行为，跳过 LLM 审查';
+}
+
 // 从 API 获取天魂层展示名（数据驱动），返回 LAYER_NAMES 的超集
 // 优先从 souls.yaml layer_display 配置读取，失败时降级到 LAYER_NAMES
 var _layerDisplayCache = null;

@@ -471,6 +471,10 @@ function renderRenhun(data) {
 }
 
 // 天魂层 detail 文案：分级审核跳过的中文化（兼容历史英文记录）
+function isLlmSkipDetail(detail) {
+    return detail === 'llm validation skipped' || detail === '低风险行为，跳过 LLM 审查';
+}
+
 function layerDetailText(detail) {
     return detail === 'llm validation skipped' ? '低风险行为，跳过 LLM 审查' : detail;
 }
@@ -487,7 +491,10 @@ function renderTianhun(data) {
         html += `<div class="soul-layers">`;
         for (const l of data.layers) {
             const name = LAYER_NAMES[l.layer] || l.layer;
-            html += `<span class="soul-layer-tag ${l.passed ? 'passed' : 'failed'}">${escapeHtml(name)}`;
+            // 历史快照（server JSONB / 旧记录）中 skip 曾被误判为 passed=false，
+            // 渲染时以 skip 文本为准强制按通过展示
+            const passed = l.passed || isLlmSkipDetail(l.detail);
+            html += `<span class="soul-layer-tag ${passed ? 'passed' : 'failed'}">${escapeHtml(name)}`;
             if (l.detail) html += `: ${escapeHtml(layerDetailText(l.detail))}`;
             html += `</span>`;
         }

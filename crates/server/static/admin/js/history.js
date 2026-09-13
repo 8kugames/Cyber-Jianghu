@@ -545,7 +545,9 @@ function renderTianhunCell(cycles, entry) {
         if (th.layers && th.layers.length > 0) {
             html += `<div class="soul-layers">`;
             th.layers.forEach((l) => {
-                const passed = l.passed;
+                // 历史快照 JSONB 中 skip 曾被误判为 passed=false，
+                // 渲染时以 skip 文本为准强制按通过展示
+                const passed = l.passed || isLlmSkipDetail(l.detail);
                 const name = (_layerDisplayCache || LAYER_NAMES)[l.layer] || l.layer;
                 const detail = l.detail ? ": " + escapeHtml(layerDetailText(l.detail)) : "";
                 html += `<span class="soul-layer-tag ${passed ? "passed" : "failed"}">${escapeHtml(name)}${detail}</span>`;
