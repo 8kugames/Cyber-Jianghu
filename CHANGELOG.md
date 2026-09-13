@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.1.311] - 2026-09-13
+
 ### Features
 
 - **位置层级链 parent_chain 下发**（protocol+server+agent）：`Location` 新增 `parent_chain` 祖先名称链（PROTOCOL_VERSION 3.1.0 → 3.2.0，`world_state.schema.json` 契约同步）；server `ancestor_names` 沿位置图上溯生成，三处 WorldState 广播填充；agent 层级表述（父链去区域级、「·」连接）统一 character_info/context/cognitive_context。loader fail-fast 收紧：根节点必须 region、父链不得成环（pin 住 chain[0] 区域假设与上溯终止性）；ancestor_names 护栏截断与链断裂路径补 warn。
