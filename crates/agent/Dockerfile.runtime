@@ -1,0 +1,78 @@
+# ============================================================================
+# Agent 运行时镜像配方（runtime-only，单一来源）
+# ============================================================================
+# 供"二进制注入"型构建复用（避免各脚本内联重复配方导致漂移）：
+#   - scripts/build-agent-image.sh   本地联调镜像（BASE=local-debian-slim:runtime）
+#   - .test-agents/push_server.sh    远端部署镜像（BASE=debian:trixie-slim）
+#
+# 运行时阶段的权威结构来源是 crates/agent/Dockerfile 的 Stage 2；本文件与其保持
+# 同步，仅 COPY 来源从 --from=builder 改为 build context 中的现成二进制。
+# restart.sh 的离线多阶段构建因需要 COPY --from=builder（--from 不可参数化），
+# 仍独立维护，见其内部同步注释。
+#
+# 用法（build context 必须是仓库根）：
+#   docker build -f crates/agent/Dockerfile.runtime \
+#     --build-arg BASE=<runtime基镜像> \
+#     --build-arg AGENT_BIN=<context 内二进制路径> \
+#     [--build-arg INSTALL_APT=0] \
+#     -t <tag> .
+#
+# INSTALL_APT：基镜像已烘焙运行时依赖（如 local-debian-slim:runtime，由 restart.sh
+# 制备）时传 0，跳过 apt 层，实现完全离线构建；公网基镜像（debian:trixie-slim）
+# 保持默认 1。
+# ============================================================================
+
+ARG BASE=debian:trixie-slim
+FROM ${BASE}
+
+# 配置 Debian 镜像源（阿里云）；基镜像已配置或无该文件时无害
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources || \
+    sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list
+
+# 安装运行时依赖；INSTALL_APT=0 时跳过（基镜像已含，离线构建场景）
+ARG INSTALL_APT=1
+RUN if [ "$INSTALL_APT" = "1" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl libssl3 && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+# 创建非root用户
+RUN groupadd -g 1000 cyberjianghu && \
+    useradd -u 1000 -g cyberjianghu -m -s /bin/bash cyberjianghu
+
+# 设置工作目录
+WORKDIR /app
+
+# 注入现成二进制（由调用方通过 AGENT_BIN 指定 context 内路径）
+ARG AGENT_BIN=.bin/agent-bin
+COPY ${AGENT_BIN} /app/agent
+RUN chmod +x /app/agent
+
+# 复制 entrypoint 脚本并设置权限
+COPY crates/agent/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# 复制静态文件（Web 面板）
+COPY crates/agent/static /app/static
+
+# 创建数据和配置目录并设置权限
+RUN mkdir -p /app/data /app/config && \
+    chown -R cyberjianghu:cyberjianghu /app
+
+# 暴露 HTTP API 端口（默认 23340，运行时可通过 PORT 环境变量覆盖）
+EXPOSE 23340
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:23340/api/v1/health || exit 1
+
+# 设置环境变量
+ENV RUST_LOG=info \
+    CYBER_JIANGHU_CONFIG_DIR=/app/config \
+    CYBER_JIANGHU_DATA_DIR=/app/data
+
+# 容器入口点
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+
+# 默认启动（用于 OpenClaw 等外部助手集成）
+CMD ["./agent", "run", "--port", "23340"]

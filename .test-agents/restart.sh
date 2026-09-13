@@ -1,5 +1,5 @@
 #!/bin/bash
-# restart.sh - 联调测试一站式工具：镜像构建(离线) + 容器重启 + 角色归隐/注册 + 健康验证
+# restart.sh - 联调测试一站式工具：镜像构建 + 容器重启 + 角色归隐/注册 + 健康验证
 #
 # 用法:
 #   ./restart.sh                 # 重启所有 agent（保留现有角色）
@@ -80,7 +80,7 @@ for arg in "$@"; do
       echo "选项:"
       echo "  --register      归隐旧角色（server 端）+ 注册全新角色 + 验证"
       echo "  --no-register   跳过注册"
-      echo "  --build         重启前离线重建镜像（本地基镜像通道）"
+      echo "  --build         重启前重建镜像（委托 scripts/build-agent-image.sh，增量 2-5 分钟）"
       echo "  agent-name      只操作指定 agent（如 agent-1）"
       exit 0
       ;;
@@ -166,79 +166,19 @@ ensure_base_images() {
   log_ok "本地基镜像制备完成"
 }
 
+# 离线构建 agent 镜像：委托 scripts/build-agent-image.sh（容器内编译 + cargo 卷缓存
+# 增量 2-5 分钟 + Dockerfile.runtime 打包）。取代曾内联的离线多阶段 Dockerfile
+# （无 cache mount 全量编译 15-25 分钟，且配方与 canonical 漂移）。
+# 首次运行需下载 crates（cargo 卷持久缓存，之后离线增量）。
 build_image_offline() {
   ensure_base_images || return 1
 
-  local dockerfile="/tmp/Dockerfile.offline.$$"
-  # 由本脚本生成离线版 Dockerfile；结构需与 crates/agent/Dockerfile 保持同步
-  # 差异: FROM 指向本地基镜像；apt 步骤已烘焙进基镜像故省略
-  cat > "$dockerfile" <<'DOCKERFILE'
-# ============================================================================
-# TEMP offline Dockerfile — 由 restart.sh 生成，勿手工编辑
-# ============================================================================
-FROM local-rust-trixie:builder AS builder
-
-ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
-ENV RUSTUP_DIST_SERVER=https://mirrors.aliyun.com/rustup
-ENV RUSTUP_UPDATE_ROOT=https://mirrors.aliyun.com/rustup
-ENV CARGO_REGISTRIES_ALIYUN_INDEX=https://mirrors.aliyun.com/crates.io-index/ \
-    CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
-
-WORKDIR /app
-
-RUN mkdir -p ./.cargo \
-    && echo '[source.crates-io]\n\
-replace-with = "aliyun"\n\
-\n\
-[source.aliyun]\n\
-registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"' > ./.cargo/config.toml
-
-COPY Cargo.toml Cargo.lock* ./
-COPY crates/protocol/Cargo.toml ./crates/protocol/
-COPY crates/agent/Cargo.toml ./crates/agent/
-COPY crates/embedding/Cargo.toml ./crates/embedding/
-COPY crates/server/Cargo.toml ./crates/server/
-
-RUN mkdir -p crates/server/src && echo "fn main() {}" > crates/server/src/main.rs && \
-    mkdir -p crates/embedding/src && echo "" > crates/embedding/src/lib.rs
-
-COPY crates/protocol/src ./crates/protocol/src
-COPY crates/embedding/src ./crates/embedding/src
-COPY crates/agent/src ./crates/agent/src
-
-RUN cargo build --release -p cyber-jianghu-agent && \
-    cp /app/target/release/cyber-jianghu-agent /app/agent-bin
-
-FROM local-debian-slim:runtime
-
-RUN groupadd -g 1000 cyberjianghu && \
-    useradd -u 1000 -g cyberjianghu -m -s /bin/bash cyberjianghu
-
-WORKDIR /app
-
-COPY --from=builder /app/agent-bin /app/agent
-COPY crates/agent/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-COPY crates/agent/static /app/static
-RUN mkdir -p /app/data /app/config && \
-    chown -R cyberjianghu:cyberjianghu /app
-
-EXPOSE 23340
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:23340/api/v1/health || exit 1
-ENV RUST_LOG=info \
-    CYBER_JIANGHU_CONFIG_DIR=/app/config \
-    CYBER_JIANGHU_DATA_DIR=/app/data
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["./agent", "run", "--port", "23340"]
-DOCKERFILE
-
-  log_info "离线构建 agent 镜像（无 cache mount，全量编译约 15-25 分钟）..."
-  # 项目根 = 本脚本目录的上级（restart.sh 位于 .test-agents/）
-  ( cd .. && DOCKER_BUILDKIT=0 docker build -f "$dockerfile" -t agent-agent:latest . )
-  local rc=$?
-  rm -f "$dockerfile"
-  return $rc
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if ! "$script_dir/../scripts/build-agent-image.sh"; then
+    log_fail "agent 镜像构建失败（scripts/build-agent-image.sh）"
+    return 1
+  fi
 }
 
 # ── server 端归隐（幂等，先于注册，满足单设备单活跃角色约束）─────────────────

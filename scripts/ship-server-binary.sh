@@ -100,8 +100,10 @@ mkdir -p "$PROJECT_ROOT/.bin" && cp "$BIN" "$PROJECT_ROOT/.bin/server-bin" \
 echo "[上传] scp + 远端 patch + build + up + verify"
 scp -q "$BIN" "$SERVER:~/cyber-jianghu-server"
 sync_dirty_to_server
-ssh -o BatchMode=yes "$SERVER" bash -s -- "$REMOTE_PROJECT" "$COMPOSE_DIR" \
-    "$BIN_HASH" "$HEALTH_TIMEOUT" "${SKIP_VERIFY:-}" "$MIN_FREE_MB" <<'REMOTE'
+# 单引号逐个包裹：ssh 拼接会丢参数边界，空 SKIP_VERIFY 位被吞后 MIN_FREE_MB
+# 前移占位，导致默认路径静默跳过 health 验证（已实证的潜伏 bug）
+ssh -o BatchMode=yes "$SERVER" \
+    "bash -s -- '$REMOTE_PROJECT' '$COMPOSE_DIR' '$BIN_HASH' '$HEALTH_TIMEOUT' '${SKIP_VERIFY:-}' '$MIN_FREE_MB'" <<'REMOTE'
 set -e
 RP="$1"; CD="$2"; MD5="$3"; TIMEOUT="$4"; SKIP="$5"; MINFREE="$6"
 BACKUP="$CD/Dockerfile.bak"
