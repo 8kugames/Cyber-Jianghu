@@ -32,7 +32,7 @@ use anyhow::{Context, Result};
 use axum::{
     Router,
     body::Body,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 use std::fs::OpenOptions;
 use std::net::SocketAddr;
@@ -764,6 +764,8 @@ async fn main() -> Result<()> {
             post(handlers::agent::get_prompt_templates),
         )
         // Vendor 补货规则管理
+        // 注意：MethodRouter::layer 只包裹调用时已有的方法。读写分权路由必须用
+        // merge 拼接，否则后加的 write layer 会把 GET 一并包进写鉴权。
         .route(
             "/api/dashboard/agent/{id}/vendor-refill",
             get(handlers::vendor::get_vendor_refill_rules)
@@ -771,10 +773,11 @@ async fn main() -> Result<()> {
                     state.clone(),
                     handlers::auth::require_client_read_token,
                 ))
-                .put(handlers::vendor::set_vendor_refill_rule)
-                .layer(axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    handlers::auth::require_write_token,
+                .merge(put(handlers::vendor::set_vendor_refill_rule).layer(
+                    axum::middleware::from_fn_with_state(
+                        state.clone(),
+                        handlers::auth::require_write_token,
+                    ),
                 )),
         )
         .route(
@@ -793,10 +796,11 @@ async fn main() -> Result<()> {
                     state.clone(),
                     handlers::auth::require_client_read_token,
                 ))
-                .post(handlers::role::assign_role_handler)
-                .layer(axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    handlers::auth::require_write_token,
+                .merge(post(handlers::role::assign_role_handler).layer(
+                    axum::middleware::from_fn_with_state(
+                        state.clone(),
+                        handlers::auth::require_write_token,
+                    ),
                 )),
         )
         .route(
@@ -1087,10 +1091,11 @@ async fn main() -> Result<()> {
                     state.clone(),
                     handlers::auth::require_client_read_token,
                 ))
-                .put(handlers::config_editor::update_config_content)
-                .layer(axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    handlers::auth::require_write_token,
+                .merge(put(handlers::config_editor::update_config_content).layer(
+                    axum::middleware::from_fn_with_state(
+                        state.clone(),
+                        handlers::auth::require_write_token,
+                    ),
                 )),
         )
         // LLM Config API (独立于通用配置编辑器)
@@ -1103,10 +1108,11 @@ async fn main() -> Result<()> {
                     state.clone(),
                     handlers::auth::require_client_read_token,
                 ))
-                .post(handlers::config_llm::save_llm_config)
-                .layer(axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    handlers::auth::require_write_token,
+                .merge(post(handlers::config_llm::save_llm_config).layer(
+                    axum::middleware::from_fn_with_state(
+                        state.clone(),
+                        handlers::auth::require_write_token,
+                    ),
                 )),
         )
         // LLM Status & Enabled API
@@ -1124,10 +1130,11 @@ async fn main() -> Result<()> {
                     state.clone(),
                     handlers::auth::require_client_read_token,
                 ))
-                .post(handlers::config_llm::set_llm_enabled)
-                .layer(axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    handlers::auth::require_write_token,
+                .merge(post(handlers::config_llm::set_llm_enabled).layer(
+                    axum::middleware::from_fn_with_state(
+                        state.clone(),
+                        handlers::auth::require_write_token,
+                    ),
                 )),
         )
         // Config Reload API (需要 Write 权限)

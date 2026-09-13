@@ -427,16 +427,20 @@ Timestamps in the relationship protocol are `i64` milliseconds (Unix epoch), not
 - `GET /api/dashboard/locations` - Location/map graph structure
 - `GET /api/dashboard/dialogues` - Aggregated dialogue view (supports `?limit`, `?tick_from`)
 - `GET /api/dashboard/deaths` - Death timeline (supports `?limit`, `?tick_from`)
+- `GET /api/config/{filename}` - Get config file content (frontend boot fetches locations/attributes YAML)
+- `GET /api/dashboard/config/llm` - Get LLM config
+- `GET /api/dashboard/config/llm/enabled` - LLM enabled flag
+- `GET /api/dashboard/agent/{id}/roles` - Get agent roles
 
 **Dashboard (Write Token)**:
 
 - `POST /api/dashboard/agents/cleanup` - Cleanup offline agents
 - `POST /api/dashboard/chronicles/generate` - Generate chronicle
 - `PUT /api/dashboard/agent/{id}/vendor-refill` - Set vendor refill rules
-- `DELETE /api/dashboard/agent/{id}/vendor-refill/{item_id}` - Delete vendor refill rule
-- `GET/PUT /api/config/{filename}` - Get/update config file content
-- `POST /api/config/llm` - Save LLM config
-- `GET/POST /api/config/llm/enabled` - LLM enabled flag
+- `PUT /api/config/{filename}` - Update config file content
+- `POST /api/dashboard/config/llm` - Save LLM config
+- `POST /api/dashboard/config/llm/enabled` - Set LLM enabled flag
+- `POST /api/dashboard/agent/{id}/roles` - Assign role
 
 **Admin Auth**:
 
