@@ -1022,6 +1022,20 @@ impl HttpApiState {
         result
     }
 
+    /// 将 tick 到达广播给 SSE 订阅者（/api/v1/state/stream）
+    ///
+    /// 唯一调用方：lifecycle `update_tick_state`（每个到达的 WorldState 必经之路）。
+    /// 修复点：此前 tick_update_tx 的唯一 send 点位于无调用方的 http_decision 死代码中，
+    /// SSE 流在订阅首发一帧后永久沉默，下游世界视图冻结。
+    /// 无订阅者时不发送也不告警——面板未连接是常态而非错误（R7：无异常可吞）。
+    pub fn notify_tick_observers(&self, world_state: &WorldState) {
+        if self.tick_update_tx.receiver_count() > 0
+            && let Err(e) = self.tick_update_tx.send(world_state.tick_id)
+        {
+            tracing::warn!("tick_update_tx.send 失败（receiver 可能已 drop）：{e:?}");
+        }
+    }
+
     /// 在 Tick 处理后异步更新关系描述
     pub async fn maybe_update_narratives(&self, world_state: &WorldState) {
         let Some(generator) = &self.narrative_generator else {

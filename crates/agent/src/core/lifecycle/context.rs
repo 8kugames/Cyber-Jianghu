@@ -127,6 +127,9 @@ impl super::super::Agent {
         // 2.5 社交事件 → 自动更新关系（非阻塞，spawn 后台任务）
         self.process_social_events(&world_state.events_log, &world_state.entities);
 
+        // 2.6 关系名册同步：初遇登记 + 名称跟随（幂等，本地 SQLite）
+        self.sync_relationship_roster(&world_state.entities, world_state.tick_id);
+
         // 3. 遗忘机制（间隔由 memory.forgetting_interval_ticks 配置）
         if world_state.tick_id % self.config.memory.forgetting_interval_ticks == 0
             && let Err(e) = self.run_forgetting(world_state.tick_id).await

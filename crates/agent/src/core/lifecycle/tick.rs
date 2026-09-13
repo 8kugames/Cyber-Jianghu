@@ -104,6 +104,12 @@ impl super::super::Agent {
         if let Some(ref engine) = self.cognitive_engine {
             engine.record_idle_summary(world_state.tick_id, flavor);
         }
+        // 空转占位落库（route_type='idle_skip'）：三魂纪事时间轴保持连续，
+        // 下游凭 route_type 区分"无经历的空转"与"记录加载失败"。
+        // recorder 不可用时静默跳过——失败原因已在 soul_recorder_for 内 error 级记录。
+        if let Some(recorder) = self.soul_recorder().await {
+            recorder.record_idle_skip(world_state.tick_id, flavor).await;
+        }
     }
 
     pub(super) async fn update_tick_state(
@@ -413,6 +419,10 @@ impl super::super::Agent {
             *last_update = Some(std::time::Instant::now());
 
             api_state.maybe_update_narratives(world_state).await;
+
+            // 广播 tick 到达（SSE state/stream 实时刷新；先更新 current_state 再广播，
+            // 保证订阅端拉到的快照即本 tick 帧）
+            api_state.notify_tick_observers(world_state);
         }
 
         if let Some(ref mut char_cfg) = self.character_config {

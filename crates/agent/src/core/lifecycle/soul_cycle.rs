@@ -19,6 +19,34 @@ use tracing::{info, warn};
 use crate::component::memory::backend::MemoryBackend;
 use crate::models::Intent;
 
+/// 记忆通道元游戏术语黑名单（与天魂 Layer3 绝对禁止项同源：soul/reflector/prompt.rs）。
+/// ASCII 词按原文精确匹配（"MP" 不误伤 camp/temp 等英文词），中文词直接包含匹配。
+const MEMORY_OOC_ASCII_TERMS: &[&str] = &["HP", "SAN", "MP", "NPC"];
+const MEMORY_OOC_CN_TERMS: &[&str] = &[
+    "玩家",
+    "血量",
+    "数值",
+    "属性栏",
+    "状态栏",
+    "登录",
+    "存档",
+    "复活",
+    "经验值",
+    "账号",
+    "充值",
+    "服务器",
+    "上线",
+    "掉线",
+    "版本",
+    "补丁",
+];
+
+/// 判定文本是否含元游戏术语（元术语不得经由记忆通道进入世界模型）
+fn contains_meta_game_term(text: &str) -> bool {
+    MEMORY_OOC_ASCII_TERMS.iter().any(|t| text.contains(t))
+        || MEMORY_OOC_CN_TERMS.iter().any(|t| text.contains(t))
+}
+
 /// 三魂循环输出
 pub(crate) struct SoulCycleResult {
     pub intent: Intent,
@@ -230,24 +258,27 @@ impl super::super::Agent {
                 .join("；");
             let renhun_thought_log = raw_intent.thought_log.as_deref().unwrap_or("");
 
-            // 重要记忆固化
-            #[allow(clippy::collapsible_if)]
+            // 重要记忆固化（入库前元游戏术语过滤，同天魂绝对禁止项：
+            // "温九辞被记忆标成 NPC"的客户端侧兜底，模板修正为根因修复）
             if let Some(ref chain) = cognitive_chain
                 && chain.should_remember == Some(true)
                 && let Some(ref content) = chain.memory_content
-                && let Some(ref mm) = self.memory_manager
             {
-                let entry = crate::component::memory::types::MemoryEntry::new(
-                    world_state.agent_id.unwrap_or_default(),
-                    world_state.tick_id,
-                    content.clone(),
-                )
-                .with_importance(1.0);
-                let mut mm_guard = mm.write().await;
-                if let Err(e) = mm_guard.episodic_mut().add(&mut entry.clone()).await {
-                    warn!("重要记忆固化失败: {}", e);
-                } else {
-                    info!("重要记忆已固化: {}", content);
+                if contains_meta_game_term(content) {
+                    warn!("重要记忆含元游戏术语，拒绝入库: {}", content);
+                } else if let Some(ref mm) = self.memory_manager {
+                    let entry = crate::component::memory::types::MemoryEntry::new(
+                        world_state.agent_id.unwrap_or_default(),
+                        world_state.tick_id,
+                        content.clone(),
+                    )
+                    .with_importance(1.0);
+                    let mut mm_guard = mm.write().await;
+                    if let Err(e) = mm_guard.episodic_mut().add(&mut entry.clone()).await {
+                        warn!("重要记忆固化失败: {}", e);
+                    } else {
+                        info!("重要记忆已固化: {}", content);
+                    }
                 }
             }
 
@@ -673,5 +704,26 @@ used_chaos_fallback = true;
             intent: final_intent,
             validated: final_intent_validated,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::contains_meta_game_term;
+
+    #[test]
+    fn test_meta_term_detection_matches_reflector_ban_list() {
+        // 元术语必须拦截（"温九辞被记忆标成 NPC"回归）
+        assert!(contains_meta_game_term("关键NPC交互：温九辞递来一壶酒"));
+        assert!(contains_meta_game_term("我的HP只剩4点"));
+        assert!(contains_meta_game_term("这个玩家很友善"));
+        assert!(contains_meta_game_term("等级提升了，经验值大增"));
+
+        // 正常武侠叙事不得误伤
+        assert!(!contains_meta_game_term("与温九辞对饮，谈笑甚欢"));
+        assert!(!contains_meta_game_term("客栈中小憩，恢复体力"));
+        assert!(!contains_meta_game_term("act as 一名镖师押送货物"));
+        // ASCII 词仅大写精确匹配：英文普通词含 mp/san 不误伤
+        assert!(!contains_meta_game_term("扎营过夜 camp，sample 货物"));
     }
 }

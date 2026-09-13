@@ -296,6 +296,13 @@ pub async fn agent_retire(
     match db::retire_agent(&state.db_pool, payload.device_id, &payload.auth_token).await {
         Ok(result) => {
             if result.action_taken {
+                // 归隐角色立即退出运行时世界：从状态缓存移除，防止 Tick 边界
+                // 继续以更高 tick_id 持久化缓存中的 is_alive=true 快照，
+                // 覆盖 retire_agent 写入的 is_alive=false 归隐快照，
+                // 导致仪表盘把已归隐角色误报为存活
+                if let Some(retired_id) = result.retired_agent_id {
+                    state.agent_state_cache.remove(&retired_id);
+                }
                 info!(
                     "Agent 归隐成功: {} ({}) 已归隐",
                     result.retired_name.as_ref().unwrap_or(&"-".to_string()),

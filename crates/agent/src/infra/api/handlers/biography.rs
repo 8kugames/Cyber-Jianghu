@@ -479,3 +479,37 @@ pub(crate) async fn generate_biography_for_agent(
 
     Ok(bio)
 }
+
+/// 归隐触发传记生成（fire-and-forget，带重试）
+///
+/// 与死亡路径（lifecycle handle_death）语义对齐：终态角色需要“盖棺定论”传记。
+/// 必须在本地 character.yaml 状态翻转为 Retired 之后调用，
+/// 保证 generate_biography_for_agent 读到终态并强制重新生成。
+pub(crate) async fn spawn_retire_biography_generation(state: &HttpApiState, agent_id: Uuid) {
+    let state = state.clone();
+    tokio::spawn(async move {
+        const MAX_RETRIES: u32 = 3;
+        const RETRY_DELAY_SECS: u64 = 30;
+        info!("[biography] 归隐触发传记生成: agent={}", agent_id);
+        for attempt in 0..MAX_RETRIES {
+            match generate_biography_for_agent(&state, agent_id).await {
+                Ok(bio) => {
+                    info!("[biography] 归隐传记生成成功: {}字", bio.chars().count());
+                    return;
+                }
+                Err(e) => {
+                    warn!(
+                        "[biography] 归隐传记生成失败 (attempt {}/{}): {}",
+                        attempt + 1,
+                        MAX_RETRIES,
+                        e
+                    );
+                    if attempt + 1 < MAX_RETRIES {
+                        tokio::time::sleep(std::time::Duration::from_secs(RETRY_DELAY_SECS)).await;
+                    }
+                }
+            }
+        }
+        warn!("[biography] 归隐传记生成最终失败: agent={}", agent_id);
+    });
+}

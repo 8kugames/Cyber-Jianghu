@@ -172,4 +172,21 @@ impl super::Agent {
             }
         });
     }
+
+    /// 每 tick 关系名册同步：初遇登记 + 名称跟随
+    ///
+    /// 与 process_social_events 互补：后者只在真实社交事件后由 LLM 评估建档且失败无重试，
+    /// 此处保证"同处一地即相识"，并让对方改名在下一认知 tick 自愈（幂等，本地 SQLite）。
+    /// 实体的出现/位置变化为 Important 级 delta 信号，认知循环必然执行，
+    /// 因此本调用不会因空转跳过而漏掉初遇。
+    pub fn sync_relationship_roster(&self, entities: &[crate::models::Entity], tick_id: i64) {
+        let Some(ref store) = self.relationship_store else {
+            return;
+        };
+        let roster: Vec<(uuid::Uuid, String)> =
+            entities.iter().map(|e| (e.id, e.name.clone())).collect();
+        if let Err(e) = store.sync_roster(&roster, tick_id) {
+            tracing::warn!("关系名册同步失败: {}", e);
+        }
+    }
 }

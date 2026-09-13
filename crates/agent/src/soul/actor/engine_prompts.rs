@@ -410,7 +410,10 @@ impl super::CognitiveEngine {
                             label, rel.favorability, desc_suffix
                         )
                     })
-                    .unwrap_or_else(|| "（你不认识此人）".to_string());
+                    .unwrap_or_else(|| {
+                        "（素不相识——对方与你一样是有名有姓、自主行动的江湖人，不是无名的背景人物）"
+                            .to_string()
+                    });
 
                 ws_parts.push(format!(
                     "- {} (ID: {}){}",

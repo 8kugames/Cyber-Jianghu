@@ -413,6 +413,34 @@ impl SoulCycleRecorder {
         }
     }
 
+    /// 记录空转 tick 占位（route_type='idle_skip'，区别于真实认知循环的 'main'）
+    ///
+    /// 让三魂纪事时间轴连续：下游可凭 route_type 区分"无经历的空转"与"记录加载失败"。
+    /// INSERT OR IGNORE：同一 tick 若已有真实认知记录则绝不覆盖。
+    pub async fn record_idle_skip(&self, tick_id: i64, narrative: &str) {
+        let conn = self
+            .conn
+            .lock()
+            .expect("soul_cycle_recorder lock not poisoned");
+        let created_at = Utc::now().to_rfc3339();
+
+        let result = conn.execute(
+            "INSERT OR IGNORE INTO soul_cycle_record
+             (tick_id, attempt, renhun_narrative, route_type, created_at)
+             VALUES (?1, 0, ?2, 'idle_skip', ?3)",
+            params![tick_id, narrative, created_at],
+        );
+
+        match result {
+            Ok(_) => tracing::debug!("[soul_cycle] Recorded idle_skip for tick {}", tick_id),
+            Err(e) => tracing::warn!(
+                "[soul_cycle] Failed to record idle_skip for tick {}: {}",
+                tick_id,
+                e
+            ),
+        }
+    }
+
     /// 记录地魂 tool calling 日志
     pub async fn record_earth_tool_calls(&self, tick_id: i64, attempt: i32, tool_calls_json: &str) {
         let conn = self
@@ -521,9 +549,10 @@ impl SoulCycleRecorder {
             .conn
             .lock()
             .map_err(|e| anyhow::anyhow!("soul_cycle_record lock poisoned: {e}"))?;
-        // 取最近一条成功的记录（attempt 最大的，通常是最终通过的）
+        // 取最近一条成功的记录（attempt 最大的，通常是最终通过的）；
+        // 排除 idle_skip 占位行——"你上一轮的行动"提示不得把空转占位当作真实行动
         conn.query_row(
-            "SELECT renhun_narrative FROM soul_cycle_record WHERE tick_id < ?1 AND renhun_narrative IS NOT NULL ORDER BY tick_id DESC, attempt DESC LIMIT 1",
+            "SELECT renhun_narrative FROM soul_cycle_record WHERE tick_id < ?1 AND renhun_narrative IS NOT NULL AND route_type = 'main' ORDER BY tick_id DESC, attempt DESC LIMIT 1",
             params![before_tick_id],
             |row| row.get(0),
         )
@@ -1228,6 +1257,56 @@ mod tests {
         assert!(
             result.is_err(),
             "get_immediate_by_tick 在 DB 损坏时必须返回 Err"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_record_idle_skip_writes_distinguishable_placeholder() {
+        let (_dir, recorder) = make_recorder();
+        recorder
+            .record_idle_skip(7, "（空转：无显著变化，未执行认知循环）")
+            .await;
+
+        let records = recorder.get_by_tick(7).await.expect("get_by_tick in test");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].route_type, "idle_skip");
+        assert_eq!(
+            records[0].renhun_narrative.as_deref(),
+            Some("（空转：无显著变化，未执行认知循环）")
+        );
+        assert_eq!(records[0].tianhun_result, None, "占位行不得伪装天魂结果");
+    }
+
+    #[tokio::test]
+    async fn test_record_idle_skip_never_overwrites_cognitive_record() {
+        let (_dir, recorder) = make_recorder();
+        recorder
+            .record_renhun(7, 0, "真实决策", "...", "test-model")
+            .await;
+        recorder.record_idle_skip(7, "（空转）").await;
+
+        let records = recorder.get_by_tick(7).await.expect("get_by_tick in test");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].route_type, "main");
+        assert_eq!(records[0].renhun_narrative.as_deref(), Some("真实决策"));
+    }
+
+    #[tokio::test]
+    async fn test_get_last_renhun_narrative_ignores_idle_placeholder() {
+        let (_dir, recorder) = make_recorder();
+        recorder
+            .record_renhun(10, 0, "真实行动", "...", "test-model")
+            .await;
+        recorder.record_idle_skip(12, "（空转）").await;
+
+        let narrative = recorder
+            .get_last_renhun_narrative(20)
+            .await
+            .expect("get_last_renhun_narrative in test");
+        assert_eq!(
+            narrative.as_deref(),
+            Some("真实行动"),
+            "「上一轮的行动」通道不得把空转占位当作真实行动"
         );
     }
 }

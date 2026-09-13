@@ -431,9 +431,9 @@ function renderBasicInfo(agent) {
     escapeHtml(getLocationName(agent.location)) +
     "</div>" +
     '<div class="detail-item"><span class="detail-label">状态:</span> <span class="status-badge ' +
-    (agent.is_alive ? "status-alive" : "status-dead") +
+    (agent.status === "retired" ? "status-retired" : agent.is_alive ? "status-alive" : "status-dead") +
     '">' +
-    (agent.is_alive ? "存活" : "死亡") +
+    (agent.status === "retired" ? "已归隐" : agent.is_alive ? "存活" : "死亡") +
     "</span></div>" +
     '<div class="detail-item"><span class="detail-label">创建时间:</span> ' +
     escapeHtml(new Date(agent.created_at).toLocaleString()) +
@@ -632,15 +632,12 @@ async function renderInventoryManage(agent) {
         '<div style="font-size: 12px; color: var(--text-subtle); text-align: center; padding: 10px;">配方映射未加载，无法注入配方</div>' +
         "</div>";
     }
-  } else {
-    html +=
-      '<div class="detail-section">' +
-      '<div style="font-size: 12px; color: var(--text-subtle); text-align: center; padding: 10px;">需要编辑权限才能注入物品</div>' +
-      "</div>";
   }
 
-  // Vendor 补货规则配置（仅 write token 可编辑）
-  html += await renderVendorRefillSection(agent.id);
+  // Vendor 补货规则配置（仅 write token 可见）
+  if (authTokenType === "write") {
+    html += await renderVendorRefillSection(agent.id);
+  }
 
   return html;
 }
@@ -1236,11 +1233,21 @@ function renderBiographyTab(agent) {
         '</div>' +
       '</div>';
   } else {
-    var statusText = agent.is_alive ? "存活" : (agent.status || "非存活");
+    var statusText, biographyHint;
+    if (agent.status === "retired") {
+      statusText = "已归隐";
+      biographyHint = "归隐时应自动撰写传记，未生成时可在对应 Agent 面板手动触发";
+    } else if (agent.status === "dead") {
+      statusText = "已死亡";
+      biographyHint = "死亡时应自动撰写传记，未生成时可在对应 Agent 面板手动触发";
+    } else {
+      statusText = agent.is_alive ? "存活" : "状态未知";
+      biographyHint = "传记将在死亡或归隐后由 AI 撰写";
+    }
     container.innerHTML =
       '<div style="text-align: center; padding: 40px 20px; color: var(--text-subtle);">' +
         '<div style="font-size: 14px; margin-bottom: 8px;">暂无传记</div>' +
-        '<div style="font-size: 12px;">角色' + escapeHtml(statusText) + '状态，传记将在死亡或归隐后由 AI 撰写</div>' +
+        '<div style="font-size: 12px;">角色' + escapeHtml(statusText) + '，' + escapeHtml(biographyHint) + '</div>' +
       '</div>';
   }
 }

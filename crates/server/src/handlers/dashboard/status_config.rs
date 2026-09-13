@@ -57,6 +57,9 @@ pub struct AgentDetail {
     pub stamina: i32,
     pub max_stamina: i32,
     pub is_alive: bool,
+    /// 数据库终态标记（active/retired/dead）：与 is_alive 独立下发，
+    /// 供前端区分“归隐”与“死亡”（is_alive 是二值快照，无法表达归隐）
+    pub status: String,
     pub inventory: Vec<AgentInventoryItem>,
     pub attributes: std::collections::HashMap<String, i32>,
     /// 当前年龄（游戏年），NULL = 不朽
@@ -101,6 +104,11 @@ pub async fn get_agent_details(
         Some(row) => row,
         None => return Err(axum::http::StatusCode::NOT_FOUND),
     };
+
+    // 数据库终态标记优先：retired/dead 角色的历史状态快照可能因 tick 残留
+    // 写入（修复前）而携带 is_alive=true，此处按 db_status 收敛，
+    // 与列表接口“数据库状态优先”语义一致
+    let db_status: String = agent_row.get("status");
 
     // 2. Get latest state
     let state_row =
@@ -330,7 +338,8 @@ pub async fn get_agent_details(
         max_hydration,
         stamina,
         max_stamina,
-        is_alive,
+        is_alive: is_alive && db_status == "active",
+        status: db_status,
         inventory,
         attributes: attributes_map,
         age,

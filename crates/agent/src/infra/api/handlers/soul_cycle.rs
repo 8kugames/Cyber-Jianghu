@@ -528,6 +528,11 @@ pub(crate) async fn rebirth_character_handler(
         );
     }
 
+    // 仅当本次调用真实执行了归隐（Alive 分支 + server 成功响应）时，
+    // 后续才触发归隐传记生成
+    let retired_now =
+        character_status == crate::config::CharacterStatus::Alive && status.is_success();
+
     // 3. 清理本地文件系统：扫描 characters/ 目录，将 Alive 角色标记为 Retired
     let characters_dir = state.character_dir.read().await.clone();
     if let Ok(entries) = std::fs::read_dir(&characters_dir) {
@@ -547,6 +552,13 @@ pub(crate) async fn rebirth_character_handler(
                 }
             }
         }
+    }
+
+    // 3.5 归隐传记生成（fire-and-forget）：本地 character.yaml 已翻转为
+    // Retired，generate_biography_for_agent 对终态角色强制重新生成，
+    // 产出“盖棺定论”传记并回传 server（对齐死亡路径语义）
+    if retired_now {
+        crate::infra::api::handlers::spawn_retire_biography_generation(&state, agent_id).await;
     }
 
     // 4. 清理内存状态
