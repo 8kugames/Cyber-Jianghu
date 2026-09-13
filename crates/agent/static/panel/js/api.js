@@ -188,6 +188,17 @@ function handleUnauthorized() {
 /// 从 /api/v1/setup/status（公开端点）拉取 auth_token 并缓存。
 /// 在面板启动时调用一次。
 export async function refreshAuthToken() {
+    // URL ?token= 优先：带外交付入口（远程部署时 setup/status 不再向非 loopback
+    // 对端返回 token，浏览器经 http://host:port/?token=xxx 直接进入已认证面板）
+    try {
+        const urlToken = new URLSearchParams(window.location.search).get('token');
+        if (urlToken) {
+            setStoredAuthToken(urlToken);
+            return urlToken;
+        }
+    } catch (_) {
+        // 非 window 环境或 URL 异常，回落既有序列
+    }
     try {
         const data = await get(API.SETUP_STATUS, { timeout: 3000, retries: 0 });
         if (data?.auth_token) {
