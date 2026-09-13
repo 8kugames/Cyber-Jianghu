@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Features
+
+- **位置层级链 parent_chain 下发**（protocol+server+agent）：`Location` 新增 `parent_chain` 祖先名称链（PROTOCOL_VERSION 3.1.0 → 3.2.0，`world_state.schema.json` 契约同步）；server `ancestor_names` 沿位置图上溯生成，三处 WorldState 广播填充；agent 层级表述（父链去区域级、「·」连接）统一 character_info/context/cognitive_context。loader fail-fast 收紧：根节点必须 region、父链不得成环（pin 住 chain[0] 区域假设与上溯终止性）；ancestor_names 护栏截断与链断裂路径补 warn。
+- **setup token loopback 门控 + 面板显式横幅**（agent）：`setup_status` 的 auth_token 仅对 loopback 对端返回（fail-closed + `to_canonical` 归一化 v4-mapped）；面板补未获 token / 401 失效 / SSE 停连三类显式横幅，替代静默降级。
+
+### Chore
+
+- **server 地址迁移 agent.yaml + 远程部署栈**（deploy）：server 地址从 compose 环境变量（agent 从未消费的死配置）迁移至各实例 agent.yaml server 段；restart.sh/monitor-24h.sh 解析源同步切换（4 实例一致性 FATAL）；联调 SKILL 与三处文档对齐；新增远程部署文档 `QuickStart-Remote-Deployment.md` 与 `docker-compose.remote.yml`（token 带外交付、loopback 失真披露、embedding 同机共存注意）。
+
 ## [0.1.310] - 2026-09-12
 
 ### Features
