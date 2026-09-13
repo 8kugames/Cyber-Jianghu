@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================================
-# pre-commit: 版本号控制
+# pre-commit: 版本号控制 + 质量前置检查
+#   · 暂存区含 .rs 变更时, 先跑 cargo fmt --check 与 clippy (与 CI 同款), 失败即中止
 #   · 暂存区含 crates/<crate>/ 的 .rs/.toml/.yaml 变更时, 该 crate 版本 patch +1
 #   · 同步更新依赖方 Cargo.toml 中的 path 依赖版本引用
 #   · 同步刷新 Cargo.lock (cargo update -w)，按 untrack 决策(f0834eb7)仅本地维护，不入库
@@ -104,6 +105,25 @@ update_dependencies() {
         MODIFIED_FILES+=("$cargo_file")
     done
 }
+
+# --- 质量前置检查: 暂存区含 .rs 变更时跑 fmt/clippy (与 CI 检查同款) ---
+# 放在版本 bump 之前: 检查失败立即中止, 不产生任何 bump/git add 副作用
+STAGED_RS=$(git diff --cached --name-only | grep -E '\.rs$' || true)
+if [ -n "$STAGED_RS" ]; then
+    echo -e "${BLUE}→${NC} cargo fmt --check"
+    if ! cargo fmt --check; then
+        echo -e "${RED}✗${NC} cargo fmt --check 未通过，请执行 cargo fmt 后重新暂存提交" >&2
+        exit 1
+    fi
+    echo -e "${GREEN}✓${NC} fmt 通过"
+
+    echo -e "${BLUE}→${NC} cargo clippy --workspace --all-targets -- -D warnings"
+    if ! cargo clippy --workspace --all-targets -- -D warnings; then
+        echo -e "${RED}✗${NC} clippy 未通过（warnings 即错误），修复后重新提交（可 cargo clippy --workspace --all-targets --fix）" >&2
+        exit 1
+    fi
+    echo -e "${GREEN}✓${NC} clippy 通过"
+fi
 
 MODIFIED_FILES=()
 
