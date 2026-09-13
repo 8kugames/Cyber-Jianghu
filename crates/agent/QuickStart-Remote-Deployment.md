@@ -62,25 +62,35 @@ agent 代码消费（存量遗留），游戏服务器地址只认 `agent.yaml` 
 | token       | 该实例的 `CJ_AGENTx_TOKEN`     | REST 用 `Authorization: Bearer`，SSE 用 `?token=` |
 | ws (server) | `ws://<游戏服务器IP>:23333/ws` | agent 已代连，客户端通常无需直连 server           |
 
-交付方式：带外渠道（二维码 / 深链 / 私信）。客户端（Godot）侧经
-`CYBER_JIANGHU_AGENT_TOKEN` 环境变量注入 token 接入（当前 v1 行为；连接预设中的
-per-preset 独立 token 为占位能力，尚未生效）。
+推荐把 base_url + token 打包成**接入链接**交付（带外渠道：二维码 / 深链 / 私信），
+两种等价格式：
+
+1. 规范格式（QR / 深链复用）：
+   `cj://connect?base_url=<urlencoded>&token=<token>[&name=<显示名>]`
+2. 裸 web 格式（浏览器直接打开即认证，客户端同样可导入）：
+   `http://<服务器IP>:23340/?token=<token>`
+
+客户端（Godot）接入方式：设置页“接入链接”粘贴以上任一格式导入（导入即成为
+活动连接，凭据持久化 user://；注意导入为全局凭据切换，多实例混连场景删除导入
+或重启恢复）；桌面版另支持启动参数 `-- --import-link=<链接>`；
+`CYBER_JIANGHU_AGENT_TOKEN` 环境变量注入仍可用（优先级高于导入）。
 
 ## 安全模型（重要）
 
 - **`/api/v1/setup/status` 仅对 loopback 对端返回 device auth_token**
   （`setup_status_handler` 按 socket 对端地址判定，对端信息缺失一律 fail-closed）。
   远程访问者无法经此端点获取 token，token 必须带外交付。
-- **agent-web 面板的远程与容器化访问限制**：面板首次加载依赖 setup/status 自动取
-  token，以下两种形态都拿不到 token，且当前面板无手动输入 token 的入口（后续版本
-  补充）：
-  1. 远程浏览器访问（对端是远程主机，非 loopback）；
-  2. Docker 端口发布下的宿主浏览器访问（端口发布经 docker-proxy/DNAT，容器内看到的
-     对端是网桥网关 IP 而非 loopback；可用
+- **agent-web 面板的认证入口**：面板启动时优先从 URL `?token=` 读取 token（带外
+  交付入口），无该参数时回落 setup/status 自动获取（仅 loopback 对端可用）。
+  因此：
+  1. 远程浏览器打开 `http://<IP>:<port>/?token=<token>` 即进入已认证面板
+     （含 LLM 配置等全部操作）；
+  2. 不带 token 直接打开面板根路径则是未认证状态（受保护操作 401）——这是
+     loopback 门控的预期行为，可用
      `curl -s http://127.0.0.1:23340/api/v1/setup/status | grep -c auth_token`
-     在你的部署形态上实测，输出 0 即受此限制）。
-     因此容器化实例的 LLM 配置一律走 `instances/agent-N/config/agent.yaml` 编辑 +
-     重启实例；面板操作仅限原生（非容器）部署的本机浏览器。
+     实测验证（Docker 端口发布下宿主访问同样不返回，输出 0 即门控生效）；
+  3. 容器化实例的 LLM 配置：面板（带 token 的 web 地址）与直接编辑
+     `instances/agent-N/config/agent.yaml` 后重启，两者等价。
 - **反向代理注意**：代理与 agent 同机时，agent 看到的对端是代理（loopback），
   loopback 判定会失真。同机反代必须在代理层封禁引导端点（nginx 示例）：
 
