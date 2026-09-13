@@ -40,11 +40,10 @@ impl super::super::Agent {
                 .into_iter()
                 .filter_map(|(detail, layer)| {
                     detail.map(|d| {
-                        let passed =
-                            crate::soul::reflector::types::is_layer_pass_detail(d);
+                        let passed = crate::soul::reflector::types::is_layer_pass_detail(d);
                         // skip 类通过备注保留展示；常规"通过"文本不重复展示
-                        let keep_detail = passed
-                            && crate::soul::reflector::types::is_llm_skip_detail(d);
+                        let keep_detail =
+                            passed && crate::soul::reflector::types::is_llm_skip_detail(d);
                         cyber_jianghu_protocol::LayerReport {
                             layer: layer.to_string(),
                             passed,
