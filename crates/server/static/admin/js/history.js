@@ -547,7 +547,8 @@ function renderTianhunCell(cycles, entry) {
             th.layers.forEach((l) => {
                 const passed = l.passed;
                 const name = (_layerDisplayCache || LAYER_NAMES)[l.layer] || l.layer;
-                html += `<span class="soul-layer-tag ${passed ? "passed" : "failed"}">${escapeHtml(name)}${passed ? "" : ": " + escapeHtml(l.detail || "")}</span>`;
+                const detail = l.detail ? ": " + escapeHtml(layerDetailText(l.detail)) : "";
+                html += `<span class="soul-layer-tag ${passed ? "passed" : "failed"}">${escapeHtml(name)}${detail}</span>`;
             });
             html += `</div>`;
         }

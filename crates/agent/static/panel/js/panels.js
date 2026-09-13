@@ -470,6 +470,11 @@ function renderRenhun(data) {
     return html;
 }
 
+// 天魂层 detail 文案：分级审核跳过的中文化（兼容历史英文记录）
+function layerDetailText(detail) {
+    return detail === 'llm validation skipped' ? '低风险行为，跳过 LLM 审查' : detail;
+}
+
 function renderTianhun(data) {
     if (!data) return '';
     let html = `<div class="exp-tianhun"><span class="exp-soul-label">天魂</span><div class="exp-soul-content">`;
@@ -483,7 +488,7 @@ function renderTianhun(data) {
         for (const l of data.layers) {
             const name = LAYER_NAMES[l.layer] || l.layer;
             html += `<span class="soul-layer-tag ${l.passed ? 'passed' : 'failed'}">${escapeHtml(name)}`;
-            if (!l.passed && l.detail) html += `: ${escapeHtml(l.detail)}`;
+            if (l.detail) html += `: ${escapeHtml(layerDetailText(l.detail))}`;
             html += `</span>`;
         }
         html += `</div>`;

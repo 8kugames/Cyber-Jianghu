@@ -229,6 +229,11 @@ var LAYER_NAMES = {
     layer3: "意图审查",
 };
 
+// 天魂层 detail 文案：分级审核跳过的中文化（兼容历史英文记录）
+function layerDetailText(detail) {
+    return detail === 'llm validation skipped' ? '低风险行为，跳过 LLM 审查' : detail;
+}
+
 // 从 API 获取天魂层展示名（数据驱动），返回 LAYER_NAMES 的超集
 // 优先从 souls.yaml layer_display 配置读取，失败时降级到 LAYER_NAMES
 var _layerDisplayCache = null;

@@ -117,11 +117,18 @@ fn record_to_attempt_entry(
     ]
     .iter()
     .map(|(detail, layer)| {
-        let passed = detail.map(|d| d == "通过" || d.is_empty()).unwrap_or(true);
+        let passed = detail
+            .map(crate::soul::reflector::types::is_layer_pass_detail)
+            .unwrap_or(true);
         LayerResultEntry {
             layer: layer.to_string(),
             passed,
-            detail: if passed {
+            // skip 类通过备注保留展示；常规"通过"文本不重复展示
+            detail: if passed
+                && !detail
+                    .map(crate::soul::reflector::types::is_llm_skip_detail)
+                    .unwrap_or(false)
+            {
                 None
             } else {
                 Some(detail.unwrap_or("驳回").to_string())

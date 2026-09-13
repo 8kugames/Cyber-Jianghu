@@ -423,7 +423,7 @@ impl ReflectorSoul {
             layers.push(LayerResult {
                 layer: "layer3",
                 passed: true,
-                detail: Some("llm validation skipped".to_string()),
+                detail: Some("低风险行为，跳过 LLM 审查".to_string()),
             });
             return Ok(PipelineValidationResult::Approved {
                 intent: request.intent,

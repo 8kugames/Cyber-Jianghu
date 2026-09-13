@@ -82,6 +82,23 @@ pub struct LayerResult {
     pub detail: Option<String>,
 }
 
+/// 分级审核跳过备注（layer3 skip 时 detail 携带，语义为 passed=true）。
+/// 新记录写中文文案；历史英文文本保留兼容识别。
+pub fn is_llm_skip_detail(detail: &str) -> bool {
+    matches!(
+        detail,
+        "llm validation skipped" | "低风险行为，跳过 LLM 审查"
+    )
+}
+
+/// 判定天魂层 detail 文本是否表示"通过"语义。
+///
+/// soul_cycle 记录链（record_tianhun 三列 / 上报 metadata）只存 detail 文本，
+/// passed 需从文本还原；skip 类文本是"通过但有备注"，不在白名单会被误判为失败。
+pub fn is_layer_pass_detail(detail: &str) -> bool {
+    matches!(detail, "通过" | "") || is_llm_skip_detail(detail)
+}
+
 /// ReflectorSoul 完整审查结果
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]

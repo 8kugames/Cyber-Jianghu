@@ -230,7 +230,8 @@ pub enum ValidationType {
     MaxValue,
     MinLength,
     MaxLength,
-    /// 校验字段值（如 item_id）必须在物品注册表（items.yaml）中存在
+    /// 校验字段值（如 item_id）必须是完整 uuid 且可反解到注册物品（items.yaml）。
+    /// 严格模式：裸物品名/短码一律拒绝（与执行器 resolve_item_id 对齐）
     ItemExists,
 }
 

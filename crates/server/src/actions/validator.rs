@@ -276,14 +276,24 @@ fn apply_field_validations(
                 }
             }
             ValidationType::ItemExists => {
-                // 校验字段值（通常是 item_id）必须是 items.yaml 中已配置的合法物品。
-                // 拦截 LLM 幻觉产生的、不在物品注册表中的无效 ID。
+                // 严格 uuid 审查：与执行器 resolve_item_id（仅接受完整 uuid）对齐，
+                // 全链路强制 uuid 引用。拒绝两类输入：
+                // 1. 非完整 uuid（裸物品名/短码/格式错误）；
+                // 2. 合法 uuid 但反解不到注册物品（items.yaml 配置漂移或 LLM 幻觉）。
                 // 若该字段在此动作类型上不存在（get_field_str 返回 None），跳过校验——
                 // 字段存在性已由 required_fields / not_empty 校验覆盖，避免误伤非物品动作。
                 let Some(value) = parsed.get_field_str(field) else {
                     continue;
                 };
-                if !crate::game_data::registry::ItemRegistry::exists(&value) {
+                if Uuid::parse_str(&value).is_err() {
+                    return Err(GameError::InvalidActionData {
+                        reason: format!(
+                            "物品 \"{}\" 非法：item_id 必须是完整 uuid（36 位，与背包/世界状态一致），不接受名称或短码",
+                            value
+                        ),
+                    });
+                }
+                if crate::items::resolve_item_id(&value).is_none() {
                     return Err(GameError::InvalidActionData {
                         reason: format!("物品 \"{}\" 不存在（不在物品配置中）", value),
                     });
@@ -472,4 +482,66 @@ fn validate_target_colocated_typed(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod item_exists_tests {
+    use super::*;
+    use crate::actions::{ParsedActionData, YongData};
+    use crate::game_data::types::actions::{ActionValidation, FieldValidation};
+    use std::collections::HashMap;
+
+    fn item_exists_validation() -> ActionValidation {
+        let mut validation = ActionValidation::default();
+        validation.field_validations.push(FieldValidation {
+            field: "item_id".to_string(),
+            validation_type: ValidationType::ItemExists,
+            params: HashMap::new(),
+        });
+        validation
+    }
+
+    fn yong(item_id: &str) -> ParsedActionData {
+        ParsedActionData::Yong(YongData {
+            item_id: item_id.to_string(),
+        })
+    }
+
+    #[test]
+    fn item_exists_accepts_registered_full_uuid() {
+        crate::game_data::init_test_registry();
+        let uuid = crate::items::item_uuid("馒头").to_string();
+        assert!(apply_field_validations(&yong(&uuid), &item_exists_validation()).is_ok());
+    }
+
+    #[test]
+    fn item_exists_rejects_bare_item_name() {
+        crate::game_data::init_test_registry();
+        let err = apply_field_validations(&yong("馒头"), &item_exists_validation()).unwrap_err();
+        assert!(err.to_string().contains("完整 uuid"), "got: {err}");
+    }
+
+    #[test]
+    fn item_exists_rejects_short_uuid() {
+        crate::game_data::init_test_registry();
+        let short = crate::items::item_uuid("馒头").to_string()[..8].to_string();
+        let err = apply_field_validations(&yong(&short), &item_exists_validation()).unwrap_err();
+        assert!(err.to_string().contains("完整 uuid"), "got: {err}");
+    }
+
+    #[test]
+    fn item_exists_rejects_unregistered_uuid() {
+        crate::game_data::init_test_registry();
+        let fake = uuid::Uuid::new_v4().to_string();
+        let err = apply_field_validations(&yong(&fake), &item_exists_validation()).unwrap_err();
+        assert!(err.to_string().contains("不在物品配置中"), "got: {err}");
+    }
+
+    #[test]
+    fn item_exists_skips_when_field_absent() {
+        crate::game_data::init_test_registry();
+        assert!(
+            apply_field_validations(&ParsedActionData::None, &item_exists_validation()).is_ok()
+        );
+    }
 }
