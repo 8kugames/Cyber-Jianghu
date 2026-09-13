@@ -503,17 +503,19 @@ async function renderInventoryManage(agent) {
       : '<div class="inventory-grid">' +
         agent.inventory
           .map(function (item) {
-            // 物品展示统一 名称[短uuid]；uuid 缺失（display-map 未命中）时退化为裸名称
+            // 物品展示统一 名称 + 短uuid（与 formatNameId 同源：displayMapCache.item_uuids，短 id 取前 8 位）；
+            // 卡片内分行展示：名称 / 短uuid / 数量徽章，uuid 缺失（display-map 未命中）时不渲染 id 行
             var itemUuid = displayMapCache.item_uuids[item.item_id];
-            var itemDisplay = itemUuid
-              ? formatNameId(item.name, itemUuid)
-              : item.name;
+            var shortId = itemUuid ? String(itemUuid).substring(0, 8) : "";
             return (
               '<div class="inventory-item">' +
-              '<div style="margin-bottom: 2px;">' +
-              escapeHtml(itemDisplay) +
+              '<div class="inventory-item-name">' +
+              escapeHtml(item.name) +
               "</div>" +
-              '<div style="font-weight: 600; color: var(--text-secondary);">x' +
+              (shortId
+                ? '<div class="inventory-item-id">' + escapeHtml(shortId) + "</div>"
+                : "") +
+              '<div class="inventory-item-count">x' +
               escapeHtml(item.count) +
               "</div></div>"
             );
