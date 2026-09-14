@@ -163,12 +163,16 @@ impl ParsedActionData {
     }
 
     /// 从 typed 数据中提取 target_agent_id（统一处理 String/Option<String>/Option<Uuid>）
+    ///
+    /// 取(agent) 的目标在 source_id 字段：纳入提取以复用同地/存在性校验框架，
+    /// 物理约束"必须与对方同处一地才可接触其背包"
     pub fn get_target_agent_id(&self) -> Option<String> {
         match self {
             Self::Attack(d) => Some(d.target_agent_id.clone()),
             Self::Teach(d) => Some(d.target_agent_id.clone()),
             Self::Speak(d) => d.target_agent_id.map(|id| id.to_string()),
             Self::Observe(d) => d.target_agent_id.clone(),
+            Self::Qu(d) if d.source_type == "agent" => d.source_id.clone(),
             Self::Generic(v) => v.get("target_agent_id")?.as_str().map(|s| s.to_string()),
             _ => None,
         }

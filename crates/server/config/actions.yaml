@@ -75,10 +75,16 @@ data:
         - quantity
       optional_fields:
         - source_id
+      # source_type=agent 时（source_id 即目标）必须与对方同处一地：
+      # 物理上不同地无法接触对方背包，杜绝远程搬空
+      requires_target_colocated: true
       field_validations:
         - field: quantity
           validation_type: min_value
           min_value: 1
+        - field: quantity
+          validation_type: max_value
+          max_value: 9999
         - field: item_id
           validation_type: item_exists
     requirements:

@@ -523,12 +523,11 @@ fn validate_target_colocated_typed(
     agent_state: &AgentState,
     all_states: &[AgentState],
 ) -> Result<(), GameError> {
-    let target_id_str =
-        parsed
-            .get_target_agent_id()
-            .ok_or_else(|| GameError::InvalidActionData {
-                reason: "缺少 target_agent_id 字段".to_string(),
-            })?;
+    // 同地校验只约束"被引用的目标"；未引用目标（如 取 的 ground/resource 形态）
+    // 直接通过——字段存在性由 required_fields 覆盖，不在此处误伤
+    let Some(target_id_str) = parsed.get_target_agent_id() else {
+        return Ok(());
+    };
 
     let candidates: Vec<Uuid> = all_states.iter().map(|s| s.agent_id).collect();
     let target_id =
