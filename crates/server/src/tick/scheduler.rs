@@ -699,7 +699,13 @@ impl TickScheduler {
                 if remaining_budget <= 0 {
                     break;
                 }
-                let buy_count = rule.refill_to.min(remaining_budget);
+                // refill_to 语义是"补到该数量"（handler 校验 refill_to > threshold），
+                // 采购量 = 目标 - 现有，受剩余预算封顶；旧实现按 refill_to 全量买入，
+                // 库存接近阈值时也会超补
+                let buy_count = (rule.refill_to - current).max(0).min(remaining_budget);
+                if buy_count <= 0 {
+                    continue;
+                }
 
                 sqlx::query(
                     "INSERT INTO agent_inventory (agent_id, item_id, quantity) \
@@ -733,21 +739,25 @@ impl TickScheduler {
             }
 
             if total_spent > 0 {
-                let new_silver = silver - total_spent;
-                if new_silver > 0 {
+                // 相对增量扣银：绝对值 SET quantity=$1 会与 IntentWorker 正在处理的
+                // 交易（买入/卖出改银子）互相覆盖，后写者吞掉先写者的变更；
+                // 单语句相对减法是原子的，不再丢更新
+                if total_spent >= silver {
                     sqlx::query(
-                        "UPDATE agent_inventory SET quantity = $1, updated_at = CURRENT_TIMESTAMP \
-                         WHERE agent_id = $2 AND item_id = '银子'",
+                        "DELETE FROM agent_inventory WHERE agent_id = $1 AND item_id = '银子'",
                     )
-                    .bind(new_silver)
                     .bind(*agent_id)
                     .execute(&self.db_pool)
                     .await
                     .context("扣除 Vendor 银两失败")?;
                 } else {
                     sqlx::query(
-                        "DELETE FROM agent_inventory WHERE agent_id = $1 AND item_id = '银子'",
+                        "UPDATE agent_inventory \
+                         SET quantity = agent_inventory.quantity - $1, \
+                             updated_at = CURRENT_TIMESTAMP \
+                         WHERE agent_id = $2 AND item_id = '银子'",
                     )
+                    .bind(total_spent)
                     .bind(*agent_id)
                     .execute(&self.db_pool)
                     .await
@@ -767,9 +777,12 @@ impl TickScheduler {
                 ];
                 let msg = &messages[tick_id as usize % messages.len()];
 
-                self.event_manager.lock().expect("lock poisoned").add_event_for_agent(
-                    *agent_id,
-                    crate::models::WorldEvent {
+                // 经 vendor_pending_events 通道：直接写 event_manager 会被
+                // 随后 broadcast_new_tick 开头的 clear() 清空，vendor 永远收不到
+                self.vendor_pending_events
+                    .entry(*agent_id)
+                    .or_default()
+                    .push(crate::models::WorldEvent {
                         event_type: cyber_jianghu_protocol::WorldEventType::SystemNotification,
                         tick_id,
                         description: msg.clone(),
@@ -778,12 +791,11 @@ impl TickScheduler {
                             "items": restocked_items.iter().map(|(n, q)| serde_json::json!({"name": n, "quantity": q})).collect::<Vec<_>>(),
                             "cost_silver": total_spent,
                         }),
-                    },
-                );
+                    });
 
                 info!(
-                    "Vendor 补货完成: agent={} spent={} silver remaining={}",
-                    agent_id, total_spent, new_silver
+                    "Vendor 补货完成: agent={} spent={} silver_before={}",
+                    agent_id, total_spent, silver
                 );
             }
         }
