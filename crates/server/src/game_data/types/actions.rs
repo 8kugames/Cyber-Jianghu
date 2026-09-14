@@ -196,6 +196,13 @@ pub struct ActionValidation {
     /// 是否需要目标与发起者在同一地点
     pub requires_target_colocated: Option<bool>,
 
+    /// 是否要求发起者背包实际持有目标物品（intent 动态 item_id 的执行前预检）：
+    /// true 时 validate_action 阶段按权威 DB 校验持有量（quantity 字段缺省按 1），
+    /// 让 Agent 收到可自纠的具体错误，而非执行期回滚的笼统文案。
+    /// Agent 侧天魂 layer0 基于可能过期的 WorldState 快照校验，拦截不了
+    /// 快照过期竞态（同 tick 前序意图已消耗、期间被夺等），本标志防的是后者。
+    pub requires_item_ownership: Option<bool>,
+
     /// 必需的数据字段
     pub required_fields: Vec<String>,
 

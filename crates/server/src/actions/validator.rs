@@ -117,9 +117,50 @@ pub async fn validate_action(
         if validation.requires_target_colocated.unwrap_or(false) {
             validate_target_colocated_typed(&parsed, agent_state, all_states)?;
         }
+        if validation.requires_item_ownership.unwrap_or(false) {
+            validate_item_ownership(&parsed, intent, agent_state, db_pool).await?;
+        }
     }
 
     Ok(parsed)
+}
+
+/// 执行前背包持有预检（requires_item_ownership）
+///
+/// Agent 侧天魂 layer0 基于可能过期的 WorldState 快照校验，拦截不了快照过期
+/// 竞态（同 tick 前序意图已消耗该物品、期间被夺等）——Agent 真诚地以为自己
+/// 持有，layer0 不拦也不应拦。此处按权威 DB 在验证阶段前置拦截，失败走
+/// action_failed 反馈具体原因，供 Agent 下一 tick 自纠（而非执行期回滚的
+/// 「状态变更未能全部应用」笼统文案）。
+async fn validate_item_ownership(
+    parsed: &ParsedActionData,
+    intent: &Intent,
+    agent_state: &AgentState,
+    db_pool: &DbPool,
+) -> Result<(), GameError> {
+    // item_id 为完整 uuid，须反解回内部 item_id 再查库（与执行器一致；
+    // 直连查询恒为 0 会造成全量误拒）
+    let Some(item_uuid) = parsed.get_field_str("item_id") else {
+        // 字段缺失由 required_fields / not_empty 校验覆盖
+        return Ok(());
+    };
+    let Some(internal_id) = crate::items::resolve_item_id(&item_uuid) else {
+        // 未注册物品由 item_exists 校验覆盖（其报错信息更精确）
+        return Ok(());
+    };
+    let needed = parsed.get_field_i32("quantity").unwrap_or(1).max(1);
+    let owned = get_inventory_item_quantity(db_pool, agent_state.agent_id, &internal_id).await;
+    if owned < needed {
+        let name = crate::display::display_item_name(&internal_id);
+        return Err(GameError::Unknown(format!(
+            "你没有{}（需要 {}，持有 {}），无法{}",
+            name,
+            needed,
+            owned,
+            intent.action_type.as_str()
+        )));
+    }
+    Ok(())
 }
 
 async fn validate_generic_requirements(
@@ -543,5 +584,29 @@ mod item_exists_tests {
         assert!(
             apply_field_validations(&ParsedActionData::None, &item_exists_validation()).is_ok()
         );
+    }
+}
+
+#[cfg(test)]
+mod item_ownership_tests {
+    use super::*;
+
+    #[test]
+    fn requires_item_ownership_deserializes_from_config() {
+        // 数据驱动接线：actions.yaml 的 requires_item_ownership 经 JSON 反序列化
+        // 进入 ActionValidation（用/予 配置该标志，吃/喝 归一化复用用的配置）
+        let v: ActionValidation = serde_json::from_str(
+            r#"{"required_fields":["item_id"],"requires_item_ownership":true}"#,
+        )
+        .unwrap();
+        assert_eq!(v.requires_item_ownership, Some(true));
+    }
+
+    #[test]
+    fn requires_item_ownership_defaults_to_none() {
+        // 旧配置/其他动作未携带该标志时默认关闭（预检不启用，行为不变）
+        let v: ActionValidation =
+            serde_json::from_str(r#"{"required_fields":["target_agent_id"]}"#).unwrap();
+        assert_eq!(v.requires_item_ownership, None);
     }
 }

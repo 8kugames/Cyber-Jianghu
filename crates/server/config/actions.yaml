@@ -38,6 +38,9 @@ data:
         - quantity
       optional_fields:
         - recipient_id
+      # 执行前按权威 DB 预检背包持有量（含 quantity）：
+      # Agent 侧 layer0 基于可能过期的 WorldState 快照校验，本标志兜底快照过期竞态
+      requires_item_ownership: true
       field_validations:
         - field: quantity
           validation_type: min_value
@@ -96,6 +99,9 @@ data:
     validation:
       required_fields:
         - item_id
+      # 执行前按权威 DB 预检背包持有（吃/喝 归一化复用本配置）：
+      # Agent 侧 layer0 基于可能过期的 WorldState 快照校验，本标志兜底快照过期竞态
+      requires_item_ownership: true
       field_validations:
         - field: item_id
           validation_type: item_exists
