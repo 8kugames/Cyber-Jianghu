@@ -4,6 +4,55 @@
 
 use crate::models::Intent;
 
+/// 元游戏术语黑名单（与本文件 system prompt 的"绝对禁止项"同源，单一事实源）。
+/// ASCII 词为大小写敏感子串匹配（大写 "MP" 不误伤 camp/sample 等英文小写词），中文词直接包含匹配。
+/// 消费方：记忆通道过滤（lifecycle/soul_cycle）、survival_override 豁免边界（reflector/validator）。
+pub(crate) const OOC_ASCII_TERMS: &[&str] = &["HP", "SAN", "MP", "NPC"];
+pub(crate) const OOC_CN_TERMS: &[&str] = &[
+    "玩家",
+    "血量",
+    "数值",
+    "属性栏",
+    "状态栏",
+    "登录",
+    "存档",
+    "复活",
+    "经验值",
+    "账号",
+    "充值",
+    "服务器",
+    "上线",
+    "掉线",
+    "版本",
+    "补丁",
+];
+
+/// 判定文本是否含绝对禁止的元游戏术语
+pub(crate) fn contains_meta_game_term(text: &str) -> bool {
+    OOC_ASCII_TERMS.iter().any(|t| text.contains(t))
+        || OOC_CN_TERMS.iter().any(|t| text.contains(t))
+}
+
+/// 意图的玩家产出文本（说话内容 + 思考日志）是否含绝对禁止术语。
+///
+/// 绝对禁止项"不受生存凌驾豁免"（见 system prompt）——survival_override
+/// 只能救人设突破类 OOC，命中硬性 OOC 词的意图必须维持驳回。
+pub(crate) fn intent_contains_meta_game_term(intent: &Intent) -> bool {
+    let mut hit = intent
+        .thought_log
+        .as_deref()
+        .is_some_and(contains_meta_game_term);
+    if let Some(content) = intent
+        .action_data
+        .as_ref()
+        .and_then(|data| data.get("content"))
+        .and_then(|value| value.as_str())
+    {
+        hit |= contains_meta_game_term(content);
+    }
+    hit
+}
+
 /// ReflectorSoul System Prompt
 const REFLECTOR_SYSTEM_PROMPT: &str = r#"你是武侠世界的守护者（观察者）。
 

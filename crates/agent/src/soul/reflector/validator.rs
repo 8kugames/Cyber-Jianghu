@@ -477,7 +477,12 @@ impl ReflectorSoul {
                         .survival_drives
                         .iter()
                         .any(|sd| sd.attribute == "satiation" || sd.attribute == "hydration");
-                    if has_survival_drive {
+                    // 生存凌驾只豁免"人设突破"类 OOC；说话内容/思考日志命中
+                    // 绝对禁止术语（HP/数值/玩家等）的意图必须维持驳回——
+                    // 与天魂 system prompt"绝对禁止项不受生存凌驾豁免"契约一致
+                    let hits_absolute_term =
+                        super::prompt::intent_contains_meta_game_term(&request.intent);
+                    if has_survival_drive && !hits_absolute_term {
                         layers.push(LayerResult {
                             layer: "layer3",
                             passed: true,

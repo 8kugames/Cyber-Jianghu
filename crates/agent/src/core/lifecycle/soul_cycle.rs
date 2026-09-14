@@ -18,33 +18,27 @@ use tracing::{info, warn};
 
 use crate::component::memory::backend::MemoryBackend;
 use crate::models::Intent;
+use crate::soul::reflector::prompt::contains_meta_game_term;
 
-/// 记忆通道元游戏术语黑名单（与天魂 Layer3 绝对禁止项同源：soul/reflector/prompt.rs）。
-/// ASCII 词为大小写敏感子串匹配（大写 "MP" 不误伤 camp/sample 等英文小写词），中文词直接包含匹配。
-const MEMORY_OOC_ASCII_TERMS: &[&str] = &["HP", "SAN", "MP", "NPC"];
-const MEMORY_OOC_CN_TERMS: &[&str] = &[
-    "玩家",
-    "血量",
-    "数值",
-    "属性栏",
-    "状态栏",
-    "登录",
-    "存档",
-    "复活",
-    "经验值",
-    "账号",
-    "充值",
-    "服务器",
-    "上线",
-    "掉线",
-    "版本",
-    "补丁",
-];
+// 元游戏术语黑名单单一事实源已迁移至 soul/reflector/prompt.rs（与天魂
+// system prompt 绝对禁止项同源），此处经 re-export 供本文件与测试使用。
 
-/// 判定文本是否含元游戏术语（元术语不得经由记忆通道进入世界模型）
-fn contains_meta_game_term(text: &str) -> bool {
-    MEMORY_OOC_ASCII_TERMS.iter().any(|t| text.contains(t))
-        || MEMORY_OOC_CN_TERMS.iter().any(|t| text.contains(t))
+/// 意图是否为 LLM 失败产物（chaos 替补 / 认知失败兜底 / 配额耗尽）。
+///
+/// LLM 失败追踪与 chaos 恢复探测共用同一判据：chaos 模式下每 tick
+/// 保留的人魂 LLM 输出若通过此判定（非失败产物），即视为 LLM 已恢复。
+fn intent_indicates_llm_failure(intent: &Intent) -> bool {
+    intent.chaos_marker.is_some()
+        || intent
+            .thought_log
+            .as_ref()
+            .map(|t| {
+                t.contains("意图多次被驳回")
+                    || t.contains("三魂循环未产出有效意图")
+                    || t.contains("认知失败")
+                    || t.contains("[LLM 配额耗尽")
+            })
+            .unwrap_or(false)
 }
 
 /// 三魂循环输出
@@ -192,6 +186,18 @@ impl super::super::Agent {
 
             // multi-intent pipeline: primary + subsequent intents + chaos
             let max_per_tick = _max_intents;
+            // chaos 恢复探测：chaos 模式下仍保留人魂 LLM 输出，若本 tick LLM
+            // 产出健康意图（非 chaos 替补/非认知失败兜底），立即退出 chaos——
+            // 否则 consecutive_llm_failures 只增不减，chaos 成为吸收态，
+            // LLM 服务恢复后角色行为仍永久来自随机生成器
+            if self.llm_chaos_active && !intent_indicates_llm_failure(&raw_intent) {
+                tracing::info!(
+                    "LLM chaos 模式恢复探测成功，退出 chaos: agent={}",
+                    self.character_name()
+                );
+                self.llm_chaos_active = false;
+                self.consecutive_llm_failures = 0;
+            }
             let mut all_raw_intents: Vec<Intent> = {
                 let mut intents: Vec<Intent> = if self.llm_chaos_active {
                     Vec::new()
@@ -738,17 +744,7 @@ impl super::super::Agent {
         }
 
         // LLM 失败追踪
-        let is_llm_failure = final_intent.chaos_marker.is_some()
-            || final_intent
-                .thought_log
-                .as_ref()
-                .map(|t| {
-                    t.contains("意图多次被驳回")
-                        || t.contains("三魂循环未产出有效意图")
-                        || t.contains("认知失败")
-                        || t.contains("[LLM 配额耗尽")
-                })
-                .unwrap_or(false);
+        let is_llm_failure = intent_indicates_llm_failure(&final_intent);
         if is_llm_failure {
             self.consecutive_llm_failures += 1;
         } else {
@@ -842,7 +838,37 @@ impl super::super::Agent {
 
 #[cfg(test)]
 mod tests {
-    use super::contains_meta_game_term;
+    use super::intent_indicates_llm_failure;
+    use crate::models::Intent;
+    use crate::soul::reflector::prompt::contains_meta_game_term;
+    use uuid::Uuid;
+
+    #[test]
+    fn test_intent_indicates_llm_failure() {
+        // 健康 LLM 输出：非失败产物（chaos 恢复探测据此判定可退出 chaos）
+        let healthy = Intent::new(Uuid::nil(), 1, "移动", None);
+        assert!(!intent_indicates_llm_failure(&healthy));
+
+        // chaos 替补意图（带 chaos_marker）恒为失败产物
+        let chaos = Intent::new(Uuid::nil(), 1, "取", None).with_chaos_marker(
+            cyber_jianghu_protocol::types::ChaosMarker::LlmQuotaExhausted {
+                consecutive_failures: 12,
+            },
+        );
+        assert!(intent_indicates_llm_failure(&chaos));
+
+        // 认知失败兜底文案各形态
+        for thought in [
+            "意图多次被驳回",
+            "三魂循环未产出有效意图",
+            "认知失败",
+            "[LLM 配额耗尽] 已降级",
+        ] {
+            let mut fallback = Intent::new(Uuid::nil(), 1, "休整", None);
+            fallback.thought_log = Some(thought.to_string());
+            assert!(intent_indicates_llm_failure(&fallback), "漏判: {}", thought);
+        }
+    }
 
     #[test]
     fn test_meta_term_detection_matches_reflector_ban_list() {
