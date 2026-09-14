@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.1.340] - 2026-09-15
+
 ### Features
 
 - **LLM 连接信息全量环境变量注入，llm.yaml 转为可入库模板**（server）：`load_llm` 支持 `CYBER_JIANGHU_LLM_ENABLED/_PROVIDER/_BASE_URL/_API_KEY/_MODEL` 覆盖对应字段（env 非空优先，bool 宽松解析非法值告警忽略）；面板保存强制剥离 api_key（密钥永不落盘）；解除 `crates/server/config/.gitignore`，`llm.yaml` 以惰性模板（enabled=false、连接字段留空）入库，运行时完全由 `.env` / 部署环境供给；QuickStart-Server 补全变量表。
