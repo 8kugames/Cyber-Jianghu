@@ -45,6 +45,9 @@ data:
         - field: quantity
           validation_type: min_value
           min_value: 1
+        - field: quantity
+          validation_type: max_value
+          max_value: 9999
         - field: item_id
           validation_type: item_exists
     requirements:
@@ -209,11 +212,6 @@ data:
         attribute: stamina
         min: 0
         cost: 1
-    effects:
-      - effect_type: attribute_change
-        attribute: hydration
-        operation: add
-        value: 2
 
   观察:
     name: "观察"

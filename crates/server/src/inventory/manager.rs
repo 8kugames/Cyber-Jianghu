@@ -72,6 +72,19 @@ impl InventoryManager {
                 return Err(InventoryError::InventoryFull);
             }
 
+            // 新格子同样受堆叠上限约束（与 UPDATE 分支同规，防止绕过 stack_size 海量入库）
+            let max_stack_size = crate::game_data::ItemRegistry::get(item_id)
+                .map(|cfg| cfg.stack_size)
+                .unwrap_or_else(crate::inventory::types::get_max_stack_size);
+            if quantity > max_stack_size {
+                return Err(InventoryError::StackLimitExceeded {
+                    item_id: item_id.to_string(),
+                    current: 0,
+                    requested: quantity,
+                    max: max_stack_size,
+                });
+            }
+
             // 创建新物品记录
             sqlx::query(
                 "INSERT INTO agent_inventory (agent_id, item_id, quantity, is_equipped) VALUES ($1, $2, $3, false)"
