@@ -2,7 +2,7 @@
 # Agent 运行时镜像配方（runtime-only，单一来源）
 # ============================================================================
 # 供"二进制注入"型构建复用（避免各脚本内联重复配方导致漂移）：
-#   - scripts/build-agent-image.sh   本地联调镜像（BASE=local-debian-slim:runtime）
+#   - scripts/deploy/build-agent-image.sh   本地联调镜像（BASE=local-debian-slim:runtime）
 #   - .test-agents/push_server.sh    远端部署镜像（BASE=debian:trixie-slim）
 #
 # 运行时阶段的权威结构来源是 crates/agent/Dockerfile 的 Stage 2；本文件与其保持

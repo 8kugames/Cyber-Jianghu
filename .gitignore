@@ -140,3 +140,6 @@ flamegraph.svg
 crates/server/config/llm.yaml
 .bin/
 .test-agents/.env
+
+# 游戏美术资源不入库（大二进制，历史已清除）
+assets/

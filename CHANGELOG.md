@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Security
+
+- **清除线上基础设施信息**（security+deploy）：`push_server.sh` / `ship-server-binary.sh` 移除内置远端地址与项目目录默认值（SERVER / REMOTE_PROJECT 必填，杜绝误推线上）；`agent.yaml.example` 示例地址改占位符；`assets/images` 退出版本控制并从历史清除；`scripts/` 按功能分组（deploy / data / qa），`restart.sh` / `push_server.sh` 调用路径同步更新；同步清除历史中 `.claude` 遗留文件。
+
+### Bug Fixes
+
+- **远程部署漏同步静态资源**（deploy）：`ship-server-binary.sh` 仅全量同步 `config/`、另按 git 未提交集合同步 dirty 文件，导致已提交的 `crates/server/static/` 改动不进入远端构建上下文，镜像内 `/app/static` 停留旧副本——表现为服务端版本已更新、管理面板仍跑旧 JS（如关系图谱页报错）。现补 `static/` 全量同步，与 `config/` 同级对待。
+- **管理面板静态响应补缓存指令**（server）：`serve_admin_file` 此前只设 `Content-Type`，浏览器可对 `/admin/*` 资源做启发式缓存，部署后容易产生"服务端已更新、面板仍旧行为"的误判。现统一加 `Cache-Control: no-cache`（面板资源不带内容哈希且运行时按请求读盘，必须每次向服务端校验）；远程部署文档运维节补对应排查判据。
+- **部署脚本迁入子目录后根目录推导失准**（deploy）：`ship-server-binary.sh` 与 `build-agent-image.sh` 迁入 `scripts/deploy/` 后仍按 `dirname/..` 推导 `PROJECT_ROOT`，解析结果落在 `scripts/` 而非仓库根，会使 config/static 同步源、zigbuild manifest 与产物路径、工作区挂载全部落空（`set -euo pipefail` 下直接中断）。两处改为 `/../..`，并同步脚本头部的用法路径。
+
 ### Chore
 
 - **补齐部署链路收敛文档**（docs）：联调 SKILL 工具链表补 `push_server.sh`、`restart.sh --build` 语义更新为委托 `build-agent-image.sh` 增量构建；远程部署文档运维节补版本更新链路（`Dockerfile.runtime` 配方单一来源）；EN QuickStart-Agent 同步 loopback 认证注意事项。

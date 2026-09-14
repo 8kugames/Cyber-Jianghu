@@ -9,13 +9,13 @@
 # by the restarted local test agents. Runtime recipe: crates/agent/Dockerfile.runtime.
 #
 # Usage:
-#   ./scripts/build-agent-image.sh [--fresh]
+#   ./scripts/deploy/build-agent-image.sh [--fresh]
 #
 #   --fresh   wipe the cargo cache volume first (cache pollution triage)
 
 set -euo pipefail
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILDER="local-rust-trixie:builder"
 BASE="local-debian-slim:runtime"
 CARGO_VOLUME="cyj-agent-cargo"

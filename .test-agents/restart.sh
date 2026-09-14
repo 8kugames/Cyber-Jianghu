@@ -81,7 +81,7 @@ for arg in "$@"; do
       echo "选项:"
       echo "  --register      归隐旧角色（server 端）+ 注册全新角色 + 验证"
       echo "  --no-register   跳过注册"
-      echo "  --build         重启前重建镜像（委托 scripts/build-agent-image.sh，增量 2-5 分钟）"
+      echo "  --build         重启前重建镜像（委托 scripts/deploy/build-agent-image.sh，增量 2-5 分钟）"
       echo "  agent-name      只操作指定 agent（如 agent-1）"
       exit 0
       ;;
@@ -167,15 +167,15 @@ ensure_base_images() {
   log_ok "本地基镜像制备完成"
 }
 
-# 离线构建 agent 镜像：委托 scripts/build-agent-image.sh（容器内编译 + cargo 卷缓存
+# 离线构建 agent 镜像：委托 scripts/deploy/build-agent-image.sh（容器内编译 + cargo 卷缓存
 # 增量 2-5 分钟 + Dockerfile.runtime 打包）。取代曾内联的离线多阶段 Dockerfile
 # （无 cache mount 全量编译 15-25 分钟，且配方与 canonical 漂移）。
 # 首次运行需下载 crates（cargo 卷持久缓存，之后离线增量）。
 build_image_offline() {
   ensure_base_images || return 1
 
-  if ! "$SCRIPT_DIR/../scripts/build-agent-image.sh"; then
-    log_fail "agent 镜像构建失败（scripts/build-agent-image.sh）"
+  if ! "$SCRIPT_DIR/../scripts/deploy/build-agent-image.sh"; then
+    log_fail "agent 镜像构建失败（scripts/deploy/build-agent-image.sh）"
     return 1
   fi
 }

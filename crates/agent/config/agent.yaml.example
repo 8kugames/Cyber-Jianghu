@@ -24,9 +24,9 @@ server:
   # 游戏服务器 WebSocket 地址
   # 开发环境: ws://localhost:23333/ws
   # 生产环境: wss://your-server.com/ws
-  ws_url: ws://HOST_REDACTED:23333/ws
+  ws_url: ws://your-server-host:23333/ws
   # 游戏服务器 HTTP 地址
-  http_url: http://HOST_REDACTED:23333
+  http_url: http://your-server-host:23333
 
 runtime:
   # 运行模式: claw (HTTP API 供外部调用) | cognitive (内置 AI 决策)
