@@ -300,35 +300,32 @@ impl MemoryStore {
 
     /// 从 SELECT * 行反序列化为 ClientMemory
     ///
-    /// 列顺序：id(0), agent_id(1), tick_id(2), event_type(3), content(4),
-    /// metadata(5), importance_score(6), sentiment_score(7), memory_type(8),
-    /// is_confirmed(9), created_at(10), updated_at(11),
-    /// strength(12), last_accessed_at(13), access_count(14), is_archived(15),
-    /// encoding_valence(16), encoding_arousal(17), encoding_emotion(18)
+    /// 按列名取值：SELECT * 的列序由建表与后续 ALTER TABLE 迁移历史决定
+    /// （embedding BLOB 落位在 encoding_* 之前），固定下标会错位。
     fn row_to_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClientMemory> {
         Ok(ClientMemory {
-            id: Some(row.get(0)?),
-            agent_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or_default(),
-            tick_id: row.get(2)?,
-            event_type: row.get(3)?,
-            content: row.get(4)?,
+            id: Some(row.get("id")?),
+            agent_id: Uuid::parse_str(&row.get::<_, String>("agent_id")?).unwrap_or_default(),
+            tick_id: row.get("tick_id")?,
+            event_type: row.get("event_type")?,
+            content: row.get("content")?,
             metadata: row
-                .get::<_, Option<String>>(5)?
+                .get::<_, Option<String>>("metadata")?
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or(Value::Null),
-            importance_score: row.get(6)?,
-            sentiment_score: row.get(7)?,
-            memory_type: row.get(8)?,
-            is_confirmed: row.get(9)?,
-            created_at: row.get(10)?,
-            updated_at: row.get(11)?,
-            strength: row.get(12)?,
-            last_accessed_at: row.get(13)?,
-            access_count: row.get(14)?,
-            is_archived: row.get(15)?,
-            encoding_valence: row.get(16)?,
-            encoding_arousal: row.get(17)?,
-            encoding_emotion: row.get(18)?,
+            importance_score: row.get("importance_score")?,
+            sentiment_score: row.get("sentiment_score")?,
+            memory_type: row.get("memory_type")?,
+            is_confirmed: row.get("is_confirmed")?,
+            created_at: row.get("created_at")?,
+            updated_at: row.get("updated_at")?,
+            strength: row.get("strength")?,
+            last_accessed_at: row.get("last_accessed_at")?,
+            access_count: row.get("access_count")?,
+            is_archived: row.get("is_archived")?,
+            encoding_valence: row.get("encoding_valence")?,
+            encoding_arousal: row.get("encoding_arousal")?,
+            encoding_emotion: row.get("encoding_emotion")?,
         })
     }
 
@@ -918,6 +915,31 @@ mod tests {
         // 空排除列表退化为普通 top-K
         let all = store.get_top_memories_excluding_types(20, &[]).unwrap();
         assert_eq!(all.len(), 3);
+    }
+
+    /// 回归：SELECT * 的列序由建表+迁移历史决定（embedding BLOB 落位在
+    /// encoding_valence 之前），row_to_memory 必须按列名取值。
+    /// embedding 与 encoding 字段同时非 NULL 时，固定下标映射既会报
+    /// Invalid column type，也会静默错位读错列。
+    #[test]
+    fn test_read_memory_with_embedding_and_encoding() {
+        let temp_dir = TempDir::new().unwrap();
+        let agent_id = Uuid::new_v4();
+        let store = MemoryStore::new(agent_id, temp_dir.path()).unwrap();
+
+        let mut memory = ClientMemory::new(agent_id, 1, "带向量记忆".to_string());
+        memory.encoding_valence = Some(0.6);
+        memory.encoding_arousal = Some(-0.2);
+        memory.encoding_emotion = Some("joy".to_string());
+        let id = store.add_memory(&memory).unwrap();
+        store.update_embedding(id, &[1u8, 2, 3]).unwrap();
+
+        let got = store.get_recent_memories(10).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].content, "带向量记忆");
+        assert_eq!(got[0].encoding_valence, Some(0.6));
+        assert_eq!(got[0].encoding_arousal, Some(-0.2));
+        assert_eq!(got[0].encoding_emotion.as_deref(), Some("joy"));
     }
 
     #[test]
