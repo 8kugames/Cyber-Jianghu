@@ -756,6 +756,7 @@ impl super::Agent {
                         .await?;
                     let mut final_intent = soul_result.intent;
                     let final_intent_validated = soul_result.validated;
+                    let soul_cycle_attempt = soul_result.attempt;
 
                     let graded_config = self.config.game_rules
                         .as_ref()
@@ -790,6 +791,19 @@ impl super::Agent {
                                     agent_id,
                                     format!("fallback 被天魂驳回: {}", reason),
                                 );
+                                // 留痕：实际发送的是二次 chaos 意图，覆写 final intent
+                                // 并在天魂理由说明替换缘由（此前零记录）
+                                self.record_chaos_override(
+                                    world_state.tick_id,
+                                    soul_cycle_attempt,
+                                    &final_intent,
+                                    &format!(
+                                        "fallback 被天魂驳回，已替换为 chaos: {}（驳回原因: {}）",
+                                        final_intent.action_type.as_str(),
+                                        reason
+                                    ),
+                                )
+                                .await;
                             }
                         }
                     }

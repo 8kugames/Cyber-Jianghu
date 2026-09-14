@@ -51,6 +51,8 @@ fn contains_meta_game_term(text: &str) -> bool {
 pub(crate) struct SoulCycleResult {
     pub intent: Intent,
     pub validated: bool,
+    /// 最后一次尝试的序号（调用方做 chaos 覆写留痕时定位记录行）
+    pub attempt: i32,
 }
 
 impl super::super::Agent {
@@ -99,6 +101,8 @@ impl super::super::Agent {
         let agent_id = world_state.agent_id.unwrap_or_default();
         let mut final_intent = None;
         let mut final_intent_validated = false;
+        // 最后一次尝试序号：后置 chaos 覆写留痕时定位记录行
+        let mut last_attempt: i32 = 0;
 
         // tick 级 LLM 失败计数器（优化模式下使用）
         let mut tick_llm_fail_count: u32 = 0;
@@ -115,6 +119,7 @@ impl super::super::Agent {
         }
 
         for attempt in 0..=max_retries {
+            last_attempt = attempt;
             // 5a. 人魂 (ActorSoul) 决策 — 直连 WorldState，输出结构化 Intent
             let (raw_intent, cognitive_chain) = {
                 let tick_id = world_state.tick_id;
@@ -717,6 +722,18 @@ impl super::super::Agent {
                 "认知失败休息 → chaos 替换: action={}",
                 chaos_intent.action_type
             );
+            // 留痕：final intent 已按原（休整）pipeline 落库，覆写为实际发送的
+            // chaos 意图，并在天魂理由追加替换说明（否则面板记录与执行不符）
+            self.record_chaos_override(
+                world_state.tick_id,
+                last_attempt,
+                &chaos_intent,
+                &format!(
+                    "认知失败休息已被 chaos 替换为: {}",
+                    chaos_intent.action_type.as_str()
+                ),
+            )
+            .await;
             final_intent = chaos_intent;
         }
 
@@ -779,7 +796,47 @@ impl super::super::Agent {
         Ok(SoulCycleResult {
             intent: final_intent,
             validated: final_intent_validated,
+            attempt: last_attempt,
         })
+    }
+
+    /// chaos 覆写留痕：后置替换发生时，既有记录要么已按原 pipeline 落库
+    /// （认知失败休整替换）、要么根本没有 final intent 记录（fallback 被驳回
+    /// 后的二次 chaos）。此处将实际发送的 chaos 意图覆写进 final intent 列，
+    /// 并在天魂理由追加替换说明——保证面板「地魂」与实际执行一致、「天魂」
+    /// 可追溯替换缘由。
+    pub(crate) async fn record_chaos_override(
+        &self,
+        tick_id: i64,
+        attempt: i32,
+        intent: &Intent,
+        note: &str,
+    ) {
+        let Some(recorder) = self.soul_recorder().await else {
+            return;
+        };
+        let pipeline = Self::assemble_pipeline(vec![intent.clone()]);
+        let action_data = pipeline
+            .action_data
+            .as_ref()
+            .and_then(|d| serde_json::to_string(d).ok());
+        let pipeline_actions = vec![serde_json::json!({
+            "action_type": pipeline.action_type,
+            "action_data": pipeline.action_data,
+            "intent_id": pipeline.intent_id,
+        })];
+        let pipeline_json = serde_json::to_string(&pipeline_actions).ok();
+        recorder
+            .record_final_intent(
+                tick_id,
+                attempt,
+                Some(&pipeline.intent_id.to_string()),
+                Some(pipeline.action_type.as_str()),
+                action_data.as_deref(),
+                pipeline_json.as_deref(),
+            )
+            .await;
+        recorder.append_tianhun_reason(tick_id, attempt, note).await;
     }
 }
 

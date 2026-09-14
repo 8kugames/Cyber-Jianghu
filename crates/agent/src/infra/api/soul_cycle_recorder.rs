@@ -367,6 +367,40 @@ impl SoulCycleRecorder {
         }
     }
 
+    /// 追加天魂理由（保留既有内容，用于 chaos 覆写等后置替换的留痕）
+    pub async fn append_tianhun_reason(&self, tick_id: i64, attempt: i32, note: &str) {
+        let conn = self
+            .conn
+            .lock()
+            .expect("soul_cycle_recorder lock not poisoned");
+        let result = conn.execute(
+            "UPDATE soul_cycle_record SET
+                tianhun_reason = CASE
+                    WHEN tianhun_reason IS NULL OR tianhun_reason = '' THEN ?1
+                    ELSE tianhun_reason || '；' || ?1
+                END
+             WHERE tick_id = ?2 AND attempt = ?3",
+            params![note, tick_id, attempt],
+        );
+        match result {
+            Ok(n) if n > 0 => tracing::debug!(
+                "[soul_cycle] Appended tianhun reason for tick {} attempt {}",
+                tick_id,
+                attempt
+            ),
+            Ok(_) => tracing::warn!(
+                "[soul_cycle] No record found for tick {} attempt {} when appending tianhun reason",
+                tick_id,
+                attempt
+            ),
+            Err(e) => tracing::warn!(
+                "[soul_cycle] Failed to append tianhun reason for tick {}: {}",
+                tick_id,
+                e
+            ),
+        }
+    }
+
     /// 回填 Server 执行结果（幂等，按 (tick_id, attempt) 更新 server_execution_results）
     pub async fn backfill_server_result(
         &self,
