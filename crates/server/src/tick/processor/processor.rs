@@ -431,7 +431,9 @@ impl StateProcessor {
         // action_log 必须在 tx 内写入，与 state mutations 同生命周期。
         // 若 insert 失败 → execution_failed = true → 走 rollback 分支，state 不落库，
         // 保证"state 变更 + action_log"要么全成功要么全回滚（Saga 原子性）。
-        if let Err(e) = crate::db::batch_insert_action_logs(&mut tx, &[action_log]).await {
+        if let Err(e) =
+            crate::db::batch_insert_action_logs(&mut tx, std::slice::from_ref(&action_log)).await
+        {
             warn!("Action log 写入失败（将回滚整个 Saga）: {:#}", e);
             execution_failed = true;
         }
@@ -487,6 +489,36 @@ impl StateProcessor {
             collateral_versions.clear();
             if let Err(e) = tx.rollback().await {
                 warn!("Saga tx 回滚失败: {}", e);
+            }
+            // 失败日志不随 Saga 陪葬：真实失败样本是训练数据与观测的核心组成。
+            // 回滚后用独立连接补写 result=Failed 的日志——否则该 tick 在
+            // agent_action_logs 完全缺行，update_soul_cycle_metadata 会补插
+            // idle/success 占位行，WorldState recent_actions 与训练导出拿到假数据
+            let mut failure_log = action_log.clone();
+            failure_log.result = ActionResult::Failed;
+            failure_log.result_message = Some(
+                failure_reason
+                    .clone()
+                    .or_else(|| action_log.result_message.clone())
+                    .unwrap_or_else(|| "意图执行失败，已回滚".to_string()),
+            );
+            match self.db_pool.acquire().await {
+                Ok(mut conn) => {
+                    if let Err(e) =
+                        crate::db::batch_insert_action_logs(&mut conn, &[failure_log]).await
+                    {
+                        warn!(
+                            "失败 action_log 补写失败: agent={}, {:#}",
+                            intent.agent_id, e
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "失败 action_log 补写跳过（获取连接失败）: agent={}, {:#}",
+                        intent.agent_id, e
+                    );
+                }
             }
         } else {
             if let Err(e) = tx.commit().await {
