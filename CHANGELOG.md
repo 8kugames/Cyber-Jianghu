@@ -6,7 +6,7 @@
 
 ### Security
 
-- **清除线上基础设施信息**（security+deploy）：`push_server.sh` / `ship-server-binary.sh` 移除内置远端地址与项目目录默认值（SERVER / REMOTE_PROJECT 必填，杜绝误推线上）；`agent.yaml.example` 示例地址改占位符；`assets/images` 退出版本控制并从历史清除；`scripts/` 按功能分组（deploy / data / qa），`restart.sh` / `push_server.sh` 调用路径同步更新；同步清除历史中 `.claude` 遗留文件。
+- **清除线上基础设施信息**（security+deploy）：私有一键部署脚本 `.test-agents/push_server.sh` 退出版本控制并从全部 git 历史清除（本地保留使用，不入库）；`ship-server-binary.sh` 移除内置远端默认值（SERVER / REMOTE_PROJECT 必填）；`agent.yaml.example` 示例地址改占位符；`assets/images` 退出版本控制并从历史清除；`scripts/` 按功能分组（deploy / data / qa）；同步清除历史中 `.claude` 遗留文件。
 
 ### Bug Fixes
 
@@ -16,7 +16,7 @@
 
 ### Chore
 
-- **补齐部署链路收敛文档**（docs）：联调 SKILL 工具链表补 `push_server.sh`、`restart.sh --build` 语义更新为委托 `build-agent-image.sh` 增量构建；远程部署文档运维节补版本更新链路（`Dockerfile.runtime` 配方单一来源）；EN QuickStart-Agent 同步 loopback 认证注意事项。
+- **补齐部署链路收敛文档**（docs）：联调 SKILL 工具链表补远端更新脚本行、`restart.sh --build` 语义更新为委托 `build-agent-image.sh` 增量构建；远程部署文档运维节补版本更新链路；EN QuickStart-Agent 同步 loopback 认证注意事项。
 
 ## [0.1.322] - 2026-09-14
 
