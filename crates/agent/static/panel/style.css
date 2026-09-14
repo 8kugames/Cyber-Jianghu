@@ -542,6 +542,7 @@ body {
 
 .soul-text { font-size: 13px; color: var(--text-primary); line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 .soul-thought { font-size: 11px; color: var(--text-muted); font-style: italic; }
+.soul-tool { font-size: 11px; color: var(--soul-renhun, #0d9488); font-family: monospace; margin-top: 2px; }
 .soul-params { font-family: monospace; font-size: 10px; color: var(--text-muted); }
 .soul-result { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 4px; display: inline-block; }
 .soul-result.approved { color: var(--success); background: var(--success-light); }

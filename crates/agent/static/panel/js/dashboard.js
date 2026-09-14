@@ -43,8 +43,8 @@ function render(container) {
             <div class="card">
                 <div class="card-header">经历日志</div>
                 <div class="card-body" style="text-align:center;padding:30px;color:var(--text-muted);">
-                    <p style="margin-bottom:12px;">经历日志已迁移至角色面板</p>
-                    <a href="#/characters" style="color:var(--accent,#14b8a6);font-size:14px;">前往查看 →</a>
+                    <p style="margin-bottom:12px;">前往经历页查看完整三魂记录（支持分页与跳转 Tick）</p>
+                    <a href="#/experiences" style="color:var(--accent,#14b8a6);font-size:14px;">前往查看 →</a>
                 </div>
             </div>
         </div>

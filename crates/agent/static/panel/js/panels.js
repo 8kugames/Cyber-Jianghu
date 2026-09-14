@@ -17,10 +17,6 @@ const panels = {
         label: '关系',
         mount: mountRelationships,
     },
-    experiences: {
-        label: '经历',
-        mount: mountExperiences,
-    },
     memories: {
         label: '记忆',
         mount: mountMemories,
@@ -259,10 +255,8 @@ async function mountBiography(container, ctx) {
 }
 
 // ============================================================================
-// Experiences (Soul Cycles)
+// Experiences render layer (Soul Cycles) — 供经历独立页 experiences.js 复用
 // ============================================================================
-
-let expPage = 1;
 
 // 天魂层名：可被 tryFetchLayerDisplay() 覆盖（从服务器 souls.yaml 配置驱动）
 var LAYER_NAMES = { layer0: '目标校验', layer1: '动作审查', layer2: '规则校验', layer3: '意图审查' };
@@ -277,7 +271,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const SOURCE_TYPE_NAMES = { ground: '地面', agent: '角色', resource: '资源点' };
 let expNameMaps = { items: {}, agents: {}, recipes: {} };
 
-async function loadExpNameMaps() {
+export async function loadExpNameMaps() {
     const add = (uuid, name) => { if (uuid && name) expNameMaps.items[uuid] = name; };
     try {
         const ws = await get(API.STATE);
@@ -338,65 +332,11 @@ function resolveTargetRef(v) {
 }
 
 // 尝试从服务器 souls.yaml layer_display 配置拉取天魂层名（失败时静默保留 LAYER_NAMES 硬编码值）
-async function tryFetchLayerDisplay() {
+export async function tryFetchLayerDisplay() {
     try {
         var resp = await fetch('/api/dashboard/layer-display');
         if (resp.ok) Object.assign(LAYER_NAMES, await resp.json());
     } catch (_) {}
-}
-
-async function mountExperiences(container, ctx) {
-    expPage = 1;
-    showLoading(container);
-    tryFetchLayerDisplay(); // best-effort 从服务器拉取层配置；失败时静默保留硬编码
-    await loadExpNameMaps(); // 翻译层就绪后再渲染（失败时空表兑底）
-    await loadExpPage(container, ctx);
-}
-
-async function loadExpPage(container, ctx) {
-    try {
-        const agentId = ctx.agentId || '';
-        const param = agentId ? `&agent_id=${agentId}` : '';
-        const data = await get(`${API.SOUL_CYCLES}?page=${expPage}&limit=10${param}`);
-
-        // records: { tick_id: [SoulCycleAttemptEntry] }, immediate_intents: { tick_id: [...] }
-        let recordMap = data.records || {};
-        let immMap = data.immediate_intents || {};
-        if (Array.isArray(recordMap)) { recordMap = groupByTick(recordMap); }
-
-        const tickIds = Object.keys(recordMap).sort((a, b) => Number(b) - Number(a));
-
-        if (tickIds.length === 0 && expPage === 1) {
-            container.innerHTML = '<p class="text-muted">暂无经历记录</p>';
-            return;
-        }
-
-        let html = '';
-        for (const tickId of tickIds) {
-            const attempts = recordMap[tickId] || [];
-            const immediate = immMap[tickId] || [];
-            html += renderTickCard(tickId, attempts, immediate);
-        }
-
-        if (data.has_more || tickIds.length >= 10) {
-            html += `<div style="text-align:center;margin-top:12px"><button class="btn btn-sm" id="exp-load-more">加载更多</button></div>`;
-        }
-
-        if (expPage === 1) {
-            container.innerHTML = `<div class="exp-list">${html}</div>`;
-        } else {
-            const list = container.querySelector('.exp-list');
-            if (list) list.insertAdjacentHTML('beforeend', html);
-        }
-
-        document.getElementById('exp-load-more')?.addEventListener('click', () => {
-            document.getElementById('exp-load-more')?.remove();
-            expPage++;
-            loadExpPage(container, ctx);
-        });
-    } catch (e) {
-        if (expPage === 1) container.innerHTML = '<p class="text-muted">经历加载失败</p>';
-    }
 }
 
 export function groupByTick(arr) {
@@ -461,11 +401,18 @@ function renderRenhun(data) {
     if (!data) return '';
     const hasNarrative = data.narrative;
     const hasThought = data.thought_log;
-    if (!hasNarrative && !hasThought) return '';
+    const tools = data.earth_tool_calls || [];
+    if (!hasNarrative && !hasThought && tools.length === 0) return '';
 
     let html = `<div class="exp-renhun"><span class="exp-soul-label">人魂</span><div class="exp-soul-content">`;
     if (hasNarrative) html += `<div class="soul-text">${escapeHtml(data.narrative)}</div>`;
     if (hasThought) html += `<div class="soul-thought">${escapeHtml(data.thought_log)}</div>`;
+    // 地魂工具调用（嵌入人魂推理循环）：行内截断，title 悬浮全量
+    for (const t of tools) {
+        const full = `${t.name}(${t.arguments || ''}) → ${t.success ? '成功' : '失败'}: ${t.result_summary || ''}`;
+        const brief = `${t.name}(${String(t.arguments || '').substring(0, 60)}) → ${t.success ? '成功' : '失败'}`;
+        html += `<div class="soul-tool" title="${escapeAttr(full)}">${escapeHtml(brief)}</div>`;
+    }
     html += `</div></div>`;
     return html;
 }

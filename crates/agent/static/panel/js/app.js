@@ -6,6 +6,7 @@ import { API, get, refreshAuthToken, getStoredAuthToken } from './api.js';
 // Page modules (loaded on demand)
 import { dashboardPage } from './dashboard.js';
 import { characterPage } from './character.js';
+import { experiencesPage } from './experiences.js';
 import { settingsPage } from './settings.js';
 
 // Global SSE connection
@@ -138,6 +139,7 @@ async function init() {
     // Register routes
     router.register('dashboard', dashboardPage);
     router.register('characters', characterPage);
+    router.register('experiences', experiencesPage);
     router.register('settings', settingsPage);
 
     // 从 setup/status（公开端点）获取 auth_token 并缓存到 localStorage。
