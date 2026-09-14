@@ -4,9 +4,18 @@
 
 ## [Unreleased]
 
+### Features
+
+- **LLM 密钥环境变量注入**（server）：`load_llm` 支持 `CYBER_JIANGHU_LLM_API_KEY` 优先覆盖 `config/llm.yaml` 的 `api_key`（密钥不落配置文件，`.env` 已 gitignore；面板读写路径不受影响）；QuickStart-Server 环境变量表补对应行。
+
 ### Security
 
 - **清除线上基础设施信息**（security+deploy）：私有一键部署脚本 `.test-agents/push_server.sh` 退出版本控制并从全部 git 历史清除（本地保留使用，不入库）；`ship-server-binary.sh` 移除内置远端默认值（SERVER / REMOTE_PROJECT 必填）；`agent.yaml.example` 示例地址改占位符；`assets/images` 退出版本控制并从历史清除；`scripts/` 按功能分组（deploy / data / qa）；同步清除历史中 `.claude` 遗留文件。
+
+### Changed
+
+- **部署链路收敛：server 运行时镜像配方单一来源化**（deploy）：新增 `crates/server/Dockerfile.runtime`（与主 Dockerfile Stage 2 同步的"二进制注入"配方），`ship-server-binary.sh` 远端不再用 Python 正则 patch 主 Dockerfile + trap 还原，改为直连 `docker build` 打 runtime 镜像（只做 COPY 打包，秒级完成）；`docker-compose.prod.yml` 的 server 服务补显式 `image: cyber-jianghu-server:binary-runtime`（compose `up -d` 依据 tag 指向的新镜像 ID 自动重建容器）。远端部署不再依赖 python3。
+- **交叉编译共享助手 build-linux-binary.sh**（deploy）：zigbuild 工具链预检（cargo-zigbuild/zig/rustup target）+ 编译 + md5 + `.bin/` 本地留存的单一来源，stdout 仅出 md5、日志走 stderr；`ship-server-binary.sh`（server）与私有的 `.test-agents/push_server.sh`（agent）共同委托。附带修复 push_server.sh 缺失工具链预检的问题（此前缺 cargo-zigbuild 会以晦涩报错失败）。
 
 ### Bug Fixes
 

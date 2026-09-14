@@ -57,14 +57,15 @@ cargo run --release
 
 服务端启动时会加载 `crates/server/.env`。主要变量说明：
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `DATABASE_URL` | PostgreSQL 连接字符串 | 无 |
-| `SERVER_HOST` | 服务端绑定 IP | `0.0.0.0` |
-| `SERVER_PORT` | 服务端监听端口 | `23333` |
-| `ADMIN_READ_TOKEN` | Dashboard 只读 Token | 未配置则自动生成 |
-| `ADMIN_WRITE_TOKEN` | Dashboard 读写 Token | 未配置则自动生成 |
-| `RUST_LOG` | 日志级别 | `info` |
+| 变量                        | 说明                                                                                       | 默认值                     |
+| --------------------------- | ------------------------------------------------------------------------------------------ | -------------------------- |
+| `DATABASE_URL`              | PostgreSQL 连接字符串                                                                      | 无                         |
+| `SERVER_HOST`               | 服务端绑定 IP                                                                              | `0.0.0.0`                  |
+| `SERVER_PORT`               | 服务端监听端口                                                                             | `23333`                    |
+| `ADMIN_READ_TOKEN`          | Dashboard 只读 Token                                                                       | 未配置则自动生成           |
+| `ADMIN_WRITE_TOKEN`         | Dashboard 读写 Token                                                                       | 未配置则自动生成           |
+| `RUST_LOG`                  | 日志级别                                                                                   | `info`                     |
+| `CYBER_JIANGHU_LLM_API_KEY` | LLM API 密钥（覆盖 `config/llm.yaml` 的 api_key，密钥不落配置文件；`.env` 已被 gitignore） | 未设置则用 llm.yaml 中的值 |
 
 > **提示**：Tick 周期已不再通过环境变量配置，请修改 `config/game_rules.yaml` 中的 `tick.real_seconds_per_tick` 字段。
 
