@@ -25,25 +25,60 @@
                 >
             </div>
             <div class="nav-tabs">
-                <div class="nav-tab active" data-tab-id="dashboard" onclick="switchTab('dashboard')">
+                <div
+                    class="nav-tab active"
+                    data-tab-id="dashboard"
+                    onclick="switchTab('dashboard')"
+                >
                     监控面板
                 </div>
-                <div class="nav-tab" data-tab-id="config" onclick="switchTab('config')">
+                <div
+                    class="nav-tab"
+                    data-tab-id="config"
+                    onclick="switchTab('config')"
+                >
                     配置编辑器
                 </div>
-                <div class="nav-tab" onclick="window.open('history.html', '_blank')">
+                <div
+                    class="nav-tab"
+                    onclick="window.open('history.html', '_blank')"
+                >
                     历史记录
                 </div>
-                <div class="nav-tab" onclick="window.open('settings.html', '_blank')">
+                <div
+                    class="nav-tab"
+                    onclick="window.open('settings.html', '_blank')"
+                >
                     LLM 设置
                 </div>
-                <div class="nav-tab" data-tab-id="evolution" onclick="switchTab('evolution'); loadActionEvolution();">
+                <div
+                    class="nav-tab"
+                    data-tab-id="evolution"
+                    onclick="
+                        switchTab('evolution');
+                        loadActionEvolution();
+                    "
+                >
                     动作演化
                 </div>
-                <div class="nav-tab" data-tab-id="health" onclick="switchTab('health'); loadHealth();">
+                <div
+                    class="nav-tab"
+                    data-tab-id="health"
+                    onclick="
+                        switchTab('health');
+                        loadHealth();
+                    "
+                >
                     健康度
                 </div>
-                <div class="nav-tab" data-tab-id="relationships" onclick="switchTab('relationships'); loadRelationships();">
+                <div
+                    class="nav-tab"
+                    data-tab-id="relationships"
+                    onclick="
+                        switchTab('relationships');
+                        loadRelationships();
+                    "
+                >
                     关系图谱
                 </div>
             </div>
@@ -57,8 +92,20 @@
                     <div class="dashboard-left">
                         <div class="dashboard-controls">
                             <h2>系统状态</h2>
-                            <div style="display: flex; align-items: center; gap: 10px">
-                                <span style="font-size: 12px; color: var(--text-secondary)">自动刷新</span>
+                            <div
+                                style="
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 10px;
+                                "
+                            >
+                                <span
+                                    style="
+                                        font-size: 12px;
+                                        color: var(--text-secondary);
+                                    "
+                                    >自动刷新</span
+                                >
                                 <label class="switch">
                                     <input
                                         type="checkbox"
@@ -91,10 +138,48 @@
                             <h2 id="agents-total-title" style="margin: 0">
                                 所有角色 (0)
                             </h2>
-                            <div style="display: flex; gap: 12px; align-items: center; font-size: 12px; color: var(--text-secondary)">
-                                <span>在线: <span id="online-count" style="color: var(--success); font-weight: 600">0</span></span>
-                                <span>离线: <span id="offline-count" style="color: var(--warning); font-weight: 600">0</span></span>
-                                <span>已死亡: <span id="dead-count" style="color: var(--error); font-weight: 600">0</span></span>
+                            <div
+                                style="
+                                    display: flex;
+                                    gap: 12px;
+                                    align-items: center;
+                                    font-size: 12px;
+                                    color: var(--text-secondary);
+                                "
+                            >
+                                <span
+                                    >在线:
+                                    <span
+                                        id="online-count"
+                                        style="
+                                            color: var(--success);
+                                            font-weight: 600;
+                                        "
+                                        >0</span
+                                    ></span
+                                >
+                                <span
+                                    >离线:
+                                    <span
+                                        id="offline-count"
+                                        style="
+                                            color: var(--warning);
+                                            font-weight: 600;
+                                        "
+                                        >0</span
+                                    ></span
+                                >
+                                <span
+                                    >已死亡:
+                                    <span
+                                        id="dead-count"
+                                        style="
+                                            color: var(--error);
+                                            font-weight: 600;
+                                        "
+                                        >0</span
+                                    ></span
+                                >
                             </div>
                         </div>
                         <input
@@ -119,9 +204,23 @@
                             </div>
                         </div>
                         <div class="agent-pagination">
-                            <button class="btn btn-secondary" onclick="changeAgentPage(-1)" id="agent-page-prev">上一页</button>
-                            <span id="agent-page-info">第 1 / 1 页 · 共 0 条</span>
-                            <button class="btn btn-secondary" onclick="changeAgentPage(1)" id="agent-page-next">下一页</button>
+                            <button
+                                class="btn btn-secondary"
+                                onclick="changeAgentPage(-1)"
+                                id="agent-page-prev"
+                            >
+                                上一页
+                            </button>
+                            <span id="agent-page-info"
+                                >第 1 / 1 页 · 共 0 条</span
+                            >
+                            <button
+                                class="btn btn-secondary"
+                                onclick="changeAgentPage(1)"
+                                id="agent-page-next"
+                            >
+                                下一页
+                            </button>
                         </div>
                     </div>
 
@@ -156,18 +255,63 @@
                         >
                     </div>
                     <div class="modal-tabs">
-                        <button class="modal-tab active" data-tab="basic" onclick="switchModalTab('basic')">基本信息</button>
-                        <button class="modal-tab" data-tab="experiences" onclick="switchModalTab('experiences')">经历日志</button>
-                        <button class="modal-tab" data-tab="roles" onclick="switchModalTab('roles')">身份管理</button>
-                        <button class="modal-tab" data-tab="inventory" onclick="switchModalTab('inventory')">物品管理</button>
-                        <button class="modal-tab" data-tab="biography" onclick="switchModalTab('biography')">传记</button>
+                        <button
+                            class="modal-tab active"
+                            data-tab="basic"
+                            onclick="switchModalTab('basic')"
+                        >
+                            基本信息
+                        </button>
+                        <button
+                            class="modal-tab"
+                            data-tab="experiences"
+                            onclick="switchModalTab('experiences')"
+                        >
+                            经历日志
+                        </button>
+                        <button
+                            class="modal-tab"
+                            data-tab="roles"
+                            onclick="switchModalTab('roles')"
+                        >
+                            身份管理
+                        </button>
+                        <button
+                            class="modal-tab"
+                            data-tab="inventory"
+                            onclick="switchModalTab('inventory')"
+                        >
+                            物品管理
+                        </button>
+                        <button
+                            class="modal-tab"
+                            data-tab="biography"
+                            onclick="switchModalTab('biography')"
+                        >
+                            传记
+                        </button>
                     </div>
                     <div class="modal-body" id="modal-agent-body">
-                        <div id="modal-tab-basic" class="modal-tab-content active"></div>
-                        <div id="modal-tab-experiences" class="modal-tab-content"></div>
-                        <div id="modal-tab-roles" class="modal-tab-content"></div>
-                        <div id="modal-tab-inventory" class="modal-tab-content"></div>
-                        <div id="modal-tab-biography" class="modal-tab-content"></div>
+                        <div
+                            id="modal-tab-basic"
+                            class="modal-tab-content active"
+                        ></div>
+                        <div
+                            id="modal-tab-experiences"
+                            class="modal-tab-content"
+                        ></div>
+                        <div
+                            id="modal-tab-roles"
+                            class="modal-tab-content"
+                        ></div>
+                        <div
+                            id="modal-tab-inventory"
+                            class="modal-tab-content"
+                        ></div>
+                        <div
+                            id="modal-tab-biography"
+                            class="modal-tab-content"
+                        ></div>
                     </div>
                 </div>
             </div>
@@ -182,7 +326,11 @@
                         <div class="editor-toolbar">
                             <div
                                 id="current-file-name"
-                                style="font-weight: 600; font-size: 13px; color: var(--text-primary)"
+                                style="
+                                    font-weight: 600;
+                                    font-size: 13px;
+                                    color: var(--text-primary);
+                                "
                             >
                                 选择文件
                             </div>
@@ -221,8 +369,20 @@
                 <div class="dashboard-controls">
                     <h2>关系图谱</h2>
                     <div style="display: flex; align-items: center; gap: 10px">
-                        <span style="font-size: 12px; color: var(--text-secondary)">关系为单向主观认知：A→B 与 B→A 独立存储，本页仅对比展示，不合并不平均</span>
-                        <button class="btn btn-primary" onclick="loadRelationships()">刷新</button>
+                        <span
+                            style="
+                                font-size: 12px;
+                                color: var(--text-secondary);
+                            "
+                            >关系为单向主观认知：A→B 与 B→A
+                            独立存储，本页仅对比展示，不合并不平均</span
+                        >
+                        <button
+                            class="btn btn-primary"
+                            onclick="loadRelationships()"
+                        >
+                            刷新
+                        </button>
                     </div>
                 </div>
                 <input
@@ -230,7 +390,10 @@
                     id="rel-filter"
                     class="form-input"
                     placeholder="搜索持有者/目标名称或 ID..."
-                    oninput="relFilterText = this.value; renderRelationships()"
+                    oninput="
+                        relFilterText = this.value;
+                        renderRelationships();
+                    "
                     style="width: 260px; margin-bottom: 10px"
                 />
                 <div id="relationships-content">
