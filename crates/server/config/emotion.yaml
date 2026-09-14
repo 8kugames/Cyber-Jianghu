@@ -17,6 +17,13 @@ core_affect:
       absolute_floor: 0.0
       valence_sensitivity: 0.3
       arousal_sensitivity: 0.2
+    # 与 satiation 同规：缺水同样产生不适信号（衰减 2.78/tick 后
+    # 水压与饥饿同级，缺此条目则渴感不进入情绪系统）
+    - attribute: hydration
+      comfort_zone: [40.0, 100.0]
+      absolute_floor: 0.0
+      valence_sensitivity: 0.3
+      arousal_sensitivity: 0.2
     - attribute: hp
       comfort_zone: [30.0, 100.0]
       absolute_floor: 0.0
