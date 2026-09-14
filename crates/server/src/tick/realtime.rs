@@ -61,11 +61,11 @@ pub struct IntentWorker {
     db_pool: DbPool,
     /// Agent 状态内存缓存
     state_cache: AgentStateCache,
-    /// 最近成功执行 intent 的 tick（agent_id → tick_id）
+    /// 最近成功执行 intent 的 tick（agent_id → tick_id，秒级时间戳）
     ///
     /// 唯一写入点：process_intent 持久化成功后；
     /// 唯一读取点：process_tick_boundary 衰减前的休息判定
-    /// （tick_id - last_intent_tick <= 1 视为本 tick 窗口内行动过）。
+    /// （tick_id 差值在 real_seconds_per_tick 秒内视为本 tick 窗口内行动过）。
     last_intent_ticks: dashmap::DashMap<uuid::Uuid, i64>,
     /// 状态处理器（验证 + 执行 + 状态变更）
     state_processor: Arc<StateProcessor>,
@@ -712,10 +712,25 @@ impl IntentWorker {
         // 2. 衰减
         // 休息判定：本 tick 或上一 tick 内成功执行过 intent 的 Agent 视为行动中，
         // 其余（idle-skip / 离线 / 思考间隙）视为休息 tick，门控恢复生效。
+        // tick_id 是秒级时间戳（scheduler::calculate_tick_id_from_time），
+        // 相邻 tick 边界相差 real_seconds_per_tick 秒，窗口必须按秒换算。
+        let tick_window_secs = crate::game_data::registry_or_error()
+            .map(|cache| {
+                cache
+                    .get()
+                    .game_rules
+                    .data
+                    .agent_state
+                    .tick
+                    .real_seconds_per_tick as i64
+            })
+            .ok()
+            .filter(|v| *v > 0)
+            .unwrap_or(60);
         let acted_recently: std::collections::HashSet<uuid::Uuid> = self
             .last_intent_ticks
             .iter()
-            .filter(|entry| tick_id - entry.value() <= 1)
+            .filter(|entry| tick_id - entry.value() <= tick_window_secs)
             .map(|entry| *entry.key())
             .collect();
         let (mut updated_states, dead_agents, _decay_events, death_notifications) =
