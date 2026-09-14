@@ -78,9 +78,12 @@ fn serve_admin_file(path: &str) -> Result<axum::response::Response<Body>, Status
     let mime = mime_guess::from_path(&resolved_path).first_or_octet_stream();
     let body =
         Body::from(std::fs::read(&resolved_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?);
+    // 管理面板资源不带内容哈希，且运行时按请求读盘：禁用启发式缓存，
+    // 避免部署后浏览器复用旧 JS，造成"服务端已更新、面板仍旧行为"的误判。
     Ok(axum::response::Response::builder()
         .status(StatusCode::OK)
         .header(axum::http::header::CONTENT_TYPE, mime.as_ref())
+        .header(axum::http::header::CACHE_CONTROL, "no-cache")
         .body(body)
         .unwrap_or_else(|_| axum::response::Response::new(Body::empty())))
 }

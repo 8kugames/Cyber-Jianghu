@@ -7,11 +7,11 @@
 #       还原 Dockerfile → 输出 Admin 凭证。
 #
 # 用法：
-#   SERVER=user@host ./scripts/ship-server-binary.sh
+#   SERVER=user@host ./scripts/deploy/ship-server-binary.sh
 #
 # 环境变量：
-#   SERVER            必填，形如 DEPLOY_TARGET_REDACTED 或 ssh config alias
-#   REMOTE_PROJECT    远端项目目录，默认 REMOTE_PATH_REDACTED
+#   SERVER            必填，形如 user@host 或 ssh config alias（禁止写入真实线上地址）
+#   REMOTE_PROJECT    必填，远端项目目录（禁止内置默认值）
 #   COMPOSE_DIR       远端 docker-compose 目录，默认 $REMOTE_PROJECT/crates/server
 #   HEALTH_TIMEOUT    健康检查超时秒数，默认 60
 #   SKIP_VERIFY       非空则跳过 health 校验
@@ -19,10 +19,10 @@
 
 set -euo pipefail
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TARGET="x86_64-unknown-linux-gnu"
-SERVER="${SERVER:?必须设置 SERVER，例如 DEPLOY_TARGET_REDACTED}"
-REMOTE_PROJECT="${REMOTE_PROJECT:-REMOTE_PATH_REDACTED}"
+SERVER="${SERVER:?必须设置 SERVER，形如 user@host}"
+REMOTE_PROJECT="${REMOTE_PROJECT:?必须设置 REMOTE_PROJECT，远端项目目录}"
 COMPOSE_DIR="${COMPOSE_DIR:-$REMOTE_PROJECT/crates/server}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-60}"
 MIN_FREE_MB="${MIN_FREE_MB:-1024}"
@@ -86,6 +86,12 @@ fi
 
 echo "[同步] config/ → 服务端（防二进制新/配置旧错配）"
 rsync -az --delete "$PROJECT_ROOT/crates/server/config/" "$SERVER:$REMOTE_PROJECT/crates/server/config/"     && echo "[ sync ] config/ 全量同步"
+
+# static/ 与 config/ 同属构建上下文输入（Dockerfile: COPY crates/server/static /app/static）。
+# sync_dirty_to_server 只覆盖 git 未提交改动，已提交的静态修复（如管理面板 JS）不会进入
+# 远端上下文，镜像内 /app/static 会停留旧副本——表现为服务端版本已更新、面板仍跑旧 JS。
+echo "[同步] static/ → 服务端（防二进制新/静态旧错配）"
+rsync -az --delete "$PROJECT_ROOT/crates/server/static/" "$SERVER:$REMOTE_PROJECT/crates/server/static/"   && echo "[ sync ] static/ 全量同步"
 
 echo "[构建] zigbuild $TARGET"
 RUSTC="$(rustup which rustc)" cargo zigbuild --release --target "$TARGET" \
