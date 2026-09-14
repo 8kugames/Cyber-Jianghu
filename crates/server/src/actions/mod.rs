@@ -105,6 +105,12 @@ pub enum ParsedActionData {
     Teach(TeachData),
     /// 无参数动作（如休整）
     None,
+    /// 演化动作（编译期闭集之外、actions.yaml 注册表之内的动作）
+    ///
+    /// 动作演化 approve 产物动态写入 actions.yaml，不可能预先声明 typed struct；
+    /// 校验走数据驱动的 field_validations / requirements，执行走通用效果路径
+    /// （effects 同样数据驱动）。字段访问直接读原始 JSON。
+    Generic(serde_json::Value),
 }
 
 /// 从可选的 JSON Value 反序列化为指定类型
@@ -141,6 +147,7 @@ impl ParsedActionData {
             (Self::Teach(d), "target_agent_id") => Some(d.target_agent_id.clone()),
             (Self::Attack(d), "target_agent_id") => Some(d.target_agent_id.clone()),
             (Self::Observe(d), "target_agent_id") => d.target_agent_id.clone(),
+            (Self::Generic(v), _) => v.get(field)?.as_str().map(|s| s.to_string()),
             _ => None,
         }
     }
@@ -150,6 +157,7 @@ impl ParsedActionData {
         match (self, field) {
             (Self::Yu(d), "quantity") => Some(d.quantity),
             (Self::Qu(d), "quantity") => Some(d.quantity),
+            (Self::Generic(v), _) => v.get(field)?.as_i64().and_then(|n| i32::try_from(n).ok()),
             _ => None,
         }
     }
@@ -161,6 +169,7 @@ impl ParsedActionData {
             Self::Teach(d) => Some(d.target_agent_id.clone()),
             Self::Speak(d) => d.target_agent_id.map(|id| id.to_string()),
             Self::Observe(d) => d.target_agent_id.clone(),
+            Self::Generic(v) => v.get("target_agent_id")?.as_str().map(|s| s.to_string()),
             _ => None,
         }
     }

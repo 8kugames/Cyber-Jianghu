@@ -85,6 +85,19 @@ impl ActionExecutor {
             ParsedActionData::Craft(data) => BasicActionExecutor::execute_craft(intent, data),
             ParsedActionData::Teach(data) => BasicActionExecutor::execute_teach(intent, data),
             ParsedActionData::None => BasicActionExecutor::execute_halt(intent),
+            // 演化动作：无专用执行器，requirements 已在 consume_requirements 按配置扣减，
+            // effects 由下方 apply_generic_effects 按配置应用——
+            // 审议通过即真实可执行，闭环"提案→审议→生效→Agent 可用"
+            ParsedActionData::Generic(_) => {
+                let display = ActionRegistry::get(intent.action_type.as_ref())
+                    .map(|c| c.display_name.clone().unwrap_or(c.name))
+                    .unwrap_or_else(|| intent.action_type.to_string());
+                ActionExecutionResult::success(
+                    format!("{} 完成", display),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
+                )
+            }
         };
 
         if result.success {

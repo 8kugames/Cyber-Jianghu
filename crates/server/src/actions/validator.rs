@@ -55,9 +55,17 @@ fn parse_action_data_by_type(intent: &Intent) -> Result<ParsedActionData, GameEr
             "教导",
         )?)),
         "休整" => Ok(ParsedActionData::None),
-        other => Err(GameError::InvalidActionData {
-            reason: format!("未知的动作类型: {}", other),
-        }),
+        // 编译期闭集之外、注册表之内的动作（动作演化 approve 产物）：
+        // validate_action 第一道门（ActionRegistry::get）已放行，此处不再拦截——
+        // 拦截会让通过审议的演化动作永远收到"未知的动作类型"→ UnknownAction
+        // → Agent 无限重复提案。数据驱动的 field_validations / requirements /
+        // effects 对 Generic 形态照常生效
+        _ => Ok(ParsedActionData::Generic(
+            intent
+                .action_data
+                .clone()
+                .unwrap_or(serde_json::Value::Null),
+        )),
     }
 }
 
