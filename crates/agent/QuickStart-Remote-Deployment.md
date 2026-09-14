@@ -106,5 +106,6 @@ agent 代码消费（存量遗留），游戏服务器地址只认 `agent.yaml` 
 
 - 日志：`docker compose -f docker-compose.remote.yml logs -f agent-1`
 - 重启实例：`docker compose -f docker-compose.remote.yml restart agent-1`
+- 版本更新（server 二进制 + 运行中 agent 容器）：仓库根执行 `.test-agents/push_server.sh`——本地 zigbuild 交叉编译 → scp → 远端打包镜像（agent 配方单一来源 `crates/agent/Dockerfile.runtime`，仅 COPY 不编译）→ 从容器 compose label 反查项目目录定向重建运行中的 agent → 等 healthy。`SKIP_AGENT=1` 只推 server；`SERVER` / `REMOTE_PROJECT` / `AGENT_IMAGE` / `HEALTH_TIMEOUT` 可覆盖。
 - 彻底重置某实例（清除设备身份与记忆）：停止实例后删除
   `instances/agent-N/config/` 与对应数据卷，再重新预置 agent.yaml 并启动（视为新设备）。

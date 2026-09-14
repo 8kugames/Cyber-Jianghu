@@ -126,3 +126,10 @@ llm:
 ```
 
 You can also edit and hot-reload it directly from the Agent's built-in web panel (`http://localhost:23340/settings.html`).
+
+Note: automatic panel authentication relies on `setup/status` returning the token only
+to loopback peers, which holds only for native (non-container) local deployments.
+Under Docker port publishing the host browser reaches the agent through NAT, the
+token is not returned, and the panel cannot authenticate (see the security model
+section in [QuickStart-Remote-Deployment.md](QuickStart-Remote-Deployment.md)).
+For containerized deployment, edit `agent.yaml` directly and restart the instance.

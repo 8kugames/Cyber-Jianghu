@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Chore
+
+- **补齐部署链路收敛文档**（docs）：联调 SKILL 工具链表补 `push_server.sh`、`restart.sh --build` 语义更新为委托 `build-agent-image.sh` 增量构建；远程部署文档运维节补版本更新链路（`Dockerfile.runtime` 配方单一来源）；EN QuickStart-Agent 同步 loopback 认证注意事项。
+
 ## [0.1.322] - 2026-09-14
 
 ### Features
