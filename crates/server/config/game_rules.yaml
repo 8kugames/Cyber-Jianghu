@@ -92,8 +92,6 @@ data:
     llm_chaos_threshold: 12
     # 分级审核辅助配置
     llm_validation:
-      # 每 tick 至少审核的 Intent 数量
-      minimum_per_tick: 1
       # 限制区域 node_id 前缀/关键词（medium 风险 move 动作抽审用）
       restricted_area_keywords:
         - admin

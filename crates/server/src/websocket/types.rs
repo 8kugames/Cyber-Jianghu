@@ -27,12 +27,10 @@ use cyber_jianghu_protocol::{
 //   max_intents_per_tick = 5      — 单 tick 最大意图数，防止 agent 过度消耗资源
 //   max_retries = 3              — 意图执行失败重试次数上限
 //   llm_chaos_threshold = 12    — LLM 混沌阈值（sanity <此值时触发混乱行为）
-//   minimum_per_tick = 1          — 每 tick 最少审核意图数（即使 ooc_risk=skip）
 // ============================================================================
 
 const INTENT_BATCH_MAX_PER_TICK: usize = 5;
 const INTENT_BATCH_MAX_RETRIES: i32 = 12; // 与 game_rules.yaml intent_batch.max_retries 默认值对齐
-const INTENT_BATCH_MINIMUM_PER_TICK: usize = 1;
 const INTENT_BATCH_LLM_CHAOS_THRESHOLD: u32 = 12;
 
 /// WebSocket 升级请求的查询参数
@@ -102,7 +100,6 @@ pub fn build_game_rules_from_config(
             always_types: Vec::new(),
             adaptive_types: Vec::new(),
             skip_types: Vec::new(),
-            minimum_per_tick: INTENT_BATCH_MINIMUM_PER_TICK,
             restricted_area_keywords: Vec::new(),
             high_value_item_keywords: Vec::new(),
             adaptive_field_mapping: std::collections::HashMap::new(),

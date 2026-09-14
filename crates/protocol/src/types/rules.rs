@@ -198,10 +198,6 @@ pub struct GradedValidationConfig {
     #[serde(default)]
     pub skip_types: Vec<String>,
 
-    /// 每 tick 至少审核的 Intent 数量
-    #[serde(default = "default_minimum_per_tick")]
-    pub minimum_per_tick: usize,
-
     /// 限制区域 node_id 前缀/关键词（move 审核用）
     #[serde(default)]
     pub restricted_area_keywords: Vec<String>,
@@ -213,10 +209,6 @@ pub struct GradedValidationConfig {
     /// Adaptive 审核字段映射（数据驱动）
     #[serde(default)]
     pub adaptive_field_mapping: std::collections::HashMap<String, String>,
-}
-
-fn default_minimum_per_tick() -> usize {
-    1
 }
 
 // ============================================================================
