@@ -97,6 +97,18 @@ scp -q "$PROJECT_ROOT/crates/server/Dockerfile.runtime" \
     "$SERVER:$REMOTE_PROJECT/crates/server/Dockerfile.runtime" \
     && echo "[ sync ] Dockerfile.runtime"
 
+# migrations 与 entrypoint 同为 Dockerfile.runtime 的 COPY 输入，与 config/static
+# 同级全量同步；compose 文件是部署契约（server.image tag 配对），远端 git 陈旧
+# 会导致 compose 解析旧镜像名 → up -d 静默空操作（已实证的失败模式）
+echo "[同步] migrations/ + entrypoint + compose → 服务端"
+rsync -az --delete "$PROJECT_ROOT/crates/server/migrations/" "$SERVER:$REMOTE_PROJECT/crates/server/migrations/" && echo "[ sync ] migrations/ 全量同步"
+scp -q "$PROJECT_ROOT/crates/server/docker-entrypoint.sh" \
+    "$SERVER:$REMOTE_PROJECT/crates/server/docker-entrypoint.sh" \
+    && echo "[ sync ] docker-entrypoint.sh"
+scp -q "$PROJECT_ROOT/crates/server/docker-compose.prod.yml" \
+    "$SERVER:$COMPOSE_DIR/docker-compose.prod.yml" \
+    && echo "[ sync ] docker-compose.prod.yml"
+
 echo "[构建] 交叉编译（委托 build-linux-binary.sh）"
 # 经 bash 调用：不依赖文件可执行位，避免部署中途因 +x 缺失报 Permission denied
 BIN_HASH="$(bash "$PROJECT_ROOT/scripts/deploy/build-linux-binary.sh" -p cyber-jianghu-server)"
@@ -138,6 +150,21 @@ echo "[镜像] $IMG 已重建 (md5=$MD5)"
 
 cd "$CD"
 docker compose -f docker-compose.prod.yml up -d server
+
+# 重建核验：容器实际镜像 ID 必须等于刚打包的 tag，否则 compose 因配方漂移
+# 解析到旧镜像名会静默 no-op（已实证：远端 compose 旧版无 image: 键时，
+# 新镜像空挂、旧容器继续运行、health 假阳性通过）
+fail=0
+for cid in $(docker compose -f docker-compose.prod.yml ps -q server); do
+    run_img="$(docker inspect -f '{{.Image}}' "$cid")"
+    if [ "$run_img" != "$(docker image inspect -f '{{.Id}}' "$IMG")" ]; then
+        echo "[失败] 容器未运行新镜像（running=${run_img:0:19}），检查 $CD/docker-compose.prod.yml 的 server.image 是否为 $IMG" >&2
+        fail=1
+    else
+        echo "[核验] 容器已运行新镜像 $IMG (${run_img:0:19})"
+    fi
+done
+[ "$fail" = "0" ] || exit 1
 
 if [ -n "$SKIP" ]; then exit 0; fi
 echo "[验证] 等 health 通过 (timeout ${TIMEOUT}s)"
