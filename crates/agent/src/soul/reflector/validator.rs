@@ -133,7 +133,10 @@ impl ReflectorSoul {
             return !Self::adaptive_needs_llm(intent, config, world_state);
         }
 
-        true
+        // 未知动作（不在三列表任何一档）：fail-closed 走 LLM 审查。
+        // 场景：actions.yaml 新增动作后 Agent 仍持有旧 game_rules 词表——
+        // 若默认跳过，新增高风险动作会静默免审。
+        false
     }
 
     fn adaptive_needs_llm(
