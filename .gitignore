@@ -136,8 +136,7 @@ flamegraph.svg
 *.dylib
 
 
-# LLM 配置含明文 API key —— web 端首次保存自动生成，不入库
-crates/server/config/llm.yaml
+# LLM 配置已转为可入库模板（连接信息与密钥经环境变量注入，见 llm_loader.rs）
 .bin/
 .test-agents/.env
 .test-agents/push_server.sh

@@ -1,0 +1,16 @@
+version: 0.0.1
+description: LLM 配置模板（连接信息与密钥经环境变量注入，见 QuickStart-Server 与 crates/server/.env）
+meta:
+  created_at: 2026-07-10
+  author: Cyber-Jianghu
+data:
+  # 以下五项运行时经环境变量覆盖（env 非空优先）：
+  #   CYBER_JIANGHU_LLM_ENABLED / _PROVIDER / _BASE_URL / _API_KEY / _MODEL
+  enabled: false
+  provider: ""
+  base_url: ""
+  api_key: ""
+  model: ""
+  temperature: 0.8
+  max_tokens: 8192
+  context_window_tokens: 32768

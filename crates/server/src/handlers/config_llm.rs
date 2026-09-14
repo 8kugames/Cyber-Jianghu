@@ -170,11 +170,12 @@ pub async fn save_llm_config(
         })
     });
 
-    if config.data.api_key.is_empty()
-        && let Ok(existing) = read_llm_config_raw()
-    {
-        config.data.api_key = existing.data.api_key;
+    // 密钥永不落盘：llm.yaml 现为可入库模板，api_key 一律置空，
+    // 真实密钥经环境变量 CYBER_JIANGHU_LLM_API_KEY 注入（见 llm_loader）。
+    if !config.data.api_key.is_empty() {
+        tracing::info!("忽略面板提交的 api_key（密钥经环境变量注入，不落配置文件）");
     }
+    config.data.api_key = String::new();
 
     let yaml = serde_yaml::to_string(&config)
         .map_err(|_| json_err(StatusCode::INTERNAL_SERVER_ERROR, "序列化配置失败"))?;
