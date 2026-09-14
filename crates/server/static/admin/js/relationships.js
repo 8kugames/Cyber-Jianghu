@@ -47,7 +47,15 @@ async function loadRelationships() {
         var res = await apiFetch(API.BASE + "/agent-relationships");
         if (!res.ok) throw new Error("HTTP " + res.status);
         var data = await res.json();
-        relRows = data.relationships || [];
+        // 后端 RelationshipItem 以 serde(flatten) 序列化：实际返回为打平形态
+        // {source_agent_id, target_agent_id, target_name, ...}，无嵌套 relationship 键。
+        // 在唯一数据入口归一化为本页渲染层契约 {source_agent_id, relationship: {...}}，
+        // 下游（反查表/过滤/统计/行渲染）均按嵌套形态取值。
+        relRows = (data.relationships || []).map(function (item) {
+            var rel = Object.assign({}, item);
+            delete rel.source_agent_id;
+            return { source_agent_id: item.source_agent_id, relationship: rel };
+        });
         // 反查表：target→source→行，用于展示反向认知（独立数据，仅对比参照）
         relReverseMap = {};
         relRows.forEach(function (r) {
