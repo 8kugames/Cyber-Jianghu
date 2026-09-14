@@ -222,6 +222,10 @@ pub async fn fetch_tianhun_result_for_day(
 }
 
 /// 单条追加 daily reward 记录（供 lifetime 死亡补算用）。
+///
+/// 按 (game_day, agent_id) 幂等：settle_lifetime 在同 tick 多路径
+/// （衰减死 + action 致死）可能重复触发，重复 append 会造成 daily 文件
+/// 重复行与 cumulative 双计——已存在该 agent 的记录时跳过。
 pub async fn append_daily_record(record: &DailyReward) {
     let cfg = match RewardRegistry::get_config() {
         Some(c) if c.output.enabled => c,
@@ -234,6 +238,14 @@ pub async fn append_daily_record(record: &DailyReward) {
         return;
     }
     let path = base.join(format!("day={}.jsonl", record.game_day));
+    let existing = tokio::fs::read_to_string(&path).await.unwrap_or_default();
+    for line in existing.lines() {
+        if let Ok(prev) = serde_json::from_str::<DailyReward>(line)
+            && prev.agent_id == record.agent_id
+        {
+            return;
+        }
+    }
     let line = match serde_json::to_string(record) {
         Ok(s) => s + "\n",
         Err(_) => return,
@@ -268,7 +280,20 @@ async fn write_daily_batch(records: &[DailyReward], _tick_id: i64) -> anyhow::Re
     let game_day = records.first().map(|r| r.game_day).unwrap_or(0);
     let path = base.join(format!("day={}.jsonl", game_day));
 
+    // 合并而非截断覆盖：日中死亡 agent 的 partial 记录（settle_lifetime 追加）
+    // 不在本批存活者结算之内，整文件覆盖会把它冲掉。保留不在本批中的既有行。
+    let new_agent_ids: std::collections::HashSet<uuid::Uuid> =
+        records.iter().map(|r| r.agent_id).collect();
+    let existing = tokio::fs::read_to_string(&path).await.unwrap_or_default();
     let mut content = String::new();
+    for line in existing.lines() {
+        if let Ok(prev) = serde_json::from_str::<DailyReward>(line)
+            && !new_agent_ids.contains(&prev.agent_id)
+        {
+            content.push_str(line);
+            content.push('\n');
+        }
+    }
     for r in records {
         content.push_str(&serde_json::to_string(r)?);
         content.push('\n');
