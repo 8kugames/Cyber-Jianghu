@@ -594,6 +594,10 @@ pub(crate) async fn death_events_handler(State(state): State<HttpApiState>) -> i
                                 yield Ok::<_, std::convert::Infallible>(Frame::data(data));
                             }
                         }
+                        Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped))) => {
+                            // 消费端落后：丢弃的是旧消息，通道仍活，继续跟流（不可断连）
+                            tracing::warn!("[events] death broadcast lagged, skipped {} msgs", skipped);
+                        }
                         Ok(Err(_)) => {
                             break;
                         }
@@ -609,6 +613,12 @@ pub(crate) async fn death_events_handler(State(state): State<HttpApiState>) -> i
                             let json = serde_json::json!({"tick_id": tick_id}).to_string();
                             let data = Bytes::from(format!("event: tick_update\ndata: {}\n\n", json));
                             yield Ok::<_, std::convert::Infallible>(Frame::data(data));
+                        }
+                        // 消费端落后：丢弃的是旧帧，通道仍活，继续跟流（不可断连——
+                        // 本流还承载 agent_died；对齐 state_stream 的 Lagged 降级。
+                        // tick_update 每 tick 必发后此分支真实可达）
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            tracing::warn!("[events] tick broadcast lagged, skipped {} ticks", skipped);
                         }
                         Err(_) => {
                             break;
