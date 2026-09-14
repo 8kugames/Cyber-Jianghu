@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # ============================================================================
 # pre-commit: 版本号控制 + 质量前置检查
-#   · 暂存区含 .rs 变更时, 先跑 cargo fmt --check 与 clippy (与 CI 同款), 失败即中止
+#   · 暂存区含 .rs 变更时, 对暂存文件原地 rustfmt --check（只读不改写）, 失败即中止
+#   · clippy 不在本地校验(需整体编译上下文, 无法按单文件运行), 交由 CI 强制
+#   · 设计红线: 本钩子禁止 stash/restore/checkout 等改写工作树状态的操作——
+#     工作树是多会话并行共享的公共现场, 对其他 session 的未暂存改动必须零触碰
 #   · 暂存区含 crates/<crate>/ 的 .rs/.toml/.yaml 变更时, 该 crate 版本 patch +1
 #   · 同步更新依赖方 Cargo.toml 中的 path 依赖版本引用
 #   · 同步刷新 Cargo.lock (cargo update -w)，按 untrack 决策(f0834eb7)仅本地维护，不入库
@@ -106,23 +109,38 @@ update_dependencies() {
     done
 }
 
-# --- 质量前置检查: 暂存区含 .rs 变更时跑 fmt/clippy (与 CI 检查同款) ---
+# --- 质量前置检查: 仅校验暂存区对应的 .rs 文件格式 ---
+# rustfmt --check 为只读模式, 原地校验不改写文件, 无需临时目录。
+# 校验对象是暂存文件在工作树的当前内容（常规流程下与暂存内容一致；
+# 若暂存后又改动, 以工作树为准, 残留问题由 CI fmt 门禁兑底）。
+# skip_children 禁止 rustfmt 顺着 mod 声明解析兄弟文件（暂存区可能只含部分文件）。
 # 放在版本 bump 之前: 检查失败立即中止, 不产生任何 bump/git add 副作用
-STAGED_RS=$(git diff --cached --name-only | grep -E '\.rs$' || true)
+STAGED_RS=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.rs$' || true)
 if [ -n "$STAGED_RS" ]; then
-    echo -e "${BLUE}→${NC} cargo fmt --check"
-    if ! cargo fmt --check; then
-        echo -e "${RED}✗${NC} cargo fmt --check 未通过，请执行 cargo fmt 后重新暂存提交" >&2
-        exit 1
-    fi
-    echo -e "${GREEN}✓${NC} fmt 通过"
+    if ! command -v rustfmt > /dev/null 2>&1; then
+        echo -e "${YELLOW}⚠${NC} 未找到 rustfmt, 跳过 fmt 校验（CI 仍会强制）" >&2
+    else
+        RUST_EDITION=$(grep -m1 -E '^edition' crates/server/Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
+        case "$RUST_EDITION" in 2015 | 2018 | 2021 | 2024) ;; *) RUST_EDITION=2021 ;; esac
 
-    echo -e "${BLUE}→${NC} cargo clippy --workspace --all-targets -- -D warnings"
-    if ! cargo clippy --workspace --all-targets -- -D warnings; then
-        echo -e "${RED}✗${NC} clippy 未通过（warnings 即错误），修复后重新提交（可 cargo clippy --workspace --all-targets --fix）" >&2
-        exit 1
+        echo -e "${BLUE}→${NC} rustfmt --check (原地只读; clippy 交由 CI)"
+        FMT_FAIL=0
+        for f in $STAGED_RS; do
+            if [ ! -f "$f" ]; then
+                echo -e "${YELLOW}⚠${NC} 跳过 $f（工作树中不存在）" >&2
+                continue
+            fi
+            if ! rustfmt --check --edition "$RUST_EDITION" --config skip_children=true "$f"; then
+                FMT_FAIL=1
+            fi
+        done
+
+        if [ "$FMT_FAIL" -ne 0 ]; then
+            echo -e "${RED}✗${NC} fmt 未通过，请执行 cargo fmt 后重新暂存提交" >&2
+            exit 1
+        fi
+        echo -e "${GREEN}✓${NC} fmt 通过"
     fi
-    echo -e "${GREEN}✓${NC} clippy 通过"
 fi
 
 MODIFIED_FILES=()
