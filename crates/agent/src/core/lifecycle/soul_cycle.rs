@@ -180,6 +180,10 @@ impl super::super::Agent {
             // 后序"取后即用/予"类 intent 共享同一 WorldState 快照，
             // 需将获得物并入可见集合以免误拦合法连续动作
             let mut acquired_item_ids: Vec<String> = Vec::new();
+            // chaos 替补意图缓冲：intent 循环结束后统一追加到 approved_intents
+            // 队尾（不顶替被驳回的主槽——服务端主意图失败即中止整个队列，
+            // chaos 占主槽会在其执行失败时连坐后续已通过的合法意图）
+            let mut pending_chaos: Vec<Intent> = Vec::new();
 
             // multi-intent pipeline: primary + subsequent intents + chaos
             let max_per_tick = _max_intents;
@@ -430,6 +434,11 @@ impl super::super::Agent {
                                 .await
                             {
                                 Ok(corrected_intent) => {
+                                    // 自纠是完整重决策（可更换动作类型），标签用纠正后
+                                    // 真实动作名，否则出现「取(自纠)」实际执行「用」的
+                                    // 面板矛盾
+                                    let corrected_label =
+                                        corrected_intent.action_type.as_str().to_string();
                                     match self
                                         .validate_with_reflector(
                                             corrected_intent,
@@ -444,6 +453,18 @@ impl super::super::Agent {
                                             layers: l2,
                                             narrative: _,
                                         } => {
+                                            // 链感知：自纠产出的「取」过审后同样并入获得物
+                                            // 集合（与主循环对齐，否则收窄后的 layer0 会
+                                            // 误拦「自纠取→后续用/予」链）
+                                            if approved.action_type.as_str() == "取"
+                                                && let Some(item_id) = approved
+                                                    .action_data
+                                                    .as_ref()
+                                                    .and_then(|d| d.get("item_id"))
+                                                    .and_then(|v| v.as_str())
+                                            {
+                                                acquired_item_ids.push(item_id.to_string());
+                                            }
                                             // self-correct 审查通过后推入 summary window
                                             if let Some(ref chain) = cognitive_chain
                                                 && let Some(ref engine) = self.cognitive_engine
@@ -452,22 +473,28 @@ impl super::super::Agent {
                                             }
                                             batch_layers = l2.clone();
                                             per_intent_layers.push((
-                                                format!("{}(自纠)", intent_action_label),
+                                                format!("{}(自纠)", corrected_label),
                                                 l2,
                                             ));
                                             approved_intents.push(approved);
                                         }
                                         crate::soul::reflector::PipelineValidationResult::Rejected {
                                             reason: reason2,
-                                            ..
+                                            layers: l2,
                                         } => {
                                             warn!(
                                                 "Tick {} self-correct 后仍被驳回: {}",
                                                 world_state.tick_id, reason2
                                             );
+                                            // 自纠尝试自身留痕（此前该分支零记录，
+                                            // 面板无从追溯纠正路径）
+                                            per_intent_layers.push((
+                                                format!("{}(自纠·驳回)", corrected_label),
+                                                l2,
+                                            ));
                                             if opt_chaos_on_double_reject {
-used_chaos_fallback = true;
-                                                approved_intents.push(self.chaos_fallback_intent(
+                                                used_chaos_fallback = true;
+                                                pending_chaos.push(self.chaos_fallback_intent(
                                                     world_state,
                                                     agent_id,
                                                     format!("self-correct 后仍被驳回: {}", reason2),
@@ -482,8 +509,13 @@ used_chaos_fallback = true;
                                         "Tick {} self-correct LLM 失败 ({}): {}",
                                         world_state.tick_id, tick_llm_fail_count, e
                                     );
+                                    // 自纠 LLM 失败同样留痕（无审查层结果，仅意图标签）
+                                    per_intent_layers.push((
+                                        format!("{}(自纠·LLM失败)", intent_action_label),
+                                        Vec::new(),
+                                    ));
                                     used_chaos_fallback = true;
-                                    approved_intents.push(self.chaos_fallback_intent(
+                                    pending_chaos.push(self.chaos_fallback_intent(
                                         world_state,
                                         agent_id,
                                         format!("self-correct LLM 失败: {}", e),
@@ -492,7 +524,7 @@ used_chaos_fallback = true;
                             }
                         } else if opt_enabled && opt_chaos_on_double_reject {
                             used_chaos_fallback = true;
-                            approved_intents.push(self.chaos_fallback_intent(
+                            pending_chaos.push(self.chaos_fallback_intent(
                                 world_state,
                                 agent_id,
                                 format!("意图被驳回（跳过 self-correct）: {}", rejection_reason),
@@ -508,6 +540,19 @@ used_chaos_fallback = true;
                 if !opt_enabled && batch_rejection.is_some() {
                     break;
                 }
+            }
+
+            // chaos 沉队尾：合法已审意图优先执行，chaos 永不占主槽（主槽失败会
+            // 连坐整个队列，chaos 沉尾后即使失败也无后续损失）。
+            // 纯驳回 tick 依赖 chaos 保证 approved_intents 非空（落库 + 组 pipeline），
+            // 故必须在下方 is_empty 门控之前并入。chaos 意图不经天魂审查，
+            // 留痕为「动作(chaos)」空层条目以保留地魂动作的来历可追溯性。
+            for chaos_intent in pending_chaos {
+                per_intent_layers.push((
+                    format!("{}(chaos)", chaos_intent.action_type.as_str()),
+                    Vec::new(),
+                ));
+                approved_intents.push(chaos_intent);
             }
 
             // 聚合 JSON：[{"intent":"吃","layers":[{layer,passed,detail}]}]

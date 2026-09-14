@@ -7,20 +7,25 @@
 // ============================================================================
 
 use super::types::ValidationRequest;
+use crate::soul::item_source::{ItemActionSource, classify_item_action};
 use cyber_jianghu_protocol::WorldBuildingRules;
 
 /// Layer 0：硬性逻辑审查（目标可见性，纯确定性检查，无 LLM 参与）
 ///
 /// 天魂审查第一步，在任何 action_type / 规则引擎 / LLM 审查之前拦截 LLM 臆测的目标引用：
 /// - 人物目标（target_agent_id / source_id / recipient_id）必须在感知范围内（entities）
-/// - 物品目标（item_id）必须持有（inventory）或附近可见（nearby_items / gatherable_items）
-///   或同 tick 链内前序已验证"取"动作获得（acquired_item_ids）；
-///   例外：取-agent 的目标在对方背包中，本方不可观察，仅保留世界定义存在性检查
+/// - 物品目标（item_id）按动作来源分类（soul/item_source）：
+///   - 消耗/转出类（用/吃/喝/予）必须持有（inventory）或链内前序已验证"取"动作
+///     获得（acquired_item_ids）——与服务端执行语义对齐（ItemUsed/予 均按背包
+///     remove_item 校验），引用地面物品的消耗意图在服务端必回滚
+///   - 采集/拾取类（取）及未知动作维持宽可见集合（持有 ∨ nearby ∨ gatherable ∨
+///     链内获得物）
+///   - 例外：取-agent 的目标在对方背包中，本方不可观察，仅保留世界定义存在性检查
 ///
-/// 权衡记录（接替旧 Layer2 注释）：subsequent_intents 链内逐个验证共享同一
-/// WorldState 快照，可见性校验对链内后序 intent 有误拦风险。取(ground/resource)后
-/// 即用经 nearby/gatherable 可见集合自然通过；取(agent)后即用经 acquired_item_ids
-/// 由调用方注入；制造→用成品链因产出物需反查配方暂不覆盖，由 self-correct 兜底、
+/// 口径分层记录（接替旧 Layer2 权衡注释）：subsequent_intents 链内逐个验证共享
+/// 同一 WorldState 快照，可见性校验对链内后序 intent 有误拦风险。取(ground/
+/// resource/agent)后即用经 acquired_item_ids 由调用方注入（主循环与自纠分支
+/// 双入口）；制造→用成品链因产出物需反查配方暂不覆盖，由 self-correct 兜底、
 /// 下一 tick 快照刷新后自愈。
 ///
 /// world_state 缺失时跳过（无法校验，与 Layer 2 行为一致）
@@ -95,13 +100,18 @@ pub(super) async fn validate_hard_targets(
         }
     }
 
-    // 物品目标：持有或附近可见（用/吃/喝/取/予 的 item_id）
+    // 物品目标：按动作来源分类（用/吃/喝/取/予 等 item_id 动作，
+    // 分类器含 actions.json 数据驱动 + 五原语内置兜底，见 soul/item_source）
     // 引用体系（全面 uuid 化）：协议字段携带完整 uuid（v5 从裸 item_id 派生），
     // LLM 可能提交三种形态，统一规范化为完整 uuid 回写：
     // 1. 完整 uuid（从背包/prompt 复制）→ 直接可见性校验
     // 2. `名称[短uuid]`（照抄观察/执行文本）→ 一致性校验后派生完整 uuid
     // 3. 裸 item_id（纯名字）→ 派生完整 uuid（known_item_ids 存在性仍适用）
-    if !is_item_action(action_type) {
+    let item_source = classify_item_action(
+        action_type,
+        &crate::infra::api::cognitive_context::load_available_actions_from_file(),
+    );
+    if item_source == ItemActionSource::Unknown {
         return Ok(());
     }
     let Some(raw_item_id) = action_data
@@ -187,7 +197,47 @@ pub(super) async fn validate_hard_targets(
         return Ok(());
     }
 
-    // 可见集合：持有 ∨ 附近 ∨ 本地点可采集 ∨ 链内前序已验证"取"动作获得
+    // 消耗/转出类（用/吃/喝/予）：物品必须已持有（背包 ∨ 链内前序「取」获得）。
+    // 引用地面/资源点物品的消耗意图在服务端必因背包无货回滚（ItemUsed 按
+    // remove_item 校验），此处前置拦截与执行语义对齐。
+    if item_source == ItemActionSource::Inventory {
+        let owned = world_state
+            .self_state
+            .inventory
+            .iter()
+            .any(|i| i.item_id == item_id)
+            || request
+                .runtime
+                .acquired_item_ids
+                .iter()
+                .any(|id| id == &item_id);
+        if owned {
+            return Ok(());
+        }
+        let inventory_preview: Vec<&str> = world_state
+            .self_state
+            .inventory
+            .iter()
+            .take(5)
+            .map(|i| i.item_id.as_str())
+            .collect();
+        let nearby_preview: Vec<&str> = world_state
+            .nearby_items
+            .iter()
+            .take(5)
+            .map(|i| i.item_id.as_str())
+            .collect();
+        return Err(format!(
+            "物品「{}」不可见：{}需要背包中已持有的物品（附近物品须先「取」入背包）。你的背包: [{}]，附近可见: [{}]",
+            item_id,
+            action_type,
+            inventory_preview.join(", "),
+            nearby_preview.join(", ")
+        ));
+    }
+
+    // 可见集合（采集/拾取类与未知动作，维持宽口径）：
+    // 持有 ∨ 附近 ∨ 本地点可采集 ∨ 链内前序已验证"取"动作获得
     //（链内共享快照，制造→用成品链暂不覆盖：产出物需查配方，由 self-correct
     //  兜底，下一 tick 快照刷新后自愈——已知局限，勿静默移除本注释）
     let visible = world_state
@@ -274,23 +324,4 @@ fn format_target_rejection(
             )
         }
     }
-}
-
-/// 判定动作是否携带物品目标（item_id 字段）。
-///
-/// 数据驱动：actions.json（Server 下发）中 required/optional 字段含 item_id 的动作
-/// 自动纳入 layer0 物品校验；配置缺失时回退到与 actions.yaml 同步的内置清单，
-/// 保证校验不因配置缺失而失效（新增物品动作时需同步兜底清单或依赖下发）。
-fn is_item_action(action_type: &str) -> bool {
-    let actions = crate::infra::api::cognitive_context::load_available_actions_from_file();
-    if !actions.is_empty() {
-        return actions.iter().any(|a| {
-            (a.action == action_type || a.name == action_type)
-                && a.required_fields
-                    .iter()
-                    .chain(a.optional_fields.iter())
-                    .any(|f| f == "item_id")
-        });
-    }
-    ["用", "吃", "喝", "取", "予"].contains(&action_type)
 }

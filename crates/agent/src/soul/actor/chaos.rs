@@ -6,6 +6,7 @@
 // 零硬编码：所有动作、权重、字段均来自 game_rules 数据驱动。
 // ============================================================================
 
+use crate::soul::item_source::{ItemActionSource, classify_item_action};
 use cyber_jianghu_protocol::{AvailableAction, ChaosMarker, Intent, WorldState};
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
@@ -220,12 +221,10 @@ impl ChaosGenerator {
                 for _ in 0..Self::MAX_RESOLVE_RETRIES {
                     let idx = rng.random_range(0..survival_actions.len());
                     let action = survival_actions[idx];
-                    if let Some(data) = Self::build_action_data(
-                        &action.action,
-                        &action.required_fields,
-                        world_state,
-                        rng,
-                    ) {
+                    let source = classify_item_action(&action.action, available_actions);
+                    if let Some(data) =
+                        Self::build_action_data(source, &action.required_fields, world_state, rng)
+                    {
                         let mut intent =
                             Intent::new(agent_id, tick_id, action.action.as_str(), Some(data))
                                 .with_thought(thought.to_owned());
@@ -244,12 +243,10 @@ impl ChaosGenerator {
                 for _ in 0..Self::MAX_RESOLVE_RETRIES {
                     let idx = rng.random_range(0..available_actions.len());
                     let action = &available_actions[idx];
-                    if let Some(data) = Self::build_action_data(
-                        &action.action,
-                        &action.required_fields,
-                        world_state,
-                        rng,
-                    ) {
+                    let source = classify_item_action(&action.action, available_actions);
+                    if let Some(data) =
+                        Self::build_action_data(source, &action.required_fields, world_state, rng)
+                    {
                         let mut intent =
                             Intent::new(agent_id, tick_id, action.action.as_str(), Some(data))
                                 .with_thought(thought.to_owned());
@@ -275,8 +272,12 @@ impl ChaosGenerator {
     ///
     /// 所有 required_fields 必须成功解析才返回 Some，否则返回 None。
     /// 未在 WorldState 中提供的字段（如 recipe_id）会导致整个 action 被跳过。
+    ///
+    /// 物品目标按动作来源分类解析（soul/item_source）：消耗/转出类（用/吃/喝/予）
+    /// 从背包取——地面物品在服务端必因背包无货回滚，不得作为 chaos 生存意图；
+    /// 采集/拾取类（取）从地面 ∪ 资源点取，source_type 跟随物品实际来源。
     fn build_action_data(
-        _action_type: &str,
+        source: ItemActionSource,
         required_fields: &[String],
         world_state: &WorldState,
         rng: &mut impl rand::RngExt,
@@ -284,6 +285,22 @@ impl ChaosGenerator {
         if required_fields.is_empty() {
             return Some(serde_json::json!({}));
         }
+
+        // 物品目标预解析（item_id / source_type / quantity 三字段联动：
+        // 取 的 source_type 须与物品实际来源一致才能通过服务端校验）
+        let picked = if required_fields.iter().any(|f| f == "item_id") {
+            Self::pick_item(source, world_state, rng)
+        } else {
+            None
+        };
+
+        // 接收方预解析（予 的 recipient_type / recipient_id 联动：
+        // chaos 行为语义 — 随机给附近任意角色，或丢在地上）
+        let recipient = if required_fields.iter().any(|f| f == "recipient_type") {
+            Some(Self::pick_recipient(world_state, rng))
+        } else {
+            None
+        };
 
         let mut map = serde_json::Map::new();
 
@@ -303,19 +320,45 @@ impl ChaosGenerator {
                         Some(())
                     }
                 }
-                // 地面物品 — 从附近物品中随机选
+                // 物品 — 按动作来源分类（见函数注释）
                 "item_id" => {
-                    if world_state.nearby_items.is_empty() {
-                        None
-                    } else {
-                        let item = &world_state.nearby_items
-                            [rng.random_range(0..world_state.nearby_items.len())];
-                        map.insert(
-                            field.clone(),
-                            serde_json::Value::String(item.item_id.clone()),
-                        );
+                    let item = picked.as_ref()?;
+                    map.insert(
+                        field.clone(),
+                        serde_json::Value::String(item.item_id.clone()),
+                    );
+                    Some(())
+                }
+                // 物品来源 — 跟随预解析物品的实际来源（地面/资源点）
+                "source_type" => match picked.as_ref().map(|p| p.origin) {
+                    Some(origin @ ("ground" | "resource")) => {
+                        map.insert(field.clone(), serde_json::Value::String(origin.to_string()));
                         Some(())
                     }
+                    _ => None,
+                },
+                // 接收方类型 — 予 的 chaos 行为：随机给附近任意角色或丢在地上
+                "recipient_type" => {
+                    let r = recipient.as_ref()?;
+                    map.insert(
+                        field.clone(),
+                        serde_json::Value::String(r.recipient_type.to_string()),
+                    );
+                    // 予-agent：recipient_id 虽列为 optional 字段，但天魂 layer0
+                    // 与服务端对 agent 分支均按必填校验，须随类型一并写入
+                    if let Some(id) = &r.recipient_id {
+                        map.insert(
+                            "recipient_id".to_string(),
+                            serde_json::Value::String(id.clone()),
+                        );
+                    }
+                    Some(())
+                }
+                // 接收方角色 — 从预解析结果取（若未来动作将其列为必填）
+                "recipient_id" => {
+                    let id = recipient.as_ref()?.recipient_id.as_ref()?;
+                    map.insert(field.clone(), serde_json::Value::String(id.clone()));
+                    Some(())
                 }
                 // 位置节点 — 从可达节点中随机选
                 "target_location" | "node_id" => {
@@ -331,9 +374,14 @@ impl ChaosGenerator {
                         Some(())
                     }
                 }
-                // 数量 — 随机 1~3
+                // 数量 — 随机 1~3，以物品已知存量封顶（超量在服务端按量扣减必败）
                 "quantity" => {
-                    let qty: u32 = rng.random_range(1..=3);
+                    let cap = picked
+                        .as_ref()
+                        .map(|p| p.available_qty.min(3))
+                        .unwrap_or(3)
+                        .max(1);
+                    let qty: u32 = rng.random_range(1..=cap);
                     map.insert(field.clone(), serde_json::Value::Number(qty.into()));
                     Some(())
                 }
@@ -360,6 +408,101 @@ impl ChaosGenerator {
 
         Some(serde_json::Value::Object(map))
     }
+
+    /// 预解析物品目标：按动作来源分类选取并携带来源/存量信息
+    fn pick_item(
+        source: ItemActionSource,
+        world_state: &WorldState,
+        rng: &mut impl rand::RngExt,
+    ) -> Option<PickedItem> {
+        match source {
+            ItemActionSource::Inventory => {
+                // 消耗/转出类：物品必须来自背包；空背包返回 None（跳过该动作，
+                // 避免产出引用地面物品的必败意图）
+                let inventory = &world_state.self_state.inventory;
+                if inventory.is_empty() {
+                    return None;
+                }
+                let item = &inventory[rng.random_range(0..inventory.len())];
+                Some(PickedItem {
+                    item_id: item.item_id.clone(),
+                    origin: "inventory",
+                    available_qty: item.quantity.max(1) as u32,
+                })
+            }
+            ItemActionSource::World => {
+                // 采集/拾取类：地面物品 ∪ 本地点资源点（来源标注 ground/resource，
+                // 资源点无数量语义，由 chaos 上限 3 自然封顶）
+                let mut candidates: Vec<PickedItem> = world_state
+                    .nearby_items
+                    .iter()
+                    .map(|i| PickedItem {
+                        item_id: i.item_id.clone(),
+                        origin: "ground",
+                        available_qty: i.quantity.max(1) as u32,
+                    })
+                    .collect();
+                candidates.extend(world_state.location.gatherable_items.iter().map(|g| {
+                    PickedItem {
+                        item_id: g.item_id.clone(),
+                        origin: "resource",
+                        available_qty: u32::MAX,
+                    }
+                }));
+                if candidates.is_empty() {
+                    return None;
+                }
+                Some(candidates.swap_remove(rng.random_range(0..candidates.len())))
+            }
+            ItemActionSource::Unknown => {
+                // 分类缺失：维持历史行为（地面物品）
+                let nearby = &world_state.nearby_items;
+                if nearby.is_empty() {
+                    return None;
+                }
+                let item = &nearby[rng.random_range(0..nearby.len())];
+                Some(PickedItem {
+                    item_id: item.item_id.clone(),
+                    origin: "ground",
+                    available_qty: item.quantity.max(1) as u32,
+                })
+            }
+        }
+    }
+
+    /// 预解析予 的接收方：随机给附近任意角色，或丢在地上（chaos 行为语义）；
+    /// 附近无人时只能丢在地上
+    fn pick_recipient(world_state: &WorldState, rng: &mut impl rand::RngExt) -> PickedRecipient {
+        if world_state.entities.is_empty() || rng.random_bool(0.5) {
+            PickedRecipient {
+                recipient_type: "ground",
+                recipient_id: None,
+            }
+        } else {
+            let target = &world_state.entities[rng.random_range(0..world_state.entities.len())];
+            PickedRecipient {
+                recipient_type: "agent",
+                recipient_id: Some(target.id.to_string()),
+            }
+        }
+    }
+}
+
+/// build_action_data 的物品预解析结果（item_id 与 source_type/quantity 联动）
+struct PickedItem {
+    item_id: String,
+    /// "inventory" | "ground" | "resource"
+    origin: &'static str,
+    /// 已知存量（背包/地面），超量扣减在服务端必败
+    available_qty: u32,
+}
+
+/// build_action_data 的接收方预解析结果（recipient_type 与 recipient_id 联动）
+struct PickedRecipient {
+    /// "agent" | "ground"
+    recipient_type: &'static str,
+    /// agent 分支的目标角色 uuid（ground 分支为 None）
+    recipient_id: Option<String>,
 }
 
 #[cfg(test)]
@@ -474,5 +617,143 @@ mod tests {
         let actions: Vec<cyber_jianghu_protocol::AvailableAction> = vec![];
         let intents = generator.generate_chaos_intents(&ws, &actions, 5);
         assert!(intents.is_empty());
+    }
+
+    #[test]
+    fn test_build_action_data_inventory_source_resolves_from_inventory() {
+        // 消耗类（用）必须从背包解析：mock 世界背包有 test_item、地面有 ground_item，
+        // 解析结果只能是背包物品（历史 bug：恒取地面物品导致服务端必败回滚）
+        let ws = mock_world_state(80);
+        let mut rng = rand::rng();
+        let fields = vec!["item_id".to_string()];
+        let data =
+            ChaosGenerator::build_action_data(ItemActionSource::Inventory, &fields, &ws, &mut rng)
+                .expect("背包非空应解析成功");
+        assert_eq!(
+            data.get("item_id").and_then(|v| v.as_str()),
+            Some("test_item")
+        );
+    }
+
+    #[test]
+    fn test_build_action_data_skips_consume_when_inventory_empty() {
+        // 空背包时消耗类动作不可解析（返回 None → 该动作被跳过，不产出必败意图）
+        let mut ws = mock_world_state(80);
+        ws.self_state.inventory = vec![];
+        let mut rng = rand::rng();
+        let fields = vec!["item_id".to_string()];
+        assert!(
+            ChaosGenerator::build_action_data(ItemActionSource::Inventory, &fields, &ws, &mut rng)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_build_action_data_world_action_resolves_source_type_and_caps_quantity() {
+        // 拾取类（取）：source_type 跟随物品实际来源（地面→ground），
+        // quantity 以地面存量封顶（mock 存量 2，不得超量）
+        let mut ws = mock_world_state(80);
+        ws.nearby_items[0].quantity = 2;
+        let mut rng = rand::rng();
+        let fields = vec![
+            "source_type".to_string(),
+            "item_id".to_string(),
+            "quantity".to_string(),
+        ];
+        let data =
+            ChaosGenerator::build_action_data(ItemActionSource::World, &fields, &ws, &mut rng)
+                .expect("地面物品在场应解析成功");
+        assert_eq!(
+            data.get("source_type").and_then(|v| v.as_str()),
+            Some("ground")
+        );
+        assert_eq!(
+            data.get("item_id").and_then(|v| v.as_str()),
+            Some("ground_item")
+        );
+        let qty = data.get("quantity").and_then(|v| v.as_i64()).unwrap_or(99);
+        assert!((1..=2).contains(&qty), "quantity 应以存量 2 封顶: {}", qty);
+    }
+
+    #[test]
+    fn test_build_action_data_give_action_resolves_recipient_and_inventory_item() {
+        // 予 的 chaos 行为：接收方随机二选一（附近任意角色 / 丢在地上），
+        // 物品必须来自背包（Inventory 分类），agent 分支必须携带 recipient_id
+        let ws = mock_world_state(80);
+        let entity_ids: Vec<String> = ws.entities.iter().map(|e| e.id.to_string()).collect();
+        let fields = vec![
+            "recipient_type".to_string(),
+            "item_id".to_string(),
+            "quantity".to_string(),
+        ];
+        let mut saw_agent = false;
+        let mut saw_ground = false;
+        for _ in 0..40 {
+            let mut rng = rand::rng();
+            let data = ChaosGenerator::build_action_data(
+                ItemActionSource::Inventory,
+                &fields,
+                &ws,
+                &mut rng,
+            )
+            .expect("予 在背包非空时应可解析");
+            let rtype = data
+                .get("recipient_type")
+                .and_then(|v| v.as_str())
+                .expect("recipient_type 必须解析");
+            match rtype {
+                "agent" => {
+                    saw_agent = true;
+                    let rid = data
+                        .get("recipient_id")
+                        .and_then(|v| v.as_str())
+                        .expect("agent 分支必须携带 recipient_id");
+                    assert!(
+                        entity_ids.contains(&rid.to_string()),
+                        "recipient_id 必须来自附近实体: {}",
+                        rid
+                    );
+                }
+                "ground" => {
+                    saw_ground = true;
+                    assert!(
+                        data.get("recipient_id").is_none(),
+                        "ground 分支不应携带 recipient_id"
+                    );
+                }
+                other => panic!("非法 recipient_type: {}", other),
+            }
+            assert_eq!(
+                data.get("item_id").and_then(|v| v.as_str()),
+                Some("test_item"),
+                "予 的物品必须来自背包"
+            );
+        }
+        // 40 次采样两分支均应出现（全偏一侧概率 2*(0.5^40)，可忽略）
+        assert!(
+            saw_agent && saw_ground,
+            "chaos 行为应同时覆盖 agent 与 ground 两分支"
+        );
+    }
+
+    #[test]
+    fn test_build_action_data_give_action_falls_to_ground_when_no_entities() {
+        // 附近无人：只能丢在地上，予 不因无人而整体跳过
+        let mut ws = mock_world_state(80);
+        ws.entities = vec![];
+        let mut rng = rand::rng();
+        let fields = vec![
+            "recipient_type".to_string(),
+            "item_id".to_string(),
+            "quantity".to_string(),
+        ];
+        let data =
+            ChaosGenerator::build_action_data(ItemActionSource::Inventory, &fields, &ws, &mut rng)
+                .expect("无实体时应退化为 ground 分支");
+        assert_eq!(
+            data.get("recipient_type").and_then(|v| v.as_str()),
+            Some("ground")
+        );
+        assert!(data.get("recipient_id").is_none());
     }
 }

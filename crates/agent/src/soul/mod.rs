@@ -11,4 +11,5 @@
 
 pub mod actor;
 pub mod earth;
+pub mod item_source;
 pub mod reflector;

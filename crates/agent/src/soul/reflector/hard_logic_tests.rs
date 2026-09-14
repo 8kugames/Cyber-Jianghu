@@ -136,6 +136,41 @@ async fn test_layer0_allows_item_in_inventory() {
 
 #[tokio::test]
 async fn test_layer0_allows_item_nearby() {
+    // 附近可见对采集/拾取类（取-World）动作放行。
+    // （口径收紧回归：用/吃/喝 为消耗类仅认背包，见下方收紧测试）
+    let validator = approved_mock_validator();
+    let world_state = test_world_state();
+
+    let request = ValidationRequest {
+        intent: crate::models::Intent::new(
+            world_state.agent_id.unwrap_or_default(),
+            world_state.tick_id,
+            "取",
+            Some(serde_json::json!({
+                "source_type": "ground",
+                "item_id": "木棍",
+                "quantity": 1
+            })),
+        ),
+        persona: PersonaInfo::default(),
+        world_context: "测试地点".to_string(),
+        world_state: Some(world_state),
+        runtime: ValidationRuntimeConfig::default(),
+    };
+
+    match validator.validate_pipeline(request).await.unwrap() {
+        PipelineValidationResult::Approved { .. } => {}
+        PipelineValidationResult::Rejected { reason, .. } => {
+            panic!("附近物品应通过 layer0: {}", reason);
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_layer0_rejects_consume_action_with_ground_only_item() {
+    // 消耗类（用）引用仅地面可见的物品：layer0 必须前置拦截——
+    // 该意图在服务端必因背包无货回滚（ItemUsed 按 remove_item 校验），
+    // 历史 bug：宽可见集合放行地面物品导致「审查通过、执行必败」
     let validator = approved_mock_validator();
     let world_state = test_world_state();
 
@@ -153,9 +188,55 @@ async fn test_layer0_allows_item_nearby() {
     };
 
     match validator.validate_pipeline(request).await.unwrap() {
-        PipelineValidationResult::Approved { .. } => {}
+        PipelineValidationResult::Rejected { reason, layers } => {
+            assert!(
+                reason.contains("不可见") && reason.contains("背包"),
+                "消耗类引用地面物品应因未持有被驳回: {}",
+                reason
+            );
+            assert_eq!(layers.first().unwrap().layer, "layer0");
+            assert!(!layers.first().unwrap().passed);
+        }
+        PipelineValidationResult::Approved { .. } => {
+            panic!("消耗类引用地面物品应被 layer0 拒绝");
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_layer0_rejects_give_action_with_ground_only_item() {
+    // 转出类（予-ground）引用仅地面可见的物品：同样按持有口径拦截
+    // （予在服务端从背包扣减，语义与消耗类一致）
+    let validator = approved_mock_validator();
+    let world_state = test_world_state();
+
+    let request = ValidationRequest {
+        intent: crate::models::Intent::new(
+            world_state.agent_id.unwrap_or_default(),
+            world_state.tick_id,
+            "予",
+            Some(serde_json::json!({
+                "recipient_type": "ground",
+                "item_id": "木棍",
+                "quantity": 1
+            })),
+        ),
+        persona: PersonaInfo::default(),
+        world_context: "测试地点".to_string(),
+        world_state: Some(world_state),
+        runtime: ValidationRuntimeConfig::default(),
+    };
+
+    match validator.validate_pipeline(request).await.unwrap() {
         PipelineValidationResult::Rejected { reason, .. } => {
-            panic!("附近物品应通过 layer0: {}", reason);
+            assert!(
+                reason.contains("不可见") && reason.contains("背包"),
+                "予引用地面物品应因未持有被驳回: {}",
+                reason
+            );
+        }
+        PipelineValidationResult::Approved { .. } => {
+            panic!("予引用地面物品应被 layer0 拒绝");
         }
     }
 }

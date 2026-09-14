@@ -488,7 +488,9 @@ pub struct TianhunReport {
 /// 单个意图的天魂审查结果（多意图 pipeline 聚合条目）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IntentLayersReport {
-    /// 意图标签（动作名，自纠通过时带“(自纠)”后缀）
+    /// 意图标签（动作名，可能带后缀标记审查路径：
+    /// 「(自纠)」自纠通过、「(自纠·驳回)」自纠仍驳回、「(自纠·LLM失败)」自纠
+    /// LLM 调用失败、「(chaos)」chaos 替补意图（不经天魂审查，layers 为空））
     pub intent: String,
     pub layers: Vec<LayerReport>,
 }
