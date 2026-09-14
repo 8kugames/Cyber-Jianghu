@@ -80,6 +80,9 @@ pub struct AgentSummary {
     pub top_actions: Vec<String>,
     pub narrative: Option<String>,
     pub died_this_period: bool,
+    /// 本周期内主动归隐（区别于死亡；serde default 兼容历史存储的 JSON）
+    #[serde(default)]
+    pub retired_this_period: bool,
 }
 
 /// 动作统计

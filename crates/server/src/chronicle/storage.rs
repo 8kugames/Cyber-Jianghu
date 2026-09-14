@@ -47,6 +47,7 @@ pub async fn store_with_llm(
                 .collect(),
             narrative: a.narratives.first().cloned(),
             died_this_period: a.died_this_period,
+            retired_this_period: a.retired_this_period,
         })
         .collect();
 
@@ -217,9 +218,9 @@ pub async fn update_template_summary(
         r#"
         UPDATE chronicles
         SET summary = COALESCE(NULLIF(summary, ''), $1),
-            status = CASE 
+            status = CASE
                 WHEN summary_llm IS NOT NULL AND summary_llm != '' THEN 'both'
-                ELSE status 
+                ELSE status
             END
         WHERE chronicle_id = $2
         "#,

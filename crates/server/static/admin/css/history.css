@@ -975,6 +975,10 @@ body {
     background: var(--error-muted);
     color: var(--error);
 }
+.type-retire {
+    background: var(--warning-muted);
+    color: var(--warning);
+}
 .type-dialogue {
     background: var(--accent-muted);
     color: var(--accent);
@@ -1042,6 +1046,16 @@ body {
 .agent-died {
     color: var(--error);
     font-weight: 500;
+}
+.agent-retired {
+    color: var(--warning);
+    font-weight: 500;
+}
+.agent-card.agent-died-card {
+    border-left: 3px solid var(--error);
+}
+.agent-card.agent-retired-card {
+    border-left: 3px solid var(--warning);
 }
 
 @media (max-width: 768px) {

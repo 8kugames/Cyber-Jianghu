@@ -51,6 +51,7 @@ fn action_type_display(action_type: &str) -> String {
 fn event_type_display(event_type: &str) -> String {
     match event_type {
         "death" => "陨落".to_string(),
+        "retire" => "归隐".to_string(),
         "dialogue" => "对话".to_string(),
         "combat" => "战斗".to_string(),
         "social" => "交际".to_string(),
@@ -164,11 +165,11 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
     if !data.highlights.is_empty() {
         summary.push_str(&format!("## 本周大事{nl}{nl}"));
 
-        // 按类型分组
+        // 按类型分组（归隐属"生离"，与死亡同归"生离死别"）
         let deaths: Vec<_> = data
             .highlights
             .iter()
-            .filter(|h| h.event_type == "death")
+            .filter(|h| h.event_type == "death" || h.event_type == "retire")
             .collect();
         let combats: Vec<_> = data
             .highlights
@@ -247,7 +248,9 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
                 summary.push_str(&format!("- 主要活动: {}\n", top_strs.join("、")));
             }
 
-            if agent.died_this_period {
+            if agent.retired_this_period {
+                summary.push_str("- 命运: 归隐于本周期\n");
+            } else if agent.died_this_period {
                 summary.push_str("- 命运: 陨落于本周期\n");
             }
 
@@ -533,7 +536,9 @@ fn build_llm_prompt(data: &CollectedData, previous_summary: Option<&str>) -> Str
                     .map(|(a, _)| action_type_display(a))
                     .collect::<Vec<_>>()
                     .join("、"),
-                if agent.died_this_period {
+                if agent.retired_this_period {
+                    "已归隐"
+                } else if agent.died_this_period {
                     "已陨落"
                 } else {
                     "尚在江湖"
@@ -648,6 +653,7 @@ mod tests {
                 top_actions: vec![("移动".to_string(), 20), ("取".to_string(), 15)],
                 narratives: vec!["在江湖中行走，感受春风".to_string()],
                 died_this_period: false,
+                retired_this_period: false,
             }],
             highlights: vec![],
             action_stats: ActionStats {
@@ -692,6 +698,7 @@ mod tests {
                 top_actions: vec![("说话".to_string(), 10)],
                 narratives: vec!["今日与旧友重逢，感慨万千，决定共谋大事。".to_string()],
                 died_this_period: false,
+                retired_this_period: false,
             }],
             highlights: vec![],
             action_stats: ActionStats {
@@ -782,6 +789,7 @@ mod tests {
                     top_actions: vec![],
                     narratives: vec![],
                     died_this_period: false,
+                    retired_this_period: false,
                 },
                 AgentInfo {
                     agent_id: agent_b,
@@ -791,6 +799,7 @@ mod tests {
                     top_actions: vec![],
                     narratives: vec![],
                     died_this_period: false,
+                    retired_this_period: false,
                 },
             ],
             highlights: vec![],
@@ -821,5 +830,59 @@ mod tests {
             "LLM prompt 应包含涌现事件段"
         );
         assert!(prompt.contains("王五") && prompt.contains("赵六"));
+    }
+
+    /// 当期归隐/死亡角色区分标记：模板命运行与 LLM 人物简报各自呈现
+    #[test]
+    fn test_retire_and_death_marking() {
+        crate::game_data::init_test_registry();
+        let data = CollectedData {
+            period_start: 1,
+            period_end: 168,
+            game_day_start: 1,
+            game_day_end: 7,
+            season: "春".to_string(),
+            agents: vec![
+                AgentInfo {
+                    agent_id: uuid::Uuid::new_v4(),
+                    name: "归隐客".to_string(),
+                    location: "龙门客栈".to_string(),
+                    actions_count: 10,
+                    top_actions: vec![],
+                    narratives: vec![],
+                    died_this_period: false,
+                    retired_this_period: true,
+                },
+                AgentInfo {
+                    agent_id: uuid::Uuid::new_v4(),
+                    name: "剑下亡魂".to_string(),
+                    location: "落霞镇".to_string(),
+                    actions_count: 8,
+                    top_actions: vec![],
+                    narratives: vec![],
+                    died_this_period: true,
+                    retired_this_period: false,
+                },
+            ],
+            highlights: vec![],
+            action_stats: ActionStats {
+                total: 18,
+                by_type: HashMap::new(),
+                success_rate: 1.0,
+            },
+            location_stats: vec![],
+            deaths: 1,
+            births: 0,
+            emergence_events: vec![],
+            emergence_status: EmergenceCollectStatus::Ok,
+        };
+
+        let summary = generate_template(&data).unwrap();
+        assert!(summary.contains("归隐于本周期"), "模板应标记归隐角色");
+        assert!(summary.contains("陨落于本周期"), "模板应标记死亡角色");
+
+        let prompt = build_llm_prompt(&data, None);
+        assert!(prompt.contains("已归隐"), "LLM prompt 应标记归隐角色");
+        assert!(prompt.contains("已陨落"), "LLM prompt 应标记死亡角色");
     }
 }

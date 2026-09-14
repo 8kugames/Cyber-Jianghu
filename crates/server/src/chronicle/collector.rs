@@ -59,6 +59,8 @@ pub struct AgentInfo {
     pub top_actions: Vec<(String, i32)>,
     pub narratives: Vec<String>,
     pub died_this_period: bool,
+    /// 本周期内主动归隐（区别于死亡：归隐写入 node_id='void' 终态快照）
+    pub retired_this_period: bool,
 }
 
 /// 采集 7 日数据
@@ -174,7 +176,7 @@ async fn collect_agents(
         LEFT JOIN agent_action_logs l ON a.agent_id = l.agent_id AND l.tick_id BETWEEN $1 AND $2
         LEFT JOIN LATERAL (
             SELECT node_id FROM agent_states s
-            WHERE s.agent_id = a.agent_id AND s.tick_id <= $2
+            WHERE s.agent_id = a.agent_id AND s.tick_id <= $2 AND s.node_id <> 'void'
             ORDER BY s.tick_id DESC LIMIT 1
         ) latest_state ON true
         WHERE COALESCE(
@@ -308,21 +310,23 @@ async fn collect_agents(
             acc
         });
 
-    // 批量查询：死亡状态（使用窗口函数）
+    // 批量查询：死亡/归隐状态（使用窗口函数）
+    // 归隐终态快照的 node_id 恒为 'void'（retire_agent 专属写入），据此区分死亡与归隐
     let death_rows = sqlx::query(
         r#"
         WITH AgentDeaths AS (
             SELECT
                 agent_id,
-                tick_id,
+                node_id,
                 is_alive,
                 LAG(is_alive) OVER (PARTITION BY agent_id ORDER BY tick_id) as prev_alive
             FROM agent_states
             WHERE tick_id BETWEEN $1 AND $2
         )
-        SELECT DISTINCT agent_id
+        SELECT agent_id, bool_or(node_id = 'void') as is_retire
         FROM AgentDeaths
         WHERE is_alive = false AND prev_alive = true
+        GROUP BY agent_id
         "#,
     )
     .bind(period_start)
@@ -331,8 +335,18 @@ async fn collect_agents(
     .await
     .context("查询死亡状态失败")?;
 
-    let death_agents: std::collections::HashSet<uuid::Uuid> =
-        death_rows.iter().map(|row| row.get("agent_id")).collect();
+    let mut death_agents: std::collections::HashSet<uuid::Uuid> = std::collections::HashSet::new();
+    let mut retired_agents: std::collections::HashSet<uuid::Uuid> =
+        std::collections::HashSet::new();
+    for row in death_rows {
+        let agent_id: uuid::Uuid = row.get("agent_id");
+        let is_retire: bool = row.get("is_retire");
+        if is_retire {
+            retired_agents.insert(agent_id);
+        } else {
+            death_agents.insert(agent_id);
+        }
+    }
 
     // 组装结果
     let agents: Vec<AgentInfo> = rows
@@ -361,6 +375,7 @@ async fn collect_agents(
                     .unwrap_or_default()
             };
 
+            let retired_this_period = retired_agents.contains(&agent_id);
             let died_this_period = death_agents.contains(&agent_id);
 
             AgentInfo {
@@ -371,6 +386,7 @@ async fn collect_agents(
                 top_actions,
                 narratives,
                 died_this_period,
+                retired_this_period,
             }
         })
         .collect();
@@ -384,13 +400,14 @@ async fn collect_highlights(
     period_start: i64,
     period_end: i64,
 ) -> Result<Vec<Highlight>> {
-    // 批量查询：死亡事件（已包含 agent name）
+    // 批量查询：死亡/归隐事件（已包含 agent name；node_id='void' 为归隐终态）
     let death_rows = sqlx::query(
         r#"
         WITH StateChanges AS (
             SELECT
                 s.agent_id,
                 s.tick_id,
+                s.node_id,
                 s.is_alive,
                 LAG(s.is_alive) OVER (PARTITION BY s.agent_id ORDER BY s.tick_id) as prev_alive
             FROM agent_states s
@@ -399,6 +416,7 @@ async fn collect_highlights(
         SELECT
             sc.agent_id,
             sc.tick_id,
+            sc.node_id,
             a.name
         FROM StateChanges sc
         INNER JOIN agents a ON sc.agent_id = a.agent_id
@@ -418,14 +436,18 @@ async fn collect_highlights(
         .map(|row| {
             let agent_id: uuid::Uuid = row.get("agent_id");
             let tick_id: i64 = row.get("tick_id");
+            let node_id: String = row.get("node_id");
             let name: String = row.get("name");
+            let display_name = crate::display::display_agent_name(&name, agent_id);
+            let (event_type, description) = if node_id == "void" {
+                ("retire", format!("{} 归隐山林，退出江湖", display_name))
+            } else {
+                ("death", format!("{} 在江湖中陨落", display_name))
+            };
             Highlight {
                 tick_id,
-                event_type: "death".to_string(),
-                description: format!(
-                    "{} 在江湖中陨落",
-                    crate::display::display_agent_name(&name, agent_id)
-                ),
+                event_type: event_type.to_string(),
+                description,
                 agent_id: Some(agent_id),
                 agent_name: Some(name),
             }
@@ -724,6 +746,7 @@ async fn collect_deaths(
         FROM agent_states s1
         WHERE s1.tick_id BETWEEN $1 AND $2
         AND s1.is_alive = false
+        AND s1.node_id <> 'void'
         AND EXISTS (
             SELECT 1 FROM agent_states s2
             WHERE s2.agent_id = s1.agent_id
