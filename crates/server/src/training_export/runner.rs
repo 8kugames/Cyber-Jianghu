@@ -116,6 +116,7 @@ pub async fn run_once(
         &traces_dir,
         config.limits.max_traces_per_run,
         request.agent_id_filter,
+        trace_scan_cutoff(config, request),
     )
     .await?;
     metadata.trace_count = entries.len();
@@ -395,10 +396,29 @@ async fn directory_size_bytes(dir: &Path) -> anyhow::Result<u64> {
     Ok(total)
 }
 
+/// trace 扫描日期下限：与 checkpoint 桶退役周期（retain_days）对齐。
+///
+/// checkpoint 只保留 retain_days 内的已处理 trace_id，而 server 侧 trace
+/// 文件只增不删——若扫描无下限，第 retain_days+1 天起每个调度周期都会把
+/// 已退役日期的 trace 判为未处理而重复导出。取"今天 - retain_days"为界，
+/// trace 只在其对应 checkpoint 桶仍存活的窗口内参与扫描。
+/// force_full 手动触发不受限（用户显式要求全量）。
+fn trace_scan_cutoff(config: &TrainingExportConfig, request: &ExportRunRequest) -> Option<String> {
+    if request.force_full {
+        return None;
+    }
+    Some(
+        (chrono::Utc::now() - chrono::Duration::days(config.checkpoint.retain_days))
+            .format("%Y-%m-%d")
+            .to_string(),
+    )
+}
+
 async fn scan_trace_files(
     traces_dir: &Path,
     max_traces: usize,
     agent_id_filter: Option<Uuid>,
+    min_date: Option<String>,
 ) -> anyhow::Result<(Vec<TraceEntry>, Vec<(Uuid, i64)>, Vec<String>)> {
     let mut entries = Vec::new();
     let mut keys = HashSet::new();
@@ -455,6 +475,14 @@ async fn scan_trace_files(
                 tracing::warn!(path = %path.display(), "trace 文件名缺少 date=YYYY-MM-DD, 跳过");
                 continue;
             };
+            // 日期早于扫描下限的 trace 其 checkpoint 桶已退役，处理记录不存在，
+            // 参与扫描只会被重复导出——直接跳过
+            if min_date
+                .as_ref()
+                .is_some_and(|cutoff| date.as_str() < cutoff.as_str())
+            {
+                continue;
+            }
             let file = match tokio::fs::File::open(&path).await {
                 Ok(file) => file,
                 Err(error) => {
@@ -556,7 +584,7 @@ mod scan_tests {
         // if keys.is_empty() 分支会直接进入 empty-run 写 Completed meta 路径。
         let temp = tempfile::tempdir().expect("tempdir");
         let missing = temp.path().join("does-not-exist");
-        let (entries, keys, dates) = scan_trace_files(&missing, 10, None)
+        let (entries, keys, dates) = scan_trace_files(&missing, 10, None, None)
             .await
             .expect("scan trace files on missing dir");
         assert!(entries.is_empty());
@@ -588,13 +616,14 @@ mod scan_tests {
         .await
         .unwrap();
 
-        let (entries, _keys, _dates) = scan_trace_files(&traces_dir, 100, Some(agent_id_keep))
-            .await
-            .expect("scan with filter");
+        let (entries, _keys, _dates) =
+            scan_trace_files(&traces_dir, 100, Some(agent_id_keep), None)
+                .await
+                .expect("scan with filter");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].agent_id, agent_id_keep);
         // 对照：不带 filter 时两条都被收集。
-        let (entries_all, _, _) = scan_trace_files(&traces_dir, 100, None)
+        let (entries_all, _, _) = scan_trace_files(&traces_dir, 100, None, None)
             .await
             .expect("scan without filter");
         assert_eq!(entries_all.len(), 2);
@@ -618,10 +647,36 @@ mod scan_tests {
         tokio::fs::write(agent_dir.join("README"), "noise")
             .await
             .unwrap();
-        let (entries, _, _) = scan_trace_files(&traces_dir, 100, None)
+        let (entries, _, _) = scan_trace_files(&traces_dir, 100, None, None)
             .await
             .expect("scan");
         assert!(entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn scan_respects_min_date_cutoff() {
+        // 早于扫描下限的 trace（其 checkpoint 桶已退役）必须被跳过，
+        // 否则每个调度周期都会重复导出；等于下限的当天保留。
+        let temp = tempfile::tempdir().expect("tempdir");
+        let traces_dir = temp.path().join("traces/soul=renhun");
+        let agent_id = Uuid::new_v4();
+        let agent_dir = traces_dir.join(format!("agent={agent_id}"));
+        tokio::fs::create_dir_all(&agent_dir).await.unwrap();
+        let line = format!(
+            "{{\"trace_id\":\"t\",\"agent_id\":\"{agent_id}\",\"character_name\":\"c\",\"tick_id\":1,\"soul_stage\":\"Renhun\",\"attempt\":0,\"provider\":\"p\",\"model\":\"m\",\"persona_name\":\"\",\"persona_description\":\"\",\"user_prompt\":\"u\",\"response\":\"r\",\"ok\":true,\"wall_clock\":1}}\n"
+        );
+        tokio::fs::write(agent_dir.join("date=2026-07-01.jsonl"), &line)
+            .await
+            .unwrap();
+        tokio::fs::write(agent_dir.join("date=2026-07-26.jsonl"), &line)
+            .await
+            .unwrap();
+
+        let (entries, _, _) =
+            scan_trace_files(&traces_dir, 100, None, Some("2026-07-26".to_string()))
+                .await
+                .expect("scan with cutoff");
+        assert_eq!(entries.len(), 1, "只有 >= 下限的日期文件被扫描");
     }
 }
 
