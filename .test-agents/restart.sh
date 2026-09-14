@@ -20,7 +20,8 @@
 #     异构 FATAL：全局归隐按该地址执行，错配会误伤）；换 server 改全部 agent.yaml，脚本零修改
 
 set -uo pipefail
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
 # ── 配置 ──────────────────────────────────────────────────────────────────────
 AGENTS=(
@@ -173,9 +174,7 @@ ensure_base_images() {
 build_image_offline() {
   ensure_base_images || return 1
 
-  local script_dir
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  if ! "$script_dir/../scripts/build-agent-image.sh"; then
+  if ! "$SCRIPT_DIR/../scripts/build-agent-image.sh"; then
     log_fail "agent 镜像构建失败（scripts/build-agent-image.sh）"
     return 1
   fi
