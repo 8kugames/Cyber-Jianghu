@@ -70,6 +70,8 @@ function buildHealthHtml(d) {
         supplyRows = '<tr><td colspan="3">无存活 agent</td></tr>';
     }
 
+    const share = behaviorShareSummary(b);
+
     return `
     <div class="health-grid">
         <h3>健康度看板（观测窗口 ${d.tick_start} – ${d.tick_end}，${d.window_ticks} tick）</h3>
@@ -116,8 +118,8 @@ function buildHealthHtml(d) {
         <div class="health-section">
             <h4>行为多样性（最频动作占比） ${passBadge(b.pass)}</h4>
             <table class="health-table">
-                <tr><td>全员最频动作占比上界</td><td>${b.entropy_min.toFixed(2)} / 阈值 < ${b.min_entropy_ratio}</td><td>${passBadge(b.pass)}</td></tr>
-                <tr><td>全员平均占比</td><td>${b.entropy_mean.toFixed(2)}</td><td>-</td></tr>
+                <tr><td>全员最频动作占比上界</td><td>${share.max} / 判定阈值 ≥ ${b.max_top_share}</td><td>${passBadge(b.pass)}</td></tr>
+                <tr><td>全员平均占比</td><td>${share.mean}</td><td>-</td></tr>
                 <tr><td>饱食度紧迫阈值</td><td colspan="2">< ${b.satiation_urgent_below}（低于此值时高占比才计为卡死循环）</td></tr>
             </table>
             ${behaviorRows(b)}
@@ -126,6 +128,15 @@ function buildHealthHtml(d) {
             占比高且饱食度紧迫（< ${b.satiation_urgent_below}）才计为卡死循环。</p>
         </div>
     </div>`;
+}
+
+// 由服务端 per_agent_behavior 现算全员最高/平均占比（无决策数据时显示 '-'）
+function behaviorShareSummary(b) {
+    const shares = (b.per_agent_behavior || []).map(a => a.top_share).filter(v => typeof v === 'number');
+    if (shares.length === 0) return { max: '-', mean: '-' };
+    const max = Math.max(...shares).toFixed(2);
+    const mean = (shares.reduce((sum, v) => sum + v, 0) / shares.length).toFixed(2);
+    return { max, mean };
 }
 
 function behaviorRows(b) {
