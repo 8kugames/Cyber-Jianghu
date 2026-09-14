@@ -479,6 +479,11 @@ impl ProposalStore {
     }
 
     /// 持久化单条投票记录到 soul_review_votes 表
+    ///
+    /// upsert（按 group+soul+role，见迁移 025）：三阶段管道中伏羲以
+    /// primary / primary_final 两个 role 对同一组各投一票，旧约束
+    /// UNIQUE(group_id, soul) 会使终审票必然冲突丢失；同阶段重跑时
+    /// 新票覆盖旧票
     pub async fn write_vote(
         &self,
         proposal_group_id: Uuid,
@@ -491,7 +496,11 @@ impl ProposalStore {
         sqlx::query(
             "INSERT INTO soul_review_votes \
              (proposal_group_id, soul, role, vote, rationale, evidence_refs) \
-             VALUES ($1, $2, $3, $4, $5, $6)",
+             VALUES ($1, $2, $3, $4, $5, $6) \
+             ON CONFLICT (proposal_group_id, soul, role) DO UPDATE SET \
+             vote = EXCLUDED.vote, \
+             rationale = EXCLUDED.rationale, \
+             evidence_refs = EXCLUDED.evidence_refs",
         )
         .bind(proposal_group_id)
         .bind(soul)
