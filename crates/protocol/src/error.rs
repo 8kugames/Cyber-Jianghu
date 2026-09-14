@@ -150,8 +150,8 @@ pub enum GameError {
     #[error("Operation failed: {0}")]
     Operation(String),
 
-    /// 未知错误
-    #[error("Unknown error: {0}")]
+    /// 未知错误（payload 为面向 Agent 的完整中文提示，直接透传）
+    #[error("{0}")]
     Unknown(String),
 }
 
@@ -377,7 +377,7 @@ mod tests {
     #[test]
     fn test_game_error_unknown() {
         let err = GameError::Unknown("something went wrong".to_string());
-        assert_eq!(err.to_string(), "Unknown error: something went wrong");
+        assert_eq!(err.to_string(), "something went wrong");
     }
 
     #[test]

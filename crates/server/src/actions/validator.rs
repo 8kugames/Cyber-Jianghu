@@ -149,7 +149,9 @@ async fn validate_item_ownership(
         return Ok(());
     };
     let needed = parsed.get_field_i32("quantity").unwrap_or(1).max(1);
-    let owned = get_inventory_item_quantity(db_pool, agent_state.agent_id, &internal_id).await;
+    let owned = get_inventory_item_quantity(db_pool, agent_state.agent_id, &internal_id)
+        .await
+        .map_err(|_| storage_unavailable())?;
     if owned < needed {
         let name = crate::display::display_item_name(&internal_id);
         return Err(GameError::Unknown(format!(
@@ -189,7 +191,9 @@ async fn validate_generic_requirements(
                     let min_qty = req.get_i32("quantity").unwrap_or(1);
 
                     let item_quantity =
-                        get_inventory_item_quantity(db_pool, agent_state.agent_id, item_id).await;
+                        get_inventory_item_quantity(db_pool, agent_state.agent_id, item_id)
+                            .await
+                            .map_err(|_| storage_unavailable())?;
                     if item_quantity < min_qty {
                         return Err(GameError::Unknown(format!(
                             "物品 {} 不足: 需要 {}, 当前 {}",
@@ -207,7 +211,7 @@ pub async fn get_inventory_item_quantity(
     db_pool: &DbPool,
     agent_id: uuid::Uuid,
     item_id: &str,
-) -> i32 {
+) -> Result<i32, sqlx::Error> {
     sqlx::query_scalar::<_, i32>(
         "SELECT COALESCE(SUM(quantity), 0) FROM agent_inventory WHERE agent_id = $1 AND item_id = $2",
     )
@@ -215,7 +219,12 @@ pub async fn get_inventory_item_quantity(
     .bind(item_id)
     .fetch_one(db_pool)
     .await
-    .unwrap_or(0)
+}
+
+/// 持有量查询失败的统一错误（此前 unwrap_or(0) 把 DB 故障伪装成「持有 0」，
+/// 诱导 Agent 错误自纠——诚实报存储异常并给重试指引）
+fn storage_unavailable() -> GameError {
+    GameError::Unknown("背包持有量查询失败（服务端存储异常），请稍后重试".to_string())
 }
 
 fn is_placeholder_content(s: &str) -> bool {

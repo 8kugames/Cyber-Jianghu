@@ -65,11 +65,12 @@ pub async fn validate_action(
     };
 
     // Get all alive agents to find the current agent
+    // （查询失败直接 500：吞掉后会对合法 Agent 误报「Agent not found」）
     let all_states = match crate::db::get_all_alive_agents_latest_states(&state.db_pool).await {
         Ok(agents) => agents,
         Err(e) => {
             tracing::error!("Failed to get all agent states: {}", e);
-            Vec::new()
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
 
@@ -88,17 +89,7 @@ pub async fn validate_action(
     // Parse action type (数据驱动：接受任意字符串)
     let action_type = ActionType::new(&req.action);
 
-    // Simple validation - check if agent is alive
-    if !agent_state.is_alive {
-        return Ok(Json(ActionValidationResponse {
-            valid: false,
-            reason: Some("Agent is dead".to_string()),
-            suggestion: Some("Agent 已死亡，无法执行任何动作".to_string()),
-        }));
-    }
-
-    // Build intent for validation (not actually used in this simplified version)
-    let _intent = Intent {
+    let intent = Intent {
         intent_id: Uuid::new_v4(),
         agent_id,
         tick_id: current_tick_id,
@@ -114,12 +105,21 @@ pub async fn validate_action(
         subsequent_intents: vec![],
     };
 
-    // For now, just return valid for alive agents
-    // Full validation logic is in actions/validator.rs which is private
-    debug!("Action validation passed for agent: {}", agent_id);
-    Ok(Json(ActionValidationResponse {
-        valid: true,
-        reason: None,
-        suggestion: None,
-    }))
+    // 干跑接入真实校验器（与 IntentWorker 同一条 validate_action 链：
+    // 类型解析/规则校验/持有预检全覆盖；死亡检查由其内部完成并给出可自纠文案）
+    match crate::actions::validate_action(&intent, agent_state, &all_states, &state.db_pool).await {
+        Ok(_) => {
+            debug!("Action validation passed for agent: {}", agent_id);
+            Ok(Json(ActionValidationResponse {
+                valid: true,
+                reason: None,
+                suggestion: None,
+            }))
+        }
+        Err(e) => Ok(Json(ActionValidationResponse {
+            valid: false,
+            reason: Some(e.to_string()),
+            suggestion: None,
+        })),
+    }
 }

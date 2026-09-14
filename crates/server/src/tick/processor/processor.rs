@@ -359,7 +359,25 @@ impl StateProcessor {
 
             if !all_applied {
                 execution_failed = true;
-                failure_reason = Some("状态变更未能全部应用，已回滚".to_string());
+                // 回滚将丢弃本次意图新产生的事件，其中执行器推送的 ActionResult
+                // 失败事件携带具体原因（使用失败/转移失败/制造失败 + 原因）。
+                // 提取为 failure_reason，让 Agent 收到可自纠的信息而非笼统回滚文案
+                // （快照竞态下 F6 预检未拦截时的兜底可观察性，制造材料不足同此）。
+                let specific_reason = events[events_len_before..]
+                    .iter()
+                    .rev()
+                    .find(|(_, e)| {
+                        e.event_type == WorldEventType::ActionResult
+                            && (e.metadata.get("result").and_then(|v| v.as_str()) == Some("failed")
+                                || e.metadata
+                                    .get("action")
+                                    .and_then(|v| v.as_str())
+                                    .is_some_and(|a| a.ends_with("_failed")))
+                    })
+                    .map(|(_, e)| e.description.clone());
+                failure_reason = Some(
+                    specific_reason.unwrap_or_else(|| "状态变更未能全部应用，已回滚".to_string()),
+                );
             }
         }
 
