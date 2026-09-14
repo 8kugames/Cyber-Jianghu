@@ -8,6 +8,7 @@ mod relationship;
 mod relationship_migration;
 mod relationship_narrative;
 mod relationship_types;
+mod roster_sync;
 
 pub use dialogue::{DialogueClient, DialogueEventHandler};
 pub use relationship::RelationshipStore;
