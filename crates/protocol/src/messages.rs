@@ -479,6 +479,18 @@ pub struct TianhunReport {
     pub result: Option<String>,
     pub layers: Vec<LayerReport>,
     pub reason: Option<String>,
+    /// 多意图 pipeline 逐意图审查结果（按送审顺序）。
+    /// layers 字段仅保留末意图结果（旧展示兼容）；新数据优先进本字段。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_intent_layers: Option<Vec<IntentLayersReport>>,
+}
+
+/// 单个意图的天魂审查结果（多意图 pipeline 聚合条目）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntentLayersReport {
+    /// 意图标签（动作名，自纠通过时带“(自纠)”后缀）
+    pub intent: String,
+    pub layers: Vec<LayerReport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

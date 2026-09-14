@@ -479,6 +479,21 @@ function layerDetailText(detail) {
     return detail === 'llm validation skipped' ? '低风险行为，跳过 LLM 审查' : detail;
 }
 
+function renderLayerTags(layers) {
+    let html = `<div class="soul-layers">`;
+    for (const l of layers) {
+        const name = LAYER_NAMES[l.layer] || l.layer;
+        // 历史快照（server JSONB / 旧记录）中 skip 曾被误判为 passed=false，
+        // 渲染时以 skip 文本为准强制按通过展示
+        const passed = l.passed || isLlmSkipDetail(l.detail);
+        html += `<span class="soul-layer-tag ${passed ? 'passed' : 'failed'}">${escapeHtml(name)}`;
+        if (l.detail) html += `: ${escapeHtml(layerDetailText(l.detail))}`;
+        html += `</span>`;
+    }
+    html += `</div>`;
+    return html;
+}
+
 function renderTianhun(data) {
     if (!data) return '';
     let html = `<div class="exp-tianhun"><span class="exp-soul-label">天魂</span><div class="exp-soul-content">`;
@@ -487,18 +502,14 @@ function renderTianhun(data) {
         const isApproved = data.result === 'approved';
         html += `<div class="soul-result ${isApproved ? 'approved' : 'rejected'}">${isApproved ? '通过' : '驳回'}</div>`;
     }
-    if (data.layers && data.layers.length > 0) {
-        html += `<div class="soul-layers">`;
-        for (const l of data.layers) {
-            const name = LAYER_NAMES[l.layer] || l.layer;
-            // 历史快照（server JSONB / 旧记录）中 skip 曾被误判为 passed=false，
-            // 渲染时以 skip 文本为准强制按通过展示
-            const passed = l.passed || isLlmSkipDetail(l.detail);
-            html += `<span class="soul-layer-tag ${passed ? 'passed' : 'failed'}">${escapeHtml(name)}`;
-            if (l.detail) html += `: ${escapeHtml(layerDetailText(l.detail))}`;
-            html += `</span>`;
+    // 多意图逐意图审查结果（新格式）：按意图分组展示；旧数据回退平铺 layers
+    if (data.per_intent_layers && data.per_intent_layers.length > 0) {
+        for (const pil of data.per_intent_layers) {
+            html += `<div style="margin-top:3px;font-size:10px;color:var(--text-muted);">意图「${escapeHtml(pil.intent || '-')}」</div>`;
+            html += renderLayerTags(pil.layers || []);
         }
-        html += `</div>`;
+    } else if (data.layers && data.layers.length > 0) {
+        html += renderLayerTags(data.layers);
     }
     if (data.reason) html += `<div class="soul-reason">${escapeHtml(data.reason)}</div>`;
     if (data.narrative) html += `<div class="soul-narrative">${escapeHtml(data.narrative)}</div>`;

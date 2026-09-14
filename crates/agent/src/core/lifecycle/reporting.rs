@@ -1,5 +1,20 @@
 use tracing::{debug, error, info, warn};
 
+/// 解析 tianhun_layers 列的多意图聚合格式。
+///
+/// 新格式：`[{"intent":"吃","layers":[{layer,passed,detail}]}]`；
+/// 旧格式（单意图平铺，元素无 intent 键）返回 None，由三列兑底路径渲染。
+fn parse_per_intent_layers(
+    json: Option<&str>,
+) -> Option<Vec<cyber_jianghu_protocol::IntentLayersReport>> {
+    let v: serde_json::Value = serde_json::from_str(json?).ok()?;
+    let arr = v.as_array()?;
+    if arr.is_empty() || arr.first()?.get("intent").is_none() {
+        return None;
+    }
+    serde_json::from_value(v).ok()
+}
+
 impl super::super::Agent {
     /// 从 SoulCycleRecorder 构建本 tick 的三魂循环元数据
     ///
@@ -71,6 +86,7 @@ impl super::super::Agent {
                         result: r.tianhun_result,
                         layers,
                         reason: r.tianhun_reason,
+                        per_intent_layers: parse_per_intent_layers(r.tianhun_layers.as_deref()),
                     },
                     final_intent: r.final_intent_id.map(|id| {
                         let pipeline_actions: Option<Vec<cyber_jianghu_protocol::PipelineAction>> =
@@ -168,6 +184,7 @@ impl super::super::Agent {
                                     },
                                 ],
                                 reason: None,
+                                per_intent_layers: None,
                             },
                             final_intent: Some(cyber_jianghu_protocol::FinalIntentReport {
                                 intent_id: Some(subsequent.intent_id.to_string()),

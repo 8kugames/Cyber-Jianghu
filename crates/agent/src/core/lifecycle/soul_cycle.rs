@@ -170,6 +170,11 @@ impl super::super::Agent {
             let mut intent_verdicts: Vec<String> = Vec::new();
             let mut batch_rejection: Option<String> = None;
             let mut batch_layers: Vec<crate::soul::reflector::LayerResult> = Vec::new();
+            // 多意图逐意图审查结果聚合（按送审顺序）。
+            // 历史 bug：循环内 batch_layers 覆盖式赋值，仅末意图的天魂层被记录，
+            // 前序意图（如说话的 LLM 审查）结果丢失、UI 无从追溯。
+            let mut per_intent_layers: Vec<(String, Vec<crate::soul::reflector::LayerResult>)> =
+                Vec::new();
             let mut used_chaos_fallback = false;
             // 链内前序已验证"取"动作获得的物品（裸 item_id）：
             // 后序"取后即用/予"类 intent 共享同一 WorldState 快照，
@@ -371,7 +376,8 @@ impl super::super::Agent {
                                 }
                             }
                         }
-                        batch_layers = layers;
+                        batch_layers = layers.clone();
+                        per_intent_layers.push((intent_action_label.clone(), layers));
                         approved_intents.push(approved);
                         intent_verdicts.push(format!(
                             "第{}项[{}]通过",
@@ -389,7 +395,8 @@ impl super::super::Agent {
                         {
                             engine.push_summary_to_window(chain, &intent_for_summary, false);
                         }
-                        batch_layers = layers;
+                        batch_layers = layers.clone();
+                        per_intent_layers.push((intent_action_label.clone(), layers));
                         intent_verdicts.push(format!(
                             "第{}项[{}]驳回",
                             intent_idx + 1,
@@ -443,7 +450,11 @@ impl super::super::Agent {
                                             {
                                                 engine.push_summary_to_window(chain, &approved, true);
                                             }
-                                            batch_layers = l2;
+                                            batch_layers = l2.clone();
+                                            per_intent_layers.push((
+                                                format!("{}(自纠)", intent_action_label),
+                                                l2,
+                                            ));
                                             approved_intents.push(approved);
                                         }
                                         crate::soul::reflector::PipelineValidationResult::Rejected {
@@ -499,6 +510,24 @@ used_chaos_fallback = true;
                 }
             }
 
+            // 聚合 JSON：[{"intent":"吃","layers":[{layer,passed,detail}]}]
+            // 由 recorder 落入 tianhun_layers 列，handler/上报链解析后逐意图展示。
+            // approved / rejected 两条 record_tianhun 路径共用。
+            let per_intent_json: Vec<serde_json::Value> = per_intent_layers
+                .iter()
+                .map(|(label, ls)| {
+                    serde_json::json!({
+                        "intent": label,
+                        "layers": ls.iter().map(|l| serde_json::json!({
+                            "layer": l.layer,
+                            "passed": l.passed,
+                            "detail": l.detail,
+                        })).collect::<Vec<_>>(),
+                    })
+                })
+                .collect();
+            let layers_json = serde_json::to_string(&per_intent_json).ok();
+
             if !approved_intents.is_empty() {
                 if let Some(recorder) = self.soul_recorder().await {
                     let layer0 = batch_layers.iter().find(|l| l.layer == "layer0");
@@ -524,6 +553,7 @@ used_chaos_fallback = true;
                             } else {
                                 None
                             },
+                            layers_json.as_deref(),
                         )
                         .await;
                     let pipeline = Self::assemble_pipeline(approved_intents.clone());
@@ -587,6 +617,7 @@ used_chaos_fallback = true;
                             layer2.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             layer3.map(|l| l.detail.as_deref().unwrap_or("通过")),
                             Some(&reason),
+                            layers_json.as_deref(),
                         )
                         .await;
                 }

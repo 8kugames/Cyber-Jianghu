@@ -715,6 +715,7 @@ mod tests {
                 result: result.map(String::from),
                 layers: vec![],
                 reason: None,
+                per_intent_layers: None,
             },
             final_intent: None,
             model_id: None,

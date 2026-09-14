@@ -221,6 +221,10 @@ impl SoulCycleRecorder {
     }
 
     /// 记录天魂审查结果（layer0-3 全量落入 tianhun_layers JSON，DB 列仅存 layer1-3）
+    ///
+    /// layers_json：调用方预序列化的多意图聚合结构
+    /// `[{"intent":"吃","layers":[{layer,passed,detail}]}]`；Some 时直接落入
+    /// tianhun_layers 列（覆盖内部逐层构建），None 时保持旧的单意图格式。
     #[allow(clippy::too_many_arguments)]
     pub async fn record_tianhun(
         &self,
@@ -232,6 +236,7 @@ impl SoulCycleRecorder {
         layer2: Option<&str>,
         layer3: Option<&str>,
         reason: Option<&str>,
+        layers_json: Option<&str>,
     ) {
         let conn = self
             .conn
@@ -239,8 +244,11 @@ impl SoulCycleRecorder {
             .expect("soul_cycle_recorder lock not poisoned");
         let created_at = Utc::now().to_rfc3339();
 
-        // 构建 tianhun_layers JSON 数组（数据驱动可扩展）
-        let tianhun_layers = {
+        // 构建 tianhun_layers JSON 数组（数据驱动可扩展）；
+        // 调用方传入聚合 JSON（多意图逐意图结果）时优先落库
+        let tianhun_layers = if let Some(agg) = layers_json {
+            Some(agg.to_string())
+        } else {
             let layers: Vec<serde_json::Value> =
                 [(0, layer0), (1, layer1), (2, layer2), (3, layer3)]
                     .into_iter()
@@ -825,6 +833,7 @@ mod tests {
                 Some("物品存在"),
                 None,
                 None,
+                None,
             )
             .await;
         let records = recorder.get_by_tick(1).await.expect("get_by_tick");
@@ -879,6 +888,7 @@ mod tests {
                 Some("物品存在"),
                 None,
                 None,
+                None,
             )
             .await;
         let records = recorder.get_by_tick(1).await.expect("get_by_tick in test");
@@ -905,6 +915,7 @@ mod tests {
                 None,
                 None,
                 Some("意图不合理"),
+                None,
             )
             .await;
         let records = recorder.get_by_tick(1).await.expect("get_by_tick in test");

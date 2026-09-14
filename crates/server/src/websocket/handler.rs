@@ -1400,6 +1400,7 @@ async fn handle_intent(
                                     },
                                 ],
                                 reason: None,
+                                per_intent_layers: None,
                             },
                             final_intent: Some(cyber_jianghu_protocol::FinalIntentReport {
                                 intent_id: None,

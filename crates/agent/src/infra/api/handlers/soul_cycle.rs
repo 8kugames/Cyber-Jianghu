@@ -39,6 +39,9 @@ struct TianhunEntry {
     result: Option<String>,
     layers: Vec<LayerResultEntry>,
     reason: Option<String>,
+    /// 多意图逐意图审查结果（新格式数据才有；旧数据回退 layers 平铺展示）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    per_intent_layers: Option<serde_json::Value>,
 }
 
 /// 最终 Intent 记录
@@ -104,6 +107,17 @@ struct SoulCyclesPageResponse {
     immediate_intents: std::collections::HashMap<String, Vec<ImmediateIntentEntry>>,
 }
 
+/// 解析 tianhun_layers 列的多意图聚合格式（元素含 intent 键）；
+/// 旧单意图平铺格式返回 None。
+fn parse_per_intent_layers(json: Option<&str>) -> Option<serde_json::Value> {
+    let v: serde_json::Value = serde_json::from_str(json?).ok()?;
+    let arr = v.as_array()?;
+    if arr.is_empty() || arr.first()?.get("intent").is_none() {
+        return None;
+    }
+    Some(v)
+}
+
 /// SoulCycleRecord → SoulCycleAttemptEntry 转换（消除重复代码）
 fn record_to_attempt_entry(
     r: super::soul_cycle_recorder::SoulCycleRecord,
@@ -164,6 +178,7 @@ fn record_to_attempt_entry(
             result: r.tianhun_result,
             layers,
             reason: r.tianhun_reason,
+            per_intent_layers: parse_per_intent_layers(r.tianhun_layers.as_deref()),
         },
         final_intent: r.final_intent_id.map(|id| {
             let pipeline_actions: Option<Vec<cyber_jianghu_protocol::PipelineAction>> = r

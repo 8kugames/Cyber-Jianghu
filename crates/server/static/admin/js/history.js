@@ -242,7 +242,7 @@ function showChrModal(c) {
     <div class="detail-section">
         <h3>关键事件</h3>
         <div class="highlight-list">
-            ${c.highlights.map((h) => `<div class="highlight-item"><span class="highlight-type type-${escapeHtml(h.event_type || "")}">${escapeHtml({ death: "陨落", dialogue: "对话", combat: "战斗", social: "交际" }[h.event_type] || h.event_type || "")}</span><span class="highlight-desc">${escapeHtml(h.description || "")}</span></div>`).join("")}
+            ${c.highlights.map((h) => `<div class="highlight-item"><span class="highlight-type type-${escapeHtml(h.event_type || "")}">${escapeHtml({ death: "陨落", retire: "归隐", dialogue: "对话", combat: "战斗", social: "交际" }[h.event_type] || h.event_type || "")}</span><span class="highlight-desc">${escapeHtml(h.description || "")}</span></div>`).join("")}
         </div>
     </div>` : ""}
     ${c.emergence_events && c.emergence_events.length ? `
@@ -270,7 +270,15 @@ function showChrModal(c) {
     <div class="detail-section">
         <h3>江湖群像</h3>
         <div class="agents-grid">
-            ${c.agent_summaries.map((a) => `<div class="agent-card"><div class="agent-name">${escapeHtml(a.name || "")}</div><div class="agent-info"><div>位置: ${escapeHtml(getLocationName(a.location || "-"))}</div><div>行动: ${escapeHtml(a.actions_count || 0)}次</div>${a.died_this_period ? '<div class="agent-died">已于本周期陨落</div>' : ""}</div></div>`).join("")}
+            ${c.agent_summaries.map((a) => {
+                const fateCls = a.retired_this_period ? " agent-retired-card" : a.died_this_period ? " agent-died-card" : "";
+                const fateHtml = a.retired_this_period
+                    ? '<div class="agent-retired">已于本周期归隐</div>'
+                    : a.died_this_period
+                      ? '<div class="agent-died">已于本周期陨落</div>'
+                      : "";
+                return `<div class="agent-card${fateCls}"><div class="agent-name">${escapeHtml(a.name || "")}</div><div class="agent-info"><div>位置: ${escapeHtml(getLocationName(a.location || "-"))}</div><div>行动: ${escapeHtml(a.actions_count || 0)}次</div>${fateHtml}</div></div>`;
+            }).join("")}
         </div>
     </div>` : ""}
     `;
@@ -542,21 +550,33 @@ function renderTianhunCell(cycles, entry) {
         if (cycles.length > 1) html += `<div class="tick-attempt-label">第${idx + 1}次</div>`;
         const th = cycle.tianhun;
         if (!th) return;
-        if (th.layers && th.layers.length > 0) {
-            html += `<div class="soul-layers">`;
-            th.layers.forEach((l) => {
-                // 历史快照 JSONB 中 skip 曾被误判为 passed=false，
-                // 渲染时以 skip 文本为准强制按通过展示
-                const passed = l.passed || isLlmSkipDetail(l.detail);
-                const name = (_layerDisplayCache || LAYER_NAMES)[l.layer] || l.layer;
-                const detail = l.detail ? ": " + escapeHtml(layerDetailText(l.detail)) : "";
-                html += `<span class="soul-layer-tag ${passed ? "passed" : "failed"}">${escapeHtml(name)}${detail}</span>`;
+        // 多意图逐意图审查结果（新格式）：按意图分组展示；旧数据回退平铺 layers
+        if (th.per_intent_layers && th.per_intent_layers.length > 0) {
+            th.per_intent_layers.forEach((pil) => {
+                html += `<div style="margin-top:3px;font-size:10px;color:var(--text-muted);">意图「${escapeHtml(pil.intent || "-")}」</div>`;
+                html += renderLayerTagsAdmin(pil.layers || []);
             });
-            html += `</div>`;
+        } else if (th.layers && th.layers.length > 0) {
+            html += renderLayerTagsAdmin(th.layers);
         }
         if (th.reason) html += `<div class="exp-meta-text" style="color:var(--text-secondary);">${escapeHtml(th.reason)}</div>`;
     });
     return html || "-";
+}
+
+// 天魂层标签组渲染（renderTianhunCell 内部复用）
+function renderLayerTagsAdmin(layers) {
+    let html = `<div class="soul-layers">`;
+    layers.forEach((l) => {
+        // 历史快照 JSONB 中 skip 曾被误判为 passed=false，
+        // 渲染时以 skip 文本为准强制按通过展示
+        const passed = l.passed || isLlmSkipDetail(l.detail);
+        const name = (_layerDisplayCache || LAYER_NAMES)[l.layer] || l.layer;
+        const detail = l.detail ? ": " + escapeHtml(layerDetailText(l.detail)) : "";
+        html += `<span class="soul-layer-tag ${passed ? "passed" : "failed"}">${escapeHtml(name)}${detail}</span>`;
+    });
+    html += `</div>`;
+    return html;
 }
 
 // 地魂 action_type 中文映射（说话检测函数在 utils.js: isSpeakAtype / isWhisperAtype / isShoutAtype，纯 channel 字段判断）
