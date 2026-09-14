@@ -60,6 +60,8 @@ struct SoulCycleAttemptEntry {
     world_time: Option<serde_json::Value>,
     created_at: String,
     attempt: i32,
+    /// 记录通道：'main'=真实认知循环，'idle_skip'=空转占位（下游结构化区分"无经历"与"加载失败"）
+    route_type: String,
     renhun: RenhunEntry,
     tianhun: TianhunEntry,
     final_intent: Option<FinalIntentEntry>,
@@ -149,6 +151,7 @@ fn record_to_attempt_entry(
         world_time,
         created_at: r.created_at.to_rfc3339(),
         attempt: r.attempt,
+        route_type: r.route_type,
         renhun: RenhunEntry {
             narrative: r.renhun_narrative,
             thought_log: r.renhun_thought_log,

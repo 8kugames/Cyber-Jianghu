@@ -108,7 +108,10 @@ impl super::super::Agent {
         // 下游凭 route_type 区分"无经历的空转"与"记录加载失败"。
         // recorder 不可用时静默跳过——失败原因已在 soul_recorder_for 内 error 级记录。
         if let Some(recorder) = self.soul_recorder().await {
-            recorder.record_idle_skip(world_state.tick_id, flavor).await;
+            let world_time_str = Self::format_world_time(&world_state.world_time);
+            recorder
+                .record_idle_skip(world_state.tick_id, flavor, Some(&world_time_str))
+                .await;
         }
     }
 

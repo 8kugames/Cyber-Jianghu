@@ -194,6 +194,7 @@ impl SoulCycleRecorder {
                 renhun_narrative = excluded.renhun_narrative,
                 renhun_thought_log = excluded.renhun_thought_log,
                 model_id = excluded.model_id,
+                route_type = 'main',
                 created_at = excluded.created_at",
             params![
                 tick_id,
@@ -417,7 +418,7 @@ impl SoulCycleRecorder {
     ///
     /// 让三魂纪事时间轴连续：下游可凭 route_type 区分"无经历的空转"与"记录加载失败"。
     /// INSERT OR IGNORE：同一 tick 若已有真实认知记录则绝不覆盖。
-    pub async fn record_idle_skip(&self, tick_id: i64, narrative: &str) {
+    pub async fn record_idle_skip(&self, tick_id: i64, narrative: &str, world_time: Option<&str>) {
         let conn = self
             .conn
             .lock()
@@ -426,9 +427,9 @@ impl SoulCycleRecorder {
 
         let result = conn.execute(
             "INSERT OR IGNORE INTO soul_cycle_record
-             (tick_id, attempt, renhun_narrative, route_type, created_at)
-             VALUES (?1, 0, ?2, 'idle_skip', ?3)",
-            params![tick_id, narrative, created_at],
+             (tick_id, attempt, renhun_narrative, route_type, world_time, created_at)
+             VALUES (?1, 0, ?2, 'idle_skip', ?3, ?4)",
+            params![tick_id, narrative, world_time, created_at],
         );
 
         match result {
@@ -1264,12 +1265,17 @@ mod tests {
     async fn test_record_idle_skip_writes_distinguishable_placeholder() {
         let (_dir, recorder) = make_recorder();
         recorder
-            .record_idle_skip(7, "（空转：无显著变化，未执行认知循环）")
+            .record_idle_skip(
+                7,
+                "（空转：无显著变化，未执行认知循环）",
+                Some("第三天 申时"),
+            )
             .await;
 
         let records = recorder.get_by_tick(7).await.expect("get_by_tick in test");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].route_type, "idle_skip");
+        assert_eq!(records[0].world_time.as_deref(), Some("第三天 申时"));
         assert_eq!(
             records[0].renhun_narrative.as_deref(),
             Some("（空转：无显著变化，未执行认知循环）")
@@ -1283,7 +1289,23 @@ mod tests {
         recorder
             .record_renhun(7, 0, "真实决策", "...", "test-model")
             .await;
-        recorder.record_idle_skip(7, "（空转）").await;
+        recorder.record_idle_skip(7, "（空转）", None).await;
+
+        let records = recorder.get_by_tick(7).await.expect("get_by_tick in test");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].route_type, "main");
+        assert_eq!(records[0].renhun_narrative.as_deref(), Some("真实决策"));
+    }
+
+    #[tokio::test]
+    async fn test_record_renhun_flips_idle_row_back_to_main() {
+        let (_dir, recorder) = make_recorder();
+        // 回归防线（triple-review 建议2/F4）：同一 tick 先空转后认知时，
+        // 认知 upsert 必须把 route_type 翻回 main，真实叙事不得滞留 idle_skip 行
+        recorder.record_idle_skip(7, "（空转）", None).await;
+        recorder
+            .record_renhun(7, 0, "真实决策", "...", "test-model")
+            .await;
 
         let records = recorder.get_by_tick(7).await.expect("get_by_tick in test");
         assert_eq!(records.len(), 1);
@@ -1297,7 +1319,7 @@ mod tests {
         recorder
             .record_renhun(10, 0, "真实行动", "...", "test-model")
             .await;
-        recorder.record_idle_skip(12, "（空转）").await;
+        recorder.record_idle_skip(12, "（空转）", None).await;
 
         let narrative = recorder
             .get_last_renhun_narrative(20)
