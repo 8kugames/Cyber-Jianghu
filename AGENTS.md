@@ -187,7 +187,7 @@ Key server modules:
 
 **Dashboard Read Auth**: Dashboard READ endpoints use `require_client_read_token`, which accepts either `CLIENT_READ_TOKEN` (game-client read-only token) or the admin `ADMIN_READ_TOKEN`. When `CLIENT_READ_TOKEN` is unset, callers may use `ADMIN_READ_TOKEN` (fallback). This separates the game-client read credential from admin access.
 
-**Relationship Sync (Strategy B)**: Agents report a full per-game-day relationship snapshot via `ClientMessage::RelationshipSnapshot`. Strategy B is full-snapshot-per-day, which is naturally idempotent — re-sending the same day's snapshot overwrites the prior one for that `(agent_id, game_day)` key. The server stores these in the `agent_relationships` table (migration `022`).
+**Relationship Sync (Strategy B)**: Agents report a full relationship snapshot at game-day end via `ClientMessage::RelationshipSnapshot`. The server keeps only the **latest** snapshot per holder: each write is a transactional DELETE-all-for-source + INSERT, keyed by the directed pair `(source_agent_id, target_agent_id)` (migration `022`). `game_day` is accepted and logged but NOT persisted — there is no per-day history. Re-sending the same snapshot is idempotent; an older snapshot arriving after a newer one rolls the holder's graph back (no ordering guard; agents report sequentially over a single connection, so this is not expected in practice). Relationship perception is strictly directional: A→B and B→A are independent rows — A's view of B never overwrites B's view of A.
 
 ### Agent Architecture
 
@@ -358,7 +358,7 @@ The `crates/protocol` crate defines the wire types shared between Server, Agent,
 
 - `RelationshipMemory` — relationship memory record with `i64` millisecond timestamps (epoch ms), agent IDs, valence/affinity score, and free-form metadata.
 - `RelationshipKeyEvent` — discrete event that shifted a relationship (fight, trade, gift, dialogue, etc.); `i64` ms timestamps.
-- `ClientMessage::RelationshipSnapshot` — variant carrying a full per-day relationship snapshot from Agent → Server. Naturally idempotent: each game day overwrites the prior snapshot for that `(agent_id, game_day)` key.
+- `ClientMessage::RelationshipSnapshot` — variant carrying a full relationship snapshot from Agent → Server at game-day end. The server keeps only the latest snapshot per holder (last-writer-wins on the `source_agent_id` scope); `game_day` is accepted for logging only. Idempotent for same-day resend; no cross-day ordering guard. Edges are strictly directional: A→B and B→A are independent rows.
 
 Timestamps in the relationship protocol are `i64` milliseconds (Unix epoch), not `f64` seconds.
 

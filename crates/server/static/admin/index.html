@@ -43,6 +43,9 @@
                 <div class="nav-tab" data-tab-id="health" onclick="switchTab('health'); loadHealth();">
                     健康度
                 </div>
+                <div class="nav-tab" data-tab-id="relationships" onclick="switchTab('relationships'); loadRelationships();">
+                    关系图谱
+                </div>
             </div>
         </header>
 
@@ -213,6 +216,27 @@
                     <p>加载中...</p>
                 </div>
             </div>
+            <!-- Relationships View -->
+            <div id="relationships" class="view-section">
+                <div class="dashboard-controls">
+                    <h2>关系图谱</h2>
+                    <div style="display: flex; align-items: center; gap: 10px">
+                        <span style="font-size: 12px; color: var(--text-secondary)">关系为单向主观认知：A→B 与 B→A 独立存储，本页仅对比展示，不合并不平均</span>
+                        <button class="btn btn-primary" onclick="loadRelationships()">刷新</button>
+                    </div>
+                </div>
+                <input
+                    type="text"
+                    id="rel-filter"
+                    class="form-input"
+                    placeholder="搜索持有者/目标名称或 ID..."
+                    oninput="relFilterText = this.value; renderRelationships()"
+                    style="width: 260px; margin-bottom: 10px"
+                />
+                <div id="relationships-content">
+                    <p>加载中...</p>
+                </div>
+            </div>
         </main>
 
         <div id="toast" class="toast">Message</div>
@@ -226,5 +250,6 @@
         <script src="js/app.js"></script>
         <script src="js/action-evolution.js"></script>
         <script src="js/health.js"></script>
+        <script src="js/relationships.js"></script>
     </body>
 </html>
