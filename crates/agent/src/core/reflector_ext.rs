@@ -24,9 +24,10 @@ pub enum PersonaValidationResult {
 }
 
 impl super::Agent {
-    pub(crate) fn set_rejection_feedback(&mut self, reason: impl Into<String>) {
+    pub(crate) fn set_rejection_feedback(&mut self, reason: impl Into<String>, tick_id: i64) {
         let reason = reason.into();
         self.last_rejection_reason = Some(Self::narrativize_rejection(&reason));
+        self.last_rejection_tick = Some(tick_id);
     }
 
     pub(crate) async fn validate_with_reflector(
@@ -114,7 +115,7 @@ impl super::Agent {
         soul_cycle_attempt: i32,
     ) -> Result<cyber_jianghu_protocol::Intent> {
         // 设置驳回反馈，使 callback 能传递给 LLM
-        self.set_rejection_feedback(rejection_reason.to_string());
+        self.set_rejection_feedback(rejection_reason.to_string(), world_state.tick_id);
 
         let tick_id = world_state.tick_id;
         let agent_id = world_state.agent_id.unwrap_or_default();

@@ -304,7 +304,7 @@ fn format_target_rejection(
     match err {
         ResolveAgentIdError::Ambiguous { matched, .. } => {
             format!(
-                "{} ID '{}' 匹配到多个角色，请使用更长的 ID。匹配结果: [{}]。当前附近的角色: [{}]",
+                "{} ID '{}' 匹配到多个角色，请从匹配结果中照抄更长的完整 ID。匹配结果: [{}]。当前附近的角色: [{}]",
                 label,
                 target_id,
                 matched
@@ -316,11 +316,19 @@ fn format_target_rejection(
             )
         }
         _ => {
+            // 混合自纠：确定性指引随拒绝消息注入，使同 tick 自纠与跨 tick 决策
+            // 直接获得「换前置动作」的纠错方向，而非重复对不可见目标提交同类动作
+            let guidance = if nearby_names.is_empty() {
+                "当前位置看不到任何其他角色，任何针对特定角色的动作（说话/予/取/教导）都无法执行。请改用【移动】前往相邻场景寻找目标，或【观察】确认环境后再行动，不要对不可见目标重复提交同类动作。"
+            } else {
+                "若要与某人交互，请从上方列表照抄其完整 ID。"
+            };
             format!(
-                "{} {} 不在附近实体中。当前附近的角色: [{}]",
+                "{} {} 不在附近实体中。当前附近的角色: [{}]。{}",
                 label,
                 target_id,
-                nearby_names.join(", ")
+                nearby_names.join(", "),
+                guidance
             )
         }
     }

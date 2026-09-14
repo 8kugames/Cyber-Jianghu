@@ -17,7 +17,7 @@ impl super::super::Agent {
     /// 构建 tick 决策所需的记忆上下文
     ///
     /// 处理流程:
-    /// 1. 清除上轮 rejection + 消费 Server 错误反馈
+    /// 1. 过期上轮 rejection（TTL 保留语义）+ 消费 Server 错误反馈
     /// 2. 消费即时事件缓冲区 → 工作记忆
     /// 3. 处理 WorldState.events_log → 叙事合成记忆
     /// 4. 社交事件 → 关系更新
@@ -29,8 +29,14 @@ impl super::super::Agent {
         &mut self,
         world_state: &WorldState,
     ) -> (String, Vec<String>) {
-        // 1. 清除上一 tick 的 rejection reason（在消费新反馈之前）
-        self.last_rejection_reason = None;
+        // 1. 过期上一轮的 rejection reason：仅保留一个 tick 供决策参考，
+        //    防止过时反馈滞留导致行为过度抑制（如环境已变化仍不敢行动）
+        if self.last_rejection_tick.is_some_and(|set_at| {
+            super::super::Agent::rejection_feedback_expired(set_at, world_state.tick_id)
+        }) {
+            self.last_rejection_reason = None;
+            self.last_rejection_tick = None;
+        }
 
         // 1.6 消费 Server 验证错误反馈（由 Fn callback 异步写入）
         {
@@ -39,6 +45,7 @@ impl super::super::Agent {
                 warn!("Server 验证错误反馈: {}", reason);
                 self.last_rejection_reason =
                     Some(super::super::Agent::narrativize_rejection(&reason));
+                self.last_rejection_tick = Some(world_state.tick_id);
             }
         }
 

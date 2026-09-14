@@ -453,6 +453,7 @@ impl AgentBuilder {
             relationship_store: self.relationship_store,
             validator: self.validator,
             last_rejection_reason: None,
+            last_rejection_tick: None,
             registration_callback: None,
             reconnect_backoff: 0,
             reconnect_rx: self.reconnect_rx,

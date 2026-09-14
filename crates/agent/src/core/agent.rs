@@ -82,6 +82,9 @@ pub struct Agent {
     /// 上一次 ReflectorSoul 驳回原因（跨 tick 传递给 ActorSoul）
     pub(crate) last_rejection_reason: Option<String>,
 
+    /// 驳回原因产生时的 tick（配合 TTL 过期，防止过时反馈滞留污染决策）
+    pub(crate) last_rejection_tick: Option<i64>,
+
     /// 注册成功回调（可选，用于更新外部状态如 HTTP API 的 agent_id）
     pub(crate) registration_callback: Option<std::sync::Arc<dyn Fn(Uuid) + Send + Sync>>,
 
@@ -233,6 +236,7 @@ impl Agent {
             relationship_store: None,
             validator: None,
             last_rejection_reason: None,
+            last_rejection_tick: None,
             registration_callback: None,
             reconnect_backoff: 0,
             reconnect_rx,
@@ -743,6 +747,11 @@ impl Agent {
         reason.to_string()
     }
 
+    /// 驳回反馈是否已过期（超过 TTL 未刷新则不再注入决策上下文）
+    pub(crate) fn rejection_feedback_expired(set_at_tick: i64, current_tick: i64) -> bool {
+        current_tick - set_at_tick > crate::config::REJECTION_FEEDBACK_TTL_TICKS
+    }
+
     /// 获取三魂循环记录器（如果可用）
     /// 获取当前角色的三魂记录器（从注册表按需加载）
     pub(crate) async fn soul_recorder(
@@ -755,53 +764,5 @@ impl Agent {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use futures_util::future::BoxFuture;
-
-    fn test_config() -> Config {
-        Config {
-            server: crate::config::ServerConfig::default(),
-            runtime: crate::config::RuntimeConfig::default(),
-            llm: crate::config::LlmConfig::default(),
-            llm_reflector: None,
-            memory: crate::config::MemoryConfig::default(),
-            game_rules: None,
-            config_path: PathBuf::from("/tmp/test-agent-config.yaml"),
-            servers_dir: PathBuf::from("/tmp/test-agent-servers"),
-            earth_soul: crate::soul::earth::config::EarthSoulConfig::default(),
-            token_optimization: crate::config::TokenOptimizationConfig::default(),
-            character_generation: crate::config::CharacterGenerationConfig {
-                world_setting: "测试世界".to_string(),
-                fields: Vec::new(),
-            },
-        }
-    }
-
-    fn noop_decision_callback() -> crate::runtime::DecisionCallback {
-        Arc::new(
-            |tick_id: i64, agent_id: Uuid| -> BoxFuture<'static, Intent> {
-                Box::pin(async move { Intent::new(agent_id, tick_id, "休整", None) })
-            },
-        )
-    }
-
-    #[tokio::test]
-    async fn test_reload_character_persona_updates_persona_name_without_engine() {
-        let repo_config_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("agent crate parent")
-            .join("server/config");
-        unsafe {
-            std::env::set_var("CYBER_JIANGHU_CONFIG_DIR", &repo_config_dir);
-        }
-
-        let mut agent = Agent::new(test_config(), noop_decision_callback(), None, None).await;
-
-        assert_eq!(agent.persona.read(|p| p.name.clone()), "无名侠客");
-
-        agent.reload_character_persona(Uuid::new_v4(), "裴无咎");
-
-        assert_eq!(agent.persona.read(|p| p.name.clone()), "裴无咎");
-    }
-}
+#[path = "agent_tests.rs"]
+mod tests;

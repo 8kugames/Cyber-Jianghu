@@ -503,6 +503,11 @@ impl Default for RuntimeConfig {
 
 // 所有 LLM/agent 相关默认常量从 protocol crate 引入,避免重复定义。
 // 单一来源原则: 改默认值仅需改 protocol/src/lib.rs 一处。
+/// 驳回反馈跨 tick 保留时长（tick）：仅对紧邻的下一 tick 决策可见，
+/// 防止过时反馈滞留导致行为过度抑制（如环境已变化仍不敢行动）。
+/// agent 本地决策常量，非 wire 契约默认值，故定义于 agent crate 而非 protocol。
+pub(crate) const REJECTION_FEEDBACK_TTL_TICKS: i64 = 1;
+
 pub(crate) use cyber_jianghu_protocol::{
     DEFAULT_CONTEXT_WINDOW_TOKENS, DEFAULT_ENABLE_STREAMING, DEFAULT_EXECUTION_RESULT_TIMEOUT_MS,
     DEFAULT_IDLE_ROTATE_THRESHOLD, DEFAULT_KEEP_RECENT_TURNS, DEFAULT_LLM_CONNECT_TIMEOUT_SECS,

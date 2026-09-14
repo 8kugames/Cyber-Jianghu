@@ -105,6 +105,83 @@ async fn test_layer0_rejects_fabricated_item_id() {
 }
 
 #[tokio::test]
+async fn test_layer0_rejection_guidance_when_no_nearby_entities() {
+    let validator = approved_mock_validator();
+    let mut world_state = test_world_state();
+    world_state.entities.clear();
+
+    let request = ValidationRequest {
+        intent: crate::models::Intent::new(
+            world_state.agent_id.unwrap_or_default(),
+            world_state.tick_id,
+            "说话",
+            Some(serde_json::json!({"target_agent_id": "a65df604"})),
+        ),
+        persona: PersonaInfo::default(),
+        world_context: "测试地点".to_string(),
+        world_state: Some(world_state),
+        runtime: ValidationRuntimeConfig::default(),
+    };
+
+    match validator.validate_pipeline(request).await.unwrap() {
+        PipelineValidationResult::Rejected { reason, layers } => {
+            assert!(
+                reason.contains("不在附近实体中"),
+                "应因目标不可见被驳回: {}",
+                reason
+            );
+            assert!(
+                reason.contains("【移动】") && reason.contains("【观察】"),
+                "附近为空时应注入移动/观察的确定性指引: {}",
+                reason
+            );
+            assert_eq!(layers.first().unwrap().layer, "layer0");
+        }
+        PipelineValidationResult::Approved { .. } => {
+            panic!("目标不可见的说话意图应被 layer0 拒绝");
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_layer0_rejection_guidance_with_nearby_entities() {
+    let validator = approved_mock_validator();
+    let world_state = test_world_state();
+    let target = absent_agent_prefix(&world_state);
+
+    let request = ValidationRequest {
+        intent: crate::models::Intent::new(
+            world_state.agent_id.unwrap_or_default(),
+            world_state.tick_id,
+            "说话",
+            Some(serde_json::json!({"target_agent_id": target})),
+        ),
+        persona: PersonaInfo::default(),
+        world_context: "测试地点".to_string(),
+        world_state: Some(world_state),
+        runtime: ValidationRuntimeConfig::default(),
+    };
+
+    match validator.validate_pipeline(request).await.unwrap() {
+        PipelineValidationResult::Rejected { reason, .. } => {
+            assert!(
+                reason.contains("不在附近实体中"),
+                "应因目标不可见被驳回: {}",
+                reason
+            );
+            assert!(
+                reason.contains("照抄其完整 ID"),
+                "附近非空时应注入照抄完整 ID 的指引: {}",
+                reason
+            );
+        }
+        PipelineValidationResult::Approved { .. } => {
+            panic!("目标不可见的说话意图应被 layer0 拒绝");
+        }
+    }
+}
+
+#[tokio::test]
 async fn test_layer0_allows_item_in_inventory() {
     let validator = approved_mock_validator();
     let world_state = test_world_state();

@@ -418,7 +418,7 @@ impl super::super::Agent {
                             reason
                         );
                         let rejection_reason = marked_feedback;
-                        self.set_rejection_feedback(rejection_reason.clone());
+                        self.set_rejection_feedback(rejection_reason.clone(), world_state.tick_id);
                         warn!(
                             "Tick {} attempt {} 天魂审查驳回: {}",
                             world_state.tick_id, attempt, rejection_reason

@@ -781,7 +781,7 @@ impl super::Agent {
                                 final_intent = approved;
                             }
                             crate::soul::reflector::PipelineValidationResult::Rejected { reason, .. } => {
-                                self.set_rejection_feedback(reason.clone());
+                                self.set_rejection_feedback(reason.clone(), world_state.tick_id);
                                 warn!(
                                     "Tick {} fallback intent 被天魂驳回，改用 chaos fallback: {}",
                                     world_state.tick_id, reason
