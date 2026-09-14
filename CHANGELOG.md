@@ -4,6 +4,43 @@
 
 ## [Unreleased]
 
+## [0.1.322] - 2026-09-14
+
+### Features
+
+- **角色社会语义完善**（agent）：关系名册同步、魂纪事空转占位、归隐终态收敛、SSE 流修复；名册同步机械迁移至独立模块 `roster_sync`。
+- **关系图谱有向视图接入管理面板**（admin）：关系页适配打平响应并归一化渲染契约，同步文档修正。
+- **经历独立页面**（agent-panel）：新增 standalone experiences 页面，支持分页与 tick 跳转。
+- **纪事归隐终态采集与展示**（chronicle）。
+- **用/予执行前背包持有预检**（server）：give/offer 类动作在执行前校验背包持有。
+- **健康看板行为多样性改用 top-share 口径**（admin）。
+- **部署链路收敛**（deploy）：push_server 同步更新远端 agent、配方单一来源、ssh 参数边界修复。
+- **面板 URL `?token=` 直接认证**（panel）：支持带 token 直达进入面板。
+- **背包物品卡片改版为分行展示**（admin）。
+
+### Bug Fixes
+
+- **混合自纠避免人魂对不可见目标反复踩坑**（agent）。
+- **分级审核未知动作改为 fail-closed**（reflector）。
+- **多意图天魂审查结果逐意图聚合记录**（soul-cycle）；空转占位记录补写世界时间并向查询接口暴露 `route_type`；记录后 chaos 覆写留痕补全。
+- **物品来源分类收窄消耗类校验**（soul）：chaos/自纠链路留痕补全。
+- **F6 审查建议项落地**（server）：回滚原因收割、DB 错误透传、文案前缀、干跑接线。
+- **item_exists 严格 uuid 审查**（action）：修复分级跳过层误判为失败；历史快照中分级跳过层强制按通过渲染（panel）。
+- **读写分权路由 GET 被 write layer 误包**（server）：修复只读直达链接弹鉴权窗。
+- **row_to_memory 按列名取值**（memory）：防 `SELECT *` 列序错位。
+- **SSE 广播 Lagged 降级为告警而非断流**（agent-api）。
+
+### Refactoring
+
+- **移除未实现的 minimum_per_tick 配置**（protocol）。
+
+### Chore
+
+- **pre-commit 增强**（githooks）：新增 fmt/clippy 质量前置检查；暂存区快照校验的 stash 隔离与冲突规避。
+- **restart.sh 统一 SCRIPT_DIR 提取**（test-agents）；固化记忆通道元游戏词黑名单大小写敏感取舍的单测（core）。
+- **远程部署文档对齐面板 `?token=` 认证与接入链接契约**（docs）；PROTOCOL_VERSION 描述同步至 3.2.0。
+- **格式化清理**：rustfmt `reporting.rs`、admin `index.html`（无行为变更）。
+
 ## [0.1.311] - 2026-09-13
 
 ### Features
