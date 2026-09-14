@@ -60,6 +60,28 @@ impl RecipeRegistry {
             .map(|(id, _)| id.clone())
     }
 
+    /// 动作边界配方引用归一（uuid / 内部 recipe_id / 产物物品 id → 内部 recipe_id）。
+    ///
+    /// Agent 侧常规提交 uuid（broadcaster 下发）；内部 id 与产物物品 id 作为
+    /// 宽容输入一并归一（多配方产同物时取 recipe_id 字典序最小者，确定性）。
+    /// 无法归一的引用返回 None，由调用方按"配方不存在"拒绝。
+    pub fn normalize(recipe_ref: &str) -> Option<String> {
+        if let Some(id) = Self::resolve_recipe_id(recipe_ref) {
+            return Some(id);
+        }
+        if Self::get(recipe_ref).is_some() {
+            return Some(recipe_ref.to_string());
+        }
+        Self::all()
+            .iter()
+            .find(|(id, _)| {
+                Self::get(id)
+                    .map(|def| def.result_item == recipe_ref)
+                    .unwrap_or(false)
+            })
+            .map(|(id, _)| id.clone())
+    }
+
     /// 获取配方的稳定 uuid（UUID v5，从 recipe_id 确定性派生）。
     ///
     /// 配方是数据驱动的"类型"而非实例，uuid 由专用命名空间

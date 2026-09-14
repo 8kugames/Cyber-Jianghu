@@ -376,16 +376,18 @@ async fn validate_recipe_knowledge_typed(
         .await
         .unwrap_or_default();
 
-    let knows = known.iter().any(|r| {
-        r == recipe_id
-            || crate::game_data::registry::RecipeRegistry::get(r)
-                .map(|def| def.result_item == recipe_id)
-                .unwrap_or(false)
-    });
-
+    // Agent 侧只见到 uuid（broadcaster 下发），DB 已知清单是内部 id：
+    // 先归一提交值（uuid / 内部 id / 产物物品 id）再比对，三种输入形态一致可用
+    let resolved = crate::game_data::registry::RecipeRegistry::normalize(recipe_id);
+    let knows = resolved
+        .as_ref()
+        .is_some_and(|rid| known.iter().any(|r| r == rid));
     if !knows {
         return Err(GameError::InvalidActionData {
-            reason: format!("你尚未学会配方「{}」", recipe_id),
+            reason: match &resolved {
+                Some(_) => format!("你尚未学会配方「{}」", recipe_id),
+                None => format!("配方不存在或无效: {}", recipe_id),
+            },
         });
     }
 
@@ -434,9 +436,17 @@ async fn validate_teach_recipe_typed(
     let known = crate::db::get_known_recipe_ids(db_pool, agent_state.agent_id)
         .await
         .unwrap_or_default();
-    if !known.contains(&recipe_id.to_string()) {
+    // 与制造同规：归一（uuid / 内部 id / 产物物品 id）后与已知内部 id 比对
+    let resolved = crate::game_data::registry::RecipeRegistry::normalize(recipe_id);
+    let knows = resolved
+        .as_ref()
+        .is_some_and(|rid| known.iter().any(|r| r == rid));
+    if !knows {
         return Err(GameError::InvalidActionData {
-            reason: format!("你尚未学会配方「{}」，无法教导", recipe_id),
+            reason: match &resolved {
+                Some(_) => format!("你尚未学会配方「{}」，无法教导", recipe_id),
+                None => format!("配方不存在或无效: {}", recipe_id),
+            },
         });
     }
 

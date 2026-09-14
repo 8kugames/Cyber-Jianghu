@@ -652,18 +652,19 @@ impl BasicActionExecutor {
 
     /// 制造
     pub(super) fn execute_craft(intent: &Intent, data: &CraftData) -> ActionExecutionResult {
-        // 意图携带配方 uuid（v5 派生），严格反解回内部 recipe_id
-        let recipe_id =
-            match crate::game_data::registry::RecipeRegistry::resolve_recipe_id(&data.recipe_id) {
-                Some(id) => id,
-                None => {
-                    return ActionExecutionResult::failure(
-                        format!("配方不存在或无效: {}", data.recipe_id),
-                        intent.action_type.to_string(),
-                        Some(intent.intent_id),
-                    );
-                }
-            };
+        // 意图常规携带配方 uuid（v5 派生）；内部 id / 产物物品 id 一并归一，
+        // 校验层与执行层共用同一归一口径
+        let recipe_id = match crate::game_data::registry::RecipeRegistry::normalize(&data.recipe_id)
+        {
+            Some(id) => id,
+            None => {
+                return ActionExecutionResult::failure(
+                    format!("配方不存在或无效: {}", data.recipe_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
+                );
+            }
+        };
         let recipe = match crate::game_data::registry::RecipeRegistry::get(&recipe_id) {
             Some(r) => r,
             None => {
@@ -703,18 +704,21 @@ impl BasicActionExecutor {
             }
         };
 
-        // 意图携带配方 uuid（v5 派生），严格反解回内部 recipe_id
-        let recipe_display =
-            match crate::game_data::registry::RecipeRegistry::resolve_recipe_id(&data.recipe_id) {
-                Some(id) => crate::display::display_recipe_name(&id),
-                None => {
-                    return ActionExecutionResult::failure(
-                        format!("配方不存在或无效: {}", data.recipe_id),
-                        intent.action_type.to_string(),
-                        Some(intent.intent_id),
-                    );
-                }
-            };
+        // 与制造同规：归一（uuid / 内部 id / 产物物品 id）后使用内部 recipe_id；
+        // RecipeLearned 必须落内部 id（与初始配方/观察学习写入口径一致），
+        // 旧实现把原始 uuid 字符串写库会造成永久无法匹配注册表的脏行
+        let recipe_id = match crate::game_data::registry::RecipeRegistry::normalize(&data.recipe_id)
+        {
+            Some(id) => id,
+            None => {
+                return ActionExecutionResult::failure(
+                    format!("配方不存在或无效: {}", data.recipe_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
+                );
+            }
+        };
+        let recipe_display = crate::display::display_recipe_name(&recipe_id);
 
         let mut result = ActionExecutionResult::success(
             format!("传授配方「{}」", recipe_display),
@@ -724,7 +728,7 @@ impl BasicActionExecutor {
 
         result.add_change(StateChange::RecipeLearned {
             agent_id: student_id,
-            recipe_id: data.recipe_id.clone(),
+            recipe_id,
             source: "taught".to_string(),
         });
 
