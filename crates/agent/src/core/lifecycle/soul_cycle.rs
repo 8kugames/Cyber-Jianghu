@@ -20,7 +20,7 @@ use crate::component::memory::backend::MemoryBackend;
 use crate::models::Intent;
 
 /// 记忆通道元游戏术语黑名单（与天魂 Layer3 绝对禁止项同源：soul/reflector/prompt.rs）。
-/// ASCII 词按原文精确匹配（"MP" 不误伤 camp/temp 等英文词），中文词直接包含匹配。
+/// ASCII 词为大小写敏感子串匹配（大写 "MP" 不误伤 camp/sample 等英文小写词），中文词直接包含匹配。
 const MEMORY_OOC_ASCII_TERMS: &[&str] = &["HP", "SAN", "MP", "NPC"];
 const MEMORY_OOC_CN_TERMS: &[&str] = &[
     "玩家",
@@ -725,5 +725,9 @@ mod tests {
         assert!(!contains_meta_game_term("act as 一名镖师押送货物"));
         // ASCII 词仅大写精确匹配：英文普通词含 mp/san 不误伤
         assert!(!contains_meta_game_term("扎营过夜 camp，sample 货物"));
+        // ASCII 词为大小写敏感子串匹配：小写 hp/npc 是当前设计的绕过口，
+        // 用测试固化该取舍（防 camp/sample 误伤优先）
+        assert!(!contains_meta_game_term("hp 只剩4点"));
+        assert!(!contains_meta_game_term("这个 npc 很友善"));
     }
 }
