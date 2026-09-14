@@ -12,6 +12,20 @@
 ALTER TABLE soul_review_votes
     DROP CONSTRAINT IF EXISTS soul_review_votes_proposal_group_id_soul_key;
 
-ALTER TABLE soul_review_votes
-    ADD CONSTRAINT soul_review_votes_group_soul_role_unique
-    UNIQUE (proposal_group_id, soul, role);
+-- 幂等建约束（与 023 同约定）：entrypoint 与 Rust run_migrations 每次启动
+-- 都会重放全部迁移文件，裸 ADD CONSTRAINT 在二次执行时报
+-- "relation ... already exists" 使 server 永久崩溃循环
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'soul_review_votes_group_soul_role_unique'
+          AND conrelid = 'soul_review_votes'::regclass
+    ) THEN
+        ALTER TABLE soul_review_votes
+            ADD CONSTRAINT soul_review_votes_group_soul_role_unique
+            UNIQUE (proposal_group_id, soul, role);
+    END IF;
+END
+$$;
