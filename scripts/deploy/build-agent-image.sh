@@ -22,10 +22,34 @@ CARGO_VOLUME="cyj-agent-cargo"
 TARGET_VOLUME="cyj-agent-target"
 BIN_NAME="cyber-jianghu-agent"
 
-for img in "$BUILDER" "$BASE"; do
-    docker image inspect "$img" > /dev/null 2>&1 \
-        || { echo "[error] missing base image $img (bootstrapped by restart.sh --build)"; exit 1; }
-done
+# -- base images: auto-bootstrap when missing (network path: docker pull + apt).
+# Moved from .test-agents/restart.sh ensure_base_images: the deploy tool is now
+# self-contained instead of pointing back to the test harness. Zero overhead
+# (no network) when both base images are already present.
+ensure_base_images() {
+    local need_rust=0 need_slim=0
+    docker image inspect "$BUILDER" > /dev/null 2>&1 || need_rust=1
+    docker image inspect "$BASE"   > /dev/null 2>&1 || need_slim=1
+    if [ "$need_rust" -eq 0 ] && [ "$need_slim" -eq 0 ]; then
+        echo "[base] ready ($BUILDER / $BASE)"
+        return 0
+    fi
+    echo "[base] missing, bootstrapping via docker run + apt (network required)"
+    if [ "$need_rust" -eq 1 ]; then
+        docker run --name tmp-rust-builder rust:trixie bash -c \
+            "apt-get update -qq && apt-get install -y -qq pkg-config libssl-dev > /dev/null && rm -rf /var/lib/apt/lists/*" \
+            && docker commit tmp-rust-builder "$BUILDER" && docker rm tmp-rust-builder > /dev/null \
+            || { echo "[error] bootstrap failed: $BUILDER"; exit 1; }
+    fi
+    if [ "$need_slim" -eq 1 ]; then
+        docker run --name tmp-deb-slim debian:trixie-slim bash -c \
+            "apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates curl libssl3 > /dev/null && rm -rf /var/lib/apt/lists/*" \
+            && docker commit tmp-deb-slim "$BASE" && docker rm tmp-deb-slim > /dev/null \
+            || { echo "[error] bootstrap failed: $BASE"; exit 1; }
+    fi
+    echo "[base] bootstrap done"
+}
+ensure_base_images
 
 case "${1:-}" in
     --fresh)

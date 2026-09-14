@@ -141,39 +141,13 @@ device_id_of() {
   grep '^device_id:' "${aname}/data/servers/${SERVER_KEY}/device.yaml" 2>/dev/null | awk '{print $2}'
 }
 
-# ── 离线构建（本地基镜像通道，自举基镜像）────────────────────────────────────
-ensure_base_images() {
-  local need_rust=0 need_slim=0
-  docker image inspect local-rust-trixie:builder > /dev/null 2>&1 || need_rust=1
-  docker image inspect local-debian-slim:runtime > /dev/null 2>&1 || need_slim=1
-  if [ $need_rust -eq 0 ] && [ $need_slim -eq 0 ]; then
-    log_ok "本地基镜像已就绪 (local-rust-trixie:builder / local-debian-slim:runtime)"
-    return 0
-  fi
-
-  log_info "本地基镜像缺失，自举制备（docker run 网络路径，apt 可用）..."
-  if [ $need_rust -eq 1 ]; then
-    docker run --name tmp-rust-builder rust:trixie bash -c \
-      "apt-get update -qq && apt-get install -y -qq pkg-config libssl-dev > /dev/null && rm -rf /var/lib/apt/lists/*" \
-      && docker commit tmp-rust-builder local-rust-trixie:builder && docker rm tmp-rust-builder > /dev/null \
-      || { log_fail "local-rust-trixie:builder 制备失败"; return 1; }
-  fi
-  if [ $need_slim -eq 1 ]; then
-    docker run --name tmp-deb-slim debian:trixie-slim bash -c \
-      "apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates curl libssl3 > /dev/null && rm -rf /var/lib/apt/lists/*" \
-      && docker commit tmp-deb-slim local-debian-slim:runtime && docker rm tmp-deb-slim > /dev/null \
-      || { log_fail "local-debian-slim:runtime 制备失败"; return 1; }
-  fi
-  log_ok "本地基镜像制备完成"
-}
-
+# ── 离线构建（委托 deploy 工具）─────────────────────────────────────────────
+# 基镜像自举已下沉至 build-agent-image.sh（缺失自动制备，docker pull + apt 网络路径）。
 # 离线构建 agent 镜像：委托 scripts/deploy/build-agent-image.sh（容器内编译 + cargo 卷缓存
 # 增量 2-5 分钟 + Dockerfile.runtime 打包）。取代曾内联的离线多阶段 Dockerfile
 # （无 cache mount 全量编译 15-25 分钟，且配方与 canonical 漂移）。
 # 首次运行需下载 crates（cargo 卷持久缓存，之后离线增量）。
 build_image_offline() {
-  ensure_base_images || return 1
-
   if ! "$SCRIPT_DIR/../scripts/deploy/build-agent-image.sh"; then
     log_fail "agent 镜像构建失败（scripts/deploy/build-agent-image.sh）"
     return 1

@@ -14,6 +14,8 @@
 
 ### Changed
 
+- **基镜像自举自 restart.sh 下沉至 build-agent-image.sh**（deploy）：消除依赖倒挂——入库工具 `build-agent-image.sh` 缺基镜像时不再报错指向 `.test-agents/restart.sh --build`，改为缺失自动制备（docker run + apt 网络路径，自举逻辑逐字迁移自 restart.sh 的 ensure_base_images）；基镜像在位时零开销不触网。`restart.sh` 删除该函数（净减约 35 行），`--build` 语义不变；同步修正联调 SKILL 中脚本的过期路径。
+
 - **部署链路收敛：server 运行时镜像配方单一来源化**（deploy）：新增 `crates/server/Dockerfile.runtime`（与主 Dockerfile Stage 2 同步的"二进制注入"配方），`ship-server-binary.sh` 远端不再用 Python 正则 patch 主 Dockerfile + trap 还原，改为直连 `docker build` 打 runtime 镜像（只做 COPY 打包，秒级完成）；`docker-compose.prod.yml` 的 server 服务补显式 `image: cyber-jianghu-server:binary-runtime`（compose `up -d` 依据 tag 指向的新镜像 ID 自动重建容器）。远端部署不再依赖 python3。
 - **交叉编译共享助手 build-linux-binary.sh**（deploy）：zigbuild 工具链预检（cargo-zigbuild/zig/rustup target）+ 编译 + md5 + `.bin/` 本地留存的单一来源，stdout 仅出 md5、日志走 stderr；`ship-server-binary.sh`（server）与私有的 `.test-agents/push_server.sh`（agent）共同委托。附带修复 push_server.sh 缺失工具链预检的问题（此前缺 cargo-zigbuild 会以晦涩报错失败）。
 
