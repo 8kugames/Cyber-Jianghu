@@ -308,7 +308,8 @@ pub fn build_reactive_world_state(
                 .filter_map(|id| {
                     crate::game_data::ItemRegistry::get(id).map(|entry| {
                         crate::models::GatherableItem {
-                            item_id: id.clone(),
+                            // 采集引用 uuid，与 tick 广播/取 的 item_exists 校验同标识体系
+                            item_id: crate::items::item_uuid(id).to_string(),
                             name: entry.name.clone(),
                             item_type: entry.item_type.clone(),
                         }
@@ -474,7 +475,8 @@ pub fn build_initial_world_state(
                 .filter_map(|id| {
                     crate::game_data::ItemRegistry::get(id).map(|entry| {
                         crate::models::GatherableItem {
-                            item_id: id.clone(),
+                            // 采集引用 uuid，与 tick 广播/取 的 item_exists 校验同标识体系
+                            item_id: crate::items::item_uuid(id).to_string(),
                             name: entry.name.clone(),
                             item_type: entry.item_type.clone(),
                         }
