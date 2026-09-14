@@ -1,0 +1,84 @@
+# ============================================================================
+# Server 运行时镜像配方（runtime-only，单一来源）
+# ============================================================================
+# 供"二进制注入"型构建复用（避免部署脚本内联 patch 主 Dockerfile 导致漂移）：
+#   - scripts/deploy/ship-server-binary.sh   远端部署（BASE 用默认公网基镜像）
+#
+# 运行时阶段的权威结构来源是 crates/server/Dockerfile 的 Stage 2；本文件与其保持
+# 同步，仅二进制 COPY 来源从 --from=builder 改为 build context 中的现成二进制。
+# 修改 Stage 2 时必须同步本文件。
+#
+# 用法（build context 必须是仓库根）：
+#   docker build -f crates/server/Dockerfile.runtime \
+#     --build-arg SERVER_BIN=.bin/server-bin \
+#     -t <tag> .
+# ============================================================================
+
+ARG BASE=debian:trixie-slim
+FROM ${BASE}
+
+# 配置 Debian 镜像源（阿里云）
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources || \
+    sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list
+
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    libssl3 \
+    libpq5 \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建非root用户
+RUN groupadd -g 1000 cyberjianghu && \
+    useradd -u 1000 -g cyberjianghu -m -s /bin/bash cyberjianghu
+
+# 设置工作目录
+WORKDIR /app
+
+# 注入现成二进制（由调用方通过 SERVER_BIN 指定 context 内路径）
+ARG SERVER_BIN=.bin/server-bin
+COPY ${SERVER_BIN} /app/server
+RUN chmod +x /app/server
+
+# 复制默认配置文件到备用位置（数据驱动架构 - 支持降级）
+# 运行时：
+#   1. 如果 /app/config 通过 volume 挂载了外部配置 → 使用外部配置
+#   2. 如果 /app/config 为空 → 从 /app/default_config 自动填充
+COPY crates/server/config /app/default_config
+
+# 复制静态文件（Dashboard 管理面板）
+COPY crates/server/static /app/static
+
+# 复制数据库迁移文件
+COPY crates/server/migrations/*.sql /app/migrations/
+
+# 复制 entrypoint 脚本并设置权限
+COPY crates/server/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# 创建日志目录并设置权限
+RUN mkdir -p /app/logs && \
+    chown -R cyberjianghu:cyberjianghu /app
+
+# 暴露端口
+EXPOSE 23333
+
+# 设置环境变量
+ENV RUST_LOG=info \
+    CYBER_JIANGHU_CONFIG_DIR=/app/config \
+    CYBER_JIANGHU_STATIC_DIR=/app/static \
+    CYBER_JIANGHU_LOGS_DIR=/app/logs \
+    CYBER_JIANGHU_DATA_DIR=/app/data
+
+# 容器入口点（以 root 运行来修复权限，然后切换用户执行）
+# 注意：容器以 root 启动，entrypoint 会检查权限并切换到 cyberjianghu 用户运行服务
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+
+# 健康检查（会通过 entrypoint 以正确的用户运行）
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=40s \
+    CMD curl -f http://localhost:23333/health || exit 1
+
+# 启动服务
+CMD ["./server"]

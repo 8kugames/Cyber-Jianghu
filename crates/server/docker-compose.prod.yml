@@ -55,6 +55,9 @@ services:
   # Rust 服务端
   # ============================================================================
   server:
+    # 运行 tag：ship-server-binary.sh 用 Dockerfile.runtime 注入二进制并打同名
+    # tag（compose build 源码全量构建也打同一 tag，后建者覆盖）
+    image: cyber-jianghu-server:binary-runtime
     build:
       context: ../..
       dockerfile: ./crates/server/Dockerfile
