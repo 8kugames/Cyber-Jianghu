@@ -5,8 +5,8 @@
 # 只读观测，不改变任何 server 状态（验收纪律：只观测不干预）。
 #
 # 用法：
-#   ADMIN_READ_TOKEN=xxx ./scripts/acceptance_snapshot.sh            # 每小时一次，前台运行
-#   INTERVAL_SECS=600 ADMIN_READ_TOKEN=xxx ./scripts/acceptance_snapshot.sh
+#   ADMIN_READ_TOKEN=xxx ./scripts/qa/acceptance_snapshot.sh            # 每小时一次，前台运行
+#   INTERVAL_SECS=600 ADMIN_READ_TOKEN=xxx ./scripts/qa/acceptance_snapshot.sh
 #
 # 环境变量：
 #   SERVER_URL        默认 http://localhost:23333

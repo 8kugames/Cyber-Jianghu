@@ -22,7 +22,7 @@ DPO（直接偏好优化）训练数据导出脚本
    "metadata": {"agent_id":"...","tick_id":42,...}}
 
 用法：
-  DATABASE_URL=postgres://... python scripts/build_dpo_data.py <data_dir> -o dpo.jsonl
+  DATABASE_URL=postgres://... python scripts/data/build_dpo_data.py <data_dir> -o dpo.jsonl
 """
 
 from __future__ import annotations
@@ -33,10 +33,9 @@ import os
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 
-def load_traces_by_tick(data_dir: Path) -> Dict[Tuple[str, int], List[dict]]:
+def load_traces_by_tick(data_dir: Path) -> dict[tuple[str, int], list[dict]]:
     """加载所有 Renhun trace，按 (agent_id, tick_id) 分组，每组按 attempt 排序。
 
     trace 现在记录真实的外层 soul_cycle attempt（修复后），
@@ -47,7 +46,7 @@ def load_traces_by_tick(data_dir: Path) -> Dict[Tuple[str, int], List[dict]]:
         print(f"[警告] trace 目录不存在: {traces_dir}", file=sys.stderr)
         return {}
 
-    grouped: Dict[Tuple[str, int], List[dict]] = defaultdict(list)
+    grouped: dict[tuple[str, int], list[dict]] = defaultdict(list)
     for jsonl_path in sorted(traces_dir.rglob("*.jsonl")):
         with open(jsonl_path, encoding="utf-8") as f:
             for line in f:
@@ -63,16 +62,23 @@ def load_traces_by_tick(data_dir: Path) -> Dict[Tuple[str, int], List[dict]]:
                     tick_id = entry.get("tick_id", 0)
                     grouped[(agent_id, tick_id)].append(entry)
                 except json.JSONDecodeError as e:
-                    print(f"[警告] 解析 trace 行失败 {jsonl_path}: {e}", file=sys.stderr)
+                    print(
+                        f"[警告] 解析 trace 行失败 {jsonl_path}: {e}",
+                        file=sys.stderr,
+                    )
 
     # 每组按 attempt 排序（修复后 attempt 字段可靠）
     for key in grouped:
-        grouped[key].sort(key=lambda t: (t.get("attempt", 0), t.get("wall_clock", "")))
+        grouped[key].sort(
+            key=lambda t: (t.get("attempt", 0), t.get("wall_clock", ""))
+        )
 
     return grouped
 
 
-def load_tianhun_results(database_url: str) -> Dict[Tuple[str, int], List[Tuple[int, str]]]:
+def load_tianhun_results(
+    database_url: str,
+) -> dict[tuple[str, int], list[tuple[int, str]]]:
     """从 DB 查询每个 (agent_id, tick_id) 的所有 attempt 审查结果。
 
     soul_cycle_metadata 按 (agent_id, tick_id, pipe_seq) keyed，
@@ -83,7 +89,9 @@ def load_tianhun_results(database_url: str) -> Dict[Tuple[str, int], List[Tuple[
     try:
         import psycopg2
     except ImportError:
-        print("[错误] 需要 psycopg2：pip install psycopg2-binary", file=sys.stderr)
+        print(
+            "[错误] 需要 psycopg2：pip install psycopg2-binary", file=sys.stderr
+        )
         sys.exit(1)
 
     conn = psycopg2.connect(database_url)
@@ -98,7 +106,7 @@ def load_tianhun_results(database_url: str) -> Dict[Tuple[str, int], List[Tuple[
         """
     )
 
-    results: Dict[Tuple[str, int], List[Tuple[int, str]]] = defaultdict(list)
+    results: dict[tuple[str, int], list[tuple[int, str]]] = defaultdict(list)
     for agent_id, tick_id, metadata in cursor:
         if metadata is None:
             continue
@@ -112,7 +120,10 @@ def load_tianhun_results(database_url: str) -> Dict[Tuple[str, int], List[Tuple[
                 result = tianhun.get("result", "unknown")
                 results[(agent_id, tick_id)].append((attempt, result))
         except (json.JSONDecodeError, KeyError, TypeError) as e:
-            print(f"[警告] 解析 metadata 失败 agent={agent_id} tick={tick_id}: {e}", file=sys.stderr)
+            print(
+                f"[警告] 解析 metadata 失败 agent={agent_id} tick={tick_id}: {e}",
+                file=sys.stderr,
+            )
 
     conn.close()
 
@@ -124,9 +135,9 @@ def load_tianhun_results(database_url: str) -> Dict[Tuple[str, int], List[Tuple[
 
 
 def build_dpo_pairs(
-    traces: Dict[Tuple[str, int], List[dict]],
-    tianhun_map: Dict[Tuple[str, int], List[Tuple[int, str]]],
-) -> List[dict]:
+    traces: dict[tuple[str, int], list[dict]],
+    tianhun_map: dict[tuple[str, int], list[tuple[int, str]]],
+) -> list[dict]:
     """构建 DPO (chosen, rejected) 偏好对。
 
     配对规则：
@@ -138,13 +149,13 @@ def build_dpo_pairs(
 
     注意：trace 的 attempt 现在是真实外层 attempt（修复后可靠）。
     """
-    dpo_samples: List[dict] = []
-    stats: Dict[str, int] = defaultdict(int)
+    dpo_samples: list[dict] = []
+    stats: dict[str, int] = defaultdict(int)
 
     for (agent_id, tick_id), tick_traces in traces.items():
         # 按 attempt 分组 trace（同 attempt 可能有多条——内层重试/self-correct）
         # 取每个 attempt 的最后一条 trace（最终输出）
-        attempt_traces: Dict[int, dict] = {}
+        attempt_traces: dict[int, dict] = {}
         for trace in tick_traces:
             attempt = trace.get("attempt", 0)
             attempt_traces[attempt] = trace  # 后出现的覆盖（取最后一条）
@@ -153,7 +164,7 @@ def build_dpo_pairs(
         tianhun_seq = tianhun_map.get((agent_id, tick_id), [])
 
         # 建 attempt → result 映射
-        attempt_results: Dict[int, str] = {att: res for att, res in tianhun_seq}
+        attempt_results: dict[int, str] = {att: res for att, res in tianhun_seq}
 
         # 找连续的 rejected → approved 对
         sorted_attempts = sorted(attempt_traces.keys())
@@ -179,15 +190,19 @@ def build_dpo_pairs(
                 # prompt：用 chosen（纠正后）的 user_prompt，因含驳回反馈
                 user_prompt = chosen_trace.get("user_prompt", "")
                 persona_name = chosen_trace.get("persona_name", "")
-                persona_description = chosen_trace.get("persona_description", "")
+                persona_description = chosen_trace.get(
+                    "persona_description", ""
+                )
 
                 # DPO prompt 是 messages 数组（含 system persona + user），与 SFT 对齐
-                prompt_messages: List[dict] = []
+                prompt_messages: list[dict] = []
                 if persona_name:
                     system_content = f"你是 {persona_name}。"
                     if persona_description:
                         system_content += f"\n{persona_description}"
-                    prompt_messages.append({"role": "system", "content": system_content})
+                    prompt_messages.append(
+                        {"role": "system", "content": system_content}
+                    )
                 prompt_messages.append({"role": "user", "content": user_prompt})
 
                 sample = {
@@ -215,7 +230,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="DPO 训练数据导出（天魂 reject→approve 偏好对）"
     )
-    parser.add_argument("data_dir", type=str, help="server 数据目录（含 traces/）")
+    parser.add_argument(
+        "data_dir", type=str, help="server 数据目录（含 traces/）"
+    )
     parser.add_argument("-o", "--output", type=str, default="dpo_dataset.jsonl")
     args = parser.parse_args()
 
@@ -232,7 +249,9 @@ def main() -> None:
     traces = load_traces_by_tick(data_dir)
     total_ticks = len(traces)
     total_traces = sum(len(v) for v in traces.values())
-    print(f"加载人魂 trace: {total_traces} 条，覆盖 {total_ticks} 个 (agent,tick)")
+    print(
+        f"加载人魂 trace: {total_traces} 条，覆盖 {total_ticks} 个 (agent,tick)"
+    )
     if not traces:
         print("无 trace 数据，导出结束。")
         return
@@ -251,8 +270,10 @@ def main() -> None:
     # 4. 输出
     output_path = Path(args.output)
     with open(output_path, "w", encoding="utf-8") as f:
-        for sample in dpo_samples:
-            f.write(json.dumps(sample, ensure_ascii=False) + "\n")
+        f.writelines(
+            json.dumps(sample, ensure_ascii=False) + "\n"
+            for sample in dpo_samples
+        )
 
     # 5. 统计
     print()
@@ -264,12 +285,14 @@ def main() -> None:
         print(f"  {key}: {count}")
 
     # agent 分布
-    agent_dist: Dict[str, int] = defaultdict(int)
+    agent_dist: dict[str, int] = defaultdict(int)
     for s in dpo_samples:
         agent_dist[s["metadata"]["agent_id"][:8]] += 1
     print()
     print("--- Agent 分布（top 10）---")
-    for aid, count in sorted(agent_dist.items(), key=lambda x: x[1], reverse=True)[:10]:
+    for aid, count in sorted(
+        agent_dist.items(), key=lambda x: x[1], reverse=True
+    )[:10]:
         print(f"  {aid}...: {count} 对")
 
     print()

@@ -18,8 +18,8 @@
   两图分别跑 PageRank（damping=0.85）
 
 用法：
-  python scripts/analyze_social_structure.py <data_dir>
-  python scripts/analyze_social_structure.py ~/.cyber-jianghu
+  python scripts/data/analyze_social_structure.py <data_dir>
+  python scripts/data/analyze_social_structure.py ~/.cyber-jianghu
 
 输出（stdout）：
   - 恩望 PageRank Top 10（"公认正派领袖"）

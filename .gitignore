@@ -143,3 +143,6 @@ crates/server/config/llm.yaml
 
 # 游戏美术资源不入库（大二进制，历史已清除）
 assets/
+
+# 本地临时目录（bundle 备份 / 历史净化规则，含敏感内容严禁入库）
+tmp/
