@@ -327,6 +327,15 @@ use super::builder::AgentBuilder;
 | Database migrations      | `crates/server/migrations/*.sql`                                                 |
 | Docker stack             | `docker-compose.yml`, `docker-compose.prod.yml`                                  |
 
+### Config Hot-Reload Coverage (升级 runbook 必读)
+
+配置变更的生效路径分两档，静默替换文件对第二档**不生效**：
+
+- **自动热重载（scheduler mtime 监视，下一 tick 生效并广播 ConfigUpdate）**：仅 `actions.yaml`、`skills/`、`narrative_config.yaml`、`game_rules.yaml`、`world_building_rules.yaml`、`prompt_templates.yaml`（见 `tick/scheduler.rs` watch 清单）。
+- **需手动全量重载**：其余全部配置——含 `attributes.yaml`、`emotion.yaml`、`items.yaml`、`locations.yaml`、`initial_inventory.yaml`、`time.yaml`、`recipes.yaml` 等。生效方式：`POST /api/admin/reload-config`（write token；全量重载 + 原子换缓存 + 刷新存量 Agent 的 StatusComponent 元数据，保留当前属性值只更新 decay/max 等元信息）或重启 server。
+
+升级部署时替换了第二档配置文件的，必须在 runbook 中包含 reload-config 或重启步骤，否则旧值静默继续运行（无错误无告警）。
+
 ### Environment Variables (auth)
 
 | Variable                    | Required | Purpose                                                                                                                                                                                                                                  |
