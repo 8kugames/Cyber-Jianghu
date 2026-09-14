@@ -44,8 +44,8 @@ data:
     effects:
       - attribute: "satiation"
         operation: "add"
-        value: 60
-    description: "热腾腾的馒头，吃了不饿。恢复60点饱食度。"
+        value: 20
+    description: "热腾腾的馒头，吃了不饿。恢复20点饱食度。"
     stack_size: 10
 
   - item_id: "水"
@@ -54,8 +54,8 @@ data:
     effects:
       - attribute: "hydration"
         operation: "add"
-        value: 60
-    description: "清凉的井水，解渴必备。恢复60点饱饮度。"
+        value: 20
+    description: "清凉的井水，解渴必备。恢复20点饱饮度。"
     stack_size: 10
 
   - item_id: "李广杏"

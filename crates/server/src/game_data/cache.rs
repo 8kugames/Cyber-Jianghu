@@ -274,7 +274,10 @@ mod tests {
                 version: "2.0.0".to_string(),
                 description: "".to_string(),
                 meta: Default::default(),
-                data: InitialInventoryData { items: vec![] },
+                data: InitialInventoryData {
+                    items: vec![],
+                    rebirth_items: vec![],
+                },
             },
             inventory: UnifiedInventoryConfig {
                 version: "2.0.0".to_string(),

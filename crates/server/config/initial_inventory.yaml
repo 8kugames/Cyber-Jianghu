@@ -46,3 +46,19 @@ data:
         name: "银两"
         quantity: 10
         description: "通用货币，用于交易"
+
+  # 重生发放清单（死亡自动重生时发放；缺省回退 items）
+  # 设计意图：死亡有真实代价——转世仅得最低生存物资，不带银两，
+  # 防止"自杀换满补给"成为最优策略
+  rebirth_items:
+    food:
+      - item_id: "馒头"
+        name: "馒头"
+        quantity: 2
+        description: "普通的馒头，可以恢复饱食度"
+
+    drink:
+      - item_id: "水"
+        name: "水"
+        quantity: 2
+        description: "干净的饮用水，可以恢复饱饮度"

@@ -37,9 +37,13 @@ pub struct InitialInventoryItem {
 /// 初始物品数据包装结构
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct InitialInventoryData {
-    /// 初始物品列表
+    /// 初始物品列表（新角色注册发放）
     #[serde(deserialize_with = "deserialize_grouped_items")]
     pub items: Vec<InitialInventoryItem>,
+
+    /// 重生物品列表（死亡自动重生时发放，缺省回退 items——空列表无法表达"零发放"）
+    #[serde(default, deserialize_with = "deserialize_grouped_items")]
+    pub rebirth_items: Vec<InitialInventoryItem>,
 }
 
 fn deserialize_grouped_items<'de, D>(deserializer: D) -> Result<Vec<InitialInventoryItem>, D::Error>

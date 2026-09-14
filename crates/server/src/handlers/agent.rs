@@ -470,7 +470,8 @@ pub async fn agent_auto_rebirth(
         } else {
             rebirth_config.spawn_location.clone()
         };
-        let initial_items = game_data::InitialInventoryRegistry::items();
+        // 重生发放走独立清单（rebirth_items）：死亡不应是"满补给重置"的廉价策略
+        let initial_items = game_data::InitialInventoryRegistry::rebirth_items();
         let initial_items_data: Vec<(String, String, i32, String)> = initial_items
             .iter()
             .map(|item| {

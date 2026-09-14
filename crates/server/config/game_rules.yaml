@@ -42,7 +42,10 @@ data:
       # 自动重生配置
       rebirth:
         # 死亡后延迟 N 个 tick 自动重生 (0 = 不自动重生)
-        delay_ticks: 5
+        # 12 tick = 1 个完整游戏日（time.yaml ticks_per_hour*hours_per_day），
+        # 死亡代价至少一个昼夜，配合 rebirth_items 最低生存物资，
+        # 避免"自杀换满补给"成为廉价策略
+        delay_ticks: 12
         # 重置属性到初始值
         reset_attributes: true
         # 重生地点 (空字符串 = 使用 spawn_location)
