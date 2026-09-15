@@ -115,6 +115,7 @@ temp/
 !.claude
 !.test-agents
 !.github
+!.sqlx
 
 agent.yaml
 scripts/test/

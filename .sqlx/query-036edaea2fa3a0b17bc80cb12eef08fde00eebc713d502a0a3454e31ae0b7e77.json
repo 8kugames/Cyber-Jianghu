@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT GREATEST(\n            COALESCE((SELECT MAX(tick_id) FROM tick_logs), 0),\n            COALESCE((SELECT MAX(tick_id) FROM agent_states), 0)\n        ) AS \"v!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "v!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "036edaea2fa3a0b17bc80cb12eef08fde00eebc713d502a0a3454e31ae0b7e77"
+}

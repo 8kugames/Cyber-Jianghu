@@ -86,11 +86,11 @@ pub async fn fetch_window(
 
 /// 当前世界 tick_id（用于默认窗口回溯）。
 pub async fn current_max_tick(db_pool: &crate::db::DbPool) -> Result<i64> {
-    let row = sqlx::query("SELECT COALESCE(MAX(tick_id), 0) as max_tick FROM agent_action_logs")
-        .fetch_one(db_pool)
-        .await
-        .context("查询 max tick_id 失败")?;
-    let max_tick: i64 = row.get("max_tick");
+    let max_tick: i64 =
+        sqlx::query_scalar!("SELECT COALESCE(MAX(tick_id), 0) AS \"v!\" FROM agent_action_logs",)
+            .fetch_one(db_pool)
+            .await
+            .context("查询 max tick_id 失败")?;
     Ok(max_tick)
 }
 
@@ -116,27 +116,27 @@ pub async fn fetch_health(
     // tick 完成率（tick_logs.status 聚合）+ 连续运行跨度
     // 注意：EXTRACT(EPOCH FROM ...) 返回 PG numeric 类型，sqlx 无法直接解码为 f64，
     // 必须显式 ::float8 cast 成 double precision。
-    let tick_rows = sqlx::query(
+    let tick_rows = sqlx::query!(
         r#"
         SELECT status,
-               COUNT(*) as cnt,
+               COUNT(*) as "cnt!",
                COALESCE(EXTRACT(EPOCH FROM (COALESCE(MAX(completed_at), MAX(started_at)) - MIN(started_at)))::float8, 0.0) as span
         FROM tick_logs
         WHERE tick_id BETWEEN $1 AND $2
         GROUP BY status
         "#,
+        tick_start,
+        tick_end,
     )
-    .bind(tick_start)
-    .bind(tick_end)
     .fetch_all(db_pool)
     .await
     .context("查询 tick_logs 健康度失败")?;
 
     for row in &tick_rows {
-        let status: String = row.get("status");
-        let cnt: i64 = row.get("cnt");
+        let status = &row.status;
+        let cnt: i64 = row.cnt;
         // span 可能为 NULL（空表/无 completed_at），用 Option 防 panic
-        let span: f64 = row.get::<Option<f64>, _>("span").unwrap_or(0.0);
+        let span: f64 = row.span.unwrap_or(0.0);
         h.ticks_total += cnt;
         match status.as_str() {
             "completed" => h.ticks_completed = cnt,
@@ -155,62 +155,53 @@ pub async fn fetch_health(
     };
 
     // 窗口末点存活数（取窗口内最大 tick 的 agent_states 快照）
-    let alive_rows = sqlx::query(
+    let alive_cnt: i64 = sqlx::query_scalar!(
         r#"
-        SELECT COUNT(*) as alive_cnt
+        SELECT COUNT(*) AS "v!"
         FROM agent_states s
         WHERE s.is_alive = true
           AND s.tick_id = (SELECT MAX(tick_id) FROM agent_states WHERE tick_id BETWEEN $1 AND $2)
         "#,
+        tick_start,
+        tick_end,
     )
-    .bind(tick_start)
-    .bind(tick_end)
-    .fetch_all(db_pool)
+    .fetch_one(db_pool)
     .await
     .context("查询存活数失败")?;
-    h.agents_alive = alive_rows
-        .first()
-        .map(|r| r.get::<i64, _>("alive_cnt") as i32)
-        .unwrap_or(0);
+    h.agents_alive = alive_cnt as i32;
     h.survivors_pass = h.agents_alive >= min_survivors;
 
     // 应参与 agent 数（active+alive，用于超时率近似的分母）
-    let expected_rows = sqlx::query(
+    let expected_cnt: i64 = sqlx::query_scalar!(
         r#"
-        SELECT COUNT(DISTINCT s.agent_id) as expected_cnt
+        SELECT COUNT(DISTINCT s.agent_id) AS "v!"
         FROM agent_states s
         INNER JOIN agents a ON s.agent_id = a.agent_id
         WHERE s.is_alive = true AND a.status = 'active'
           AND s.tick_id = (SELECT MAX(tick_id) FROM agent_states WHERE tick_id BETWEEN $1 AND $2)
         "#,
+        tick_start,
+        tick_end,
     )
-    .bind(tick_start)
-    .bind(tick_end)
-    .fetch_all(db_pool)
+    .fetch_one(db_pool)
     .await
     .context("查询应参与 agent 数失败")?;
-    h.agents_expected = expected_rows
-        .first()
-        .map(|r| r.get::<i64, _>("expected_cnt") as i32)
-        .unwrap_or(0);
+    h.agents_expected = expected_cnt as i32;
 
     // 实际有动作提交的 agent 数（超时率近似的分子）
-    let submitted_rows = sqlx::query(
+    let submitted_cnt: i64 = sqlx::query_scalar!(
         r#"
-        SELECT COUNT(DISTINCT agent_id) as submitted_cnt
+        SELECT COUNT(DISTINCT agent_id) AS "v!"
         FROM agent_action_logs
         WHERE tick_id BETWEEN $1 AND $2
         "#,
+        tick_start,
+        tick_end,
     )
-    .bind(tick_start)
-    .bind(tick_end)
-    .fetch_all(db_pool)
+    .fetch_one(db_pool)
     .await
     .context("查询已提交 agent 数失败")?;
-    h.agents_submitted = submitted_rows
-        .first()
-        .map(|r| r.get::<i64, _>("submitted_cnt") as i32)
-        .unwrap_or(0);
+    h.agents_submitted = submitted_cnt as i32;
     // 超时率近似 = 1 − 已提交/应参与（标注为近似，非 MVP 字面30秒墙钟）
     h.timeout_rate_approx = if h.agents_expected > 0 {
         1.0 - (h.agents_submitted as f64 / h.agents_expected as f64)
@@ -221,7 +212,7 @@ pub async fn fetch_health(
     // 每存活 agent 补给次数
     if !supply_actions.is_empty() {
         // 存活 agent id 集合
-        let alive_ids: Vec<Uuid> = sqlx::query(
+        let alive_ids: Vec<Uuid> = sqlx::query_scalar!(
             r#"
             SELECT DISTINCT s.agent_id
             FROM agent_states s
@@ -229,15 +220,12 @@ pub async fn fetch_health(
             WHERE s.is_alive = true AND a.status = 'active'
               AND s.tick_id = (SELECT MAX(tick_id) FROM agent_states WHERE tick_id BETWEEN $1 AND $2)
             "#,
+            tick_start,
+            tick_end,
         )
-        .bind(tick_start)
-        .bind(tick_end)
         .fetch_all(db_pool)
         .await
-        .context("查询存活 agent id 失败")?
-        .into_iter()
-        .map(|r| r.get::<Uuid, _>("agent_id"))
-        .collect();
+        .context("查询存活 agent id 失败")?;
 
         // 补给次数
         let placeholders: String = (0..supply_actions.len())
@@ -278,21 +266,21 @@ pub async fn fetch_health(
     }
 
     // MVP 行为多样性：窗口内 per-agent 决策动作分布熵（含被拒决策，
-    let sat_rows = sqlx::query(
+    let sat_rows = sqlx::query!(
             r#"
-            SELECT agent_id, COALESCE((attributes->>'satiation')::float8, 999.0) as satiation
+            SELECT agent_id, COALESCE((attributes->>'satiation')::float8, 999.0) as "satiation!"
             FROM agent_states s
             WHERE s.tick_id = (SELECT MAX(tick_id) FROM agent_states WHERE tick_id BETWEEN $1 AND $2)
             "#,
+            tick_start,
+            tick_end,
         )
-        .bind(tick_start)
-        .bind(tick_end)
         .fetch_all(db_pool)
         .await
         .context("查询饱食度失败")?;
     let satiation: HashMap<Uuid, f64> = sat_rows
         .into_iter()
-        .map(|r| (r.get::<Uuid, _>("agent_id"), r.get::<f64, _>("satiation")))
+        .map(|r| (r.agent_id, r.satiation))
         .collect();
     h.per_agent_satiation = satiation.clone();
 
@@ -302,44 +290,43 @@ pub async fn fetch_health(
     // 判读：top_share ≥ max_top_share 且生存紧迫（饱食度低）→ 卡死循环；
     //       饱食安稳下的高占比属合理惰性，豁免。
     {
-        let dist_rows = sqlx::query(
+        let dist_rows = sqlx::query!(
             r#"
-            SELECT agent_id, action_type, COUNT(*) as cnt
+            SELECT agent_id, action_type, COUNT(*) as "cnt!"
             FROM agent_action_logs
             WHERE tick_id BETWEEN $1 AND $2
             GROUP BY agent_id, action_type
             "#,
+            tick_start,
+            tick_end,
         )
-        .bind(tick_start)
-        .bind(tick_end)
         .fetch_all(db_pool)
         .await
         .context("查询行为分布失败")?;
 
         let mut dist: HashMap<Uuid, Vec<(String, i64)>> = HashMap::new();
         for r in &dist_rows {
-            let aid: Uuid = r.get("agent_id");
-            let at: String = r.get("action_type");
-            let cnt: i64 = r.get("cnt");
-            dist.entry(aid).or_default().push((at, cnt));
+            dist.entry(r.agent_id)
+                .or_default()
+                .push((r.action_type.clone(), r.cnt));
         }
 
         // 窗口末点快照的饱食度（attributes->>'satiation'，无快照视为安稳）
-        let sat_rows = sqlx::query(
+        let sat_rows = sqlx::query!(
             r#"
-            SELECT agent_id, COALESCE((attributes->>'satiation')::float8, 999.0) as satiation
+            SELECT agent_id, COALESCE((attributes->>'satiation')::float8, 999.0) as "satiation!"
             FROM agent_states s
             WHERE s.tick_id = (SELECT MAX(tick_id) FROM agent_states WHERE tick_id BETWEEN $1 AND $2)
             "#,
+            tick_start,
+            tick_end,
         )
-        .bind(tick_start)
-        .bind(tick_end)
         .fetch_all(db_pool)
         .await
         .context("查询饱食度失败")?;
         let satiation: HashMap<Uuid, f64> = sat_rows
             .into_iter()
-            .map(|r| (r.get::<Uuid, _>("agent_id"), r.get::<f64, _>("satiation")))
+            .map(|r| (r.agent_id, r.satiation))
             .collect();
         h.per_agent_satiation = satiation.clone();
 

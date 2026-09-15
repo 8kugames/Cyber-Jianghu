@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH agent_durations AS (\n            SELECT\n                a.retired_at,\n                EXTRACT(EPOCH FROM (a.retired_at - d.deployed_at + a.birth_tick * $3::float8 * interval '1 second'))::float8 as duration\n            FROM agents a\n            CROSS JOIN server_deployment d\n            WHERE (a.status = 'dead' OR a.status = 'retired')\n            AND a.retired_at IS NOT NULL\n            AND a.birth_tick IS NOT NULL\n            AND a.retired_at BETWEEN $1 AND $2\n        )\n        SELECT\n            COUNT(*) as \"count!\",\n            AVG(duration) as avg_duration,\n            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration) as p50_duration,\n            PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration) as p95_duration\n        FROM agent_durations\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "avg_duration",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 2,
+        "name": "p50_duration",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 3,
+        "name": "p95_duration",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "97fa8f8bedeac6aca36cec3d70aae35450c2f64f9c9762ceff8b55edbaf5e8b7"
+}

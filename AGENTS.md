@@ -272,6 +272,16 @@ use super::builder::AgentBuilder;
 #[serde(skip_serializing_if = "Option::is_none")]  // optional fields
 ```
 
+### SQL / sqlx Conventions
+
+本节防的是一族"编译/单测不可见、只在真实 PostgreSQL 执行才暴露"的缺陷（曾三次线上事故：validator SUM 解码、telemetry EXTRACT 解码、game_rules_config 幻表）：
+
+- **聚合返回类型按 PostgreSQL 类型提升规则解码**：`COUNT(*)`/`SUM(int4)` 返回 BIGINT，只能按 `i64` 解码；`SUM(int8)`/`AVG`/`EXTRACT(EPOCH)`/`PERCENTILE_CONT` 返回 numeric，进 Rust 前必须 `::float8`（f64）或 BigDecimal，否则 sqlx 运行期报 mismatched types。
+- **禁止在 sqlx 解码点吞错**：`.ok()`/`unwrap_or(0)`/`map_err(|_| ...)` 会把解码失败伪装成 None/0；映射自定义错误前必须 log 底层 `sqlx::Error`。
+- **运行时配置以内存 game_data registry 为准**：数据库没有 `game_rules_config` 之类的配置表，SQL 不得引用；表/列名以 `crates/server/migrations/` 为唯一事实（如 `server_deployment.deployed_at`）。
+- **新增/修改聚合或含计算列的 SQL，必须跑活库守卫测试并补对应执行路径**：见 `crates/server/tests/sqlx_live_schema_guard_test.rs` 文件头的运行命令（需 `DATABASE_URL`）。空表路径测不出解码缺陷，守卫测试必须写入夹具数据。
+- **静态 SQL 一律用 `sqlx::query!`/`query_as!`/`query_scalar!` 宏**（编译期对真实 schema 校验表/列/参数/返回类型，幻表幻列与解码错配在编译期归零）。可空性不被推断时用 `AS "name!"` 强制非空标注（语义上确非空才允许）。动态拼接 SQL（format! 构建）无法用宏，必须走活库守卫测试。**修改任何宏查询后必须重跑** `cargo sqlx prepare --workspace`（需 `DATABASE_URL` 指向迁移完毕的库，见守卫测试文件头）并提交 `.sqlx/` 缓存，否则 CI（`SQLX_OFFLINE=true`）会因缓存缺失而失败。
+
 ### Rust Best Practices
 
 - **Zero-cost abstractions**: Prefer compile-time abstractions over runtime checks

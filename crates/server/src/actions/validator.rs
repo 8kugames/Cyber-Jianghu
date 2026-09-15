@@ -159,7 +159,15 @@ async fn validate_item_ownership(
     let needed = parsed.get_field_i32("quantity").unwrap_or(1).max(1);
     let owned = get_inventory_item_quantity(db_pool, agent_state.agent_id, &internal_id)
         .await
-        .map_err(|_| storage_unavailable())?;
+        .map_err(|e| {
+            tracing::error!(
+                "背包持有量查询失败 agent={} item={}: {}",
+                agent_state.agent_id,
+                internal_id,
+                e
+            );
+            storage_unavailable()
+        })?;
     if owned < needed {
         let name = crate::display::display_item_name(&internal_id);
         return Err(GameError::Unknown(format!(
@@ -201,7 +209,15 @@ async fn validate_generic_requirements(
                     let item_quantity =
                         get_inventory_item_quantity(db_pool, agent_state.agent_id, item_id)
                             .await
-                            .map_err(|_| storage_unavailable())?;
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "背包持有量查询失败 agent={} item={}: {}",
+                                    agent_state.agent_id,
+                                    item_id,
+                                    e
+                                );
+                                storage_unavailable()
+                            })?;
                     if item_quantity < min_qty {
                         return Err(GameError::Unknown(format!(
                             "物品 {} 不足: 需要 {}, 当前 {}",
@@ -220,13 +236,17 @@ pub async fn get_inventory_item_quantity(
     agent_id: uuid::Uuid,
     item_id: &str,
 ) -> Result<i32, sqlx::Error> {
-    sqlx::query_scalar::<_, i32>(
-        "SELECT COALESCE(SUM(quantity), 0) FROM agent_inventory WHERE agent_id = $1 AND item_id = $2",
+    // query_scalar! 对真实 schema 编译期校验：SUM(int4) 返回 BIGINT 必须按 i64
+    // 接收（曾以 i32 解码被误判为「服务端存储异常」）；COALESCE 保证非空。
+    // CHECK(quantity > 0) 与单格堆叠上限下 i32 溢出实际不可达，饱和防御即可。
+    let total: i64 = sqlx::query_scalar!(
+        "SELECT COALESCE(SUM(quantity), 0) AS \"v!\" FROM agent_inventory WHERE agent_id = $1 AND item_id = $2",
+        agent_id,
+        item_id,
     )
-    .bind(agent_id)
-    .bind(item_id)
     .fetch_one(db_pool)
-    .await
+    .await?;
+    Ok(i32::try_from(total).unwrap_or(i32::MAX))
 }
 
 /// 持有量查询失败的统一错误（此前 unwrap_or(0) 把 DB 故障伪装成「持有 0」，

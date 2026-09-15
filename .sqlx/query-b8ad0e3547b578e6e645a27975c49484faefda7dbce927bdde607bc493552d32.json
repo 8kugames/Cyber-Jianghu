@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT result, COUNT(*) as \"cnt!\"\n        FROM agent_action_logs\n        WHERE created_at BETWEEN $1 AND $2\n        GROUP BY result\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "result",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "cnt!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "b8ad0e3547b578e6e645a27975c49484faefda7dbce927bdde607bc493552d32"
+}

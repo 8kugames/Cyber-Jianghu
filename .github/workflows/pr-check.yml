@@ -23,6 +23,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # sqlx::query! 宏离线校验（查询缓存 .sqlx/ 已入库；改 SQL 后本地跑 cargo sqlx prepare 更新）
+  SQLX_OFFLINE: "true"
 
 jobs:
   # 快速验证: 仅 Linux 构建 + 测试

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT agent_id, COALESCE((attributes->>'satiation')::float8, 999.0) as \"satiation!\"\n            FROM agent_states s\n            WHERE s.tick_id = (SELECT MAX(tick_id) FROM agent_states WHERE tick_id BETWEEN $1 AND $2)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "agent_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "satiation!",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "97b9ca466de661af24b9ea0475ae35dc1d9ace4e1d093959689593022456076a"
+}

@@ -12,7 +12,7 @@ mod validator;
 pub use executor::ActionExecutor;
 pub use schema_validator::{SchemaViolation, ViolationType, validate_action_data_schema};
 pub use types::{ActionExecutionResult, ItemEffect, StateChange};
-pub use validator::validate_action;
+pub use validator::{get_inventory_item_quantity, validate_action};
 
 use cyber_jianghu_protocol::GameError;
 use serde::de::DeserializeOwned;

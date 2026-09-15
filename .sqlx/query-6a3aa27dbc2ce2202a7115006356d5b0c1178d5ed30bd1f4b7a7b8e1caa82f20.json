@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(DISTINCT s.agent_id) as \"count!\"\n        FROM agent_states s\n        INNER JOIN (\n            SELECT agent_id, MAX(tick_id) as max_tick\n            FROM agent_states\n            GROUP BY agent_id\n        ) latest ON s.agent_id = latest.agent_id AND s.tick_id = latest.max_tick\n        LEFT JOIN agents a ON s.agent_id = a.agent_id\n        WHERE s.is_alive = true\n        AND (\n            a.last_tick_online IS NULL\n            OR a.last_tick_online < CURRENT_TIMESTAMP - INTERVAL '1 minute' * $1\n        )\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "6a3aa27dbc2ce2202a7115006356d5b0c1178d5ed30bd1f4b7a7b8e1caa82f20"
+}

@@ -431,7 +431,7 @@ pub async fn get_chronicle(
 
 /// 获取 chronicle 总数
 pub async fn count_chronicles(db_pool: &crate::db::DbPool) -> Result<i64> {
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chronicles")
+    let count: i64 = sqlx::query_scalar!("SELECT COUNT(*) AS \"v!\" FROM chronicles")
         .fetch_one(db_pool)
         .await
         .context("查询 chronicle 总数失败")?;

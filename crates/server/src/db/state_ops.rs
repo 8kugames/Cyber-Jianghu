@@ -100,12 +100,12 @@ pub async fn get_all_alive_agents_latest_states(pool: &PgPool) -> Result<Vec<Age
 ///
 /// 使用 tick_logs 与 agent_states 的最大值，保证重启后 Tick 不回退。
 pub async fn get_current_world_tick_id(pool: &PgPool) -> Result<i64> {
-    let tick_id: i64 = sqlx::query_scalar(
+    let tick_id: i64 = sqlx::query_scalar!(
         r#"
         SELECT GREATEST(
             COALESCE((SELECT MAX(tick_id) FROM tick_logs), 0),
             COALESCE((SELECT MAX(tick_id) FROM agent_states), 0)
-        )
+        ) AS "v!"
         "#,
     )
     .fetch_one(pool)
@@ -147,10 +147,11 @@ pub async fn get_or_init_deployment_time(pool: &PgPool) -> Result<DateTime<Utc>>
 ///
 /// 仅使用 agent_states 的最大值，适用于按状态快照查询。
 pub async fn get_latest_state_tick_id(pool: &PgPool) -> Result<i64> {
-    let tick_id: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(tick_id), 0) FROM agent_states")
-        .fetch_one(pool)
-        .await
-        .context("获取最新状态 tick ID 失败")?;
+    let tick_id: i64 =
+        sqlx::query_scalar!("SELECT COALESCE(MAX(tick_id), 0) AS \"v!\" FROM agent_states",)
+            .fetch_one(pool)
+            .await
+            .context("获取最新状态 tick ID 失败")?;
 
     Ok(tick_id)
 }
@@ -189,12 +190,13 @@ pub async fn get_latest_agent_state(pool: &PgPool, agent_id: uuid::Uuid) -> Resu
 ///
 /// 用于计算当前Tick的进度，实现平滑时间插值。
 pub async fn get_last_tick_time(pool: &PgPool) -> Result<DateTime<Utc>> {
-    let timestamp: DateTime<Utc> = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(created_at), NOW() AT TIME ZONE 'UTC') FROM tick_logs",
-    )
-    .fetch_one(pool)
-    .await
-    .context("获取最后tick时间戳失败")?;
+    // tick_logs 无 created_at 列（历史幻列，恒失败；因无调用方而未暴露）。
+    // 语义取"最近一次 tick 的开始时刻"；started_at NOT NULL，COALESCE 仅兑空表。
+    let timestamp: DateTime<Utc> =
+        sqlx::query_scalar!("SELECT COALESCE(MAX(started_at), NOW()) AS \"v!\" FROM tick_logs",)
+            .fetch_one(pool)
+            .await
+            .context("获取最后tick时间戳失败")?;
 
     Ok(timestamp)
 }

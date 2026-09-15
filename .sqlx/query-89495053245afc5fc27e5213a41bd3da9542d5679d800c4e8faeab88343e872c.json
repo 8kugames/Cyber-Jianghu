@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(DISTINCT agent_id) AS \"v!\"\n        FROM agent_action_logs\n        WHERE tick_id BETWEEN $1 AND $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "v!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "89495053245afc5fc27e5213a41bd3da9542d5679d800c4e8faeab88343e872c"
+}

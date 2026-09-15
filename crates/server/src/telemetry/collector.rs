@@ -16,7 +16,27 @@ pub async fn run_aggregation(
 ) -> Result<()> {
     match event_source {
         "agents" => {
-            collect_from_agents(db_pool, agg_name, group_by, metrics, period_minutes).await?
+            // tick 秒数来自内存 game_data registry（game_rules.yaml）；数据库中
+            // 不存在 game_rules_config 表，历史上按表查询导致每轮必失败
+            let real_seconds_per_tick = crate::game_data::registry_or_error()
+                .map(|r| {
+                    r.get()
+                        .game_rules
+                        .data
+                        .agent_state
+                        .tick
+                        .real_seconds_per_tick as f64
+                })
+                .map_err(|e| anyhow::anyhow!("game_data registry 不可用: {}", e))?;
+            collect_from_agents(
+                db_pool,
+                agg_name,
+                group_by,
+                metrics,
+                period_minutes,
+                real_seconds_per_tick,
+            )
+            .await?
         }
         "agent_action_logs" => {
             collect_from_action_logs(
@@ -40,61 +60,63 @@ pub async fn run_aggregation(
 }
 
 /// 从 agents 表采集（survival_time）
-async fn collect_from_agents(
+///
+/// `real_seconds_per_tick` 由调用方注入（run_aggregation 从 game_data registry 取；
+/// 参数化使活库守卫测试可直接驱动，见 tests/sqlx_live_schema_guard_test.rs）。
+pub async fn collect_from_agents(
     db_pool: &DbPool,
     agg_name: &str,
     _group_by: &[String],
     _metrics: &[String],
     period_minutes: u64,
+    real_seconds_per_tick: f64,
 ) -> Result<()> {
     // survival_time: 统计本轮期间死亡/归隐的 agent 存活时间
     // 基于 status='dead' OR status='retired' + retired_at 在本周期内
     let period_start = chrono::Utc::now() - chrono::Duration::minutes(period_minutes as i64);
     let period_end = chrono::Utc::now();
 
-    // CTE 将 duration 计算定义在一处，避免 AVG 和两个 PERCENTILE 中重复三遍
-    let rows = sqlx::query(
+    // CTE 将 duration 计算定义在一处，避免 AVG 和两个 PERCENTILE 中重复三遍。
+    // EXTRACT(EPOCH..) 返回 numeric，须 ::float8 才能被 sqlx 解码为 f64
+    // （同 emergence/loader.rs 既有规约）；server_deployment 列名为 deployed_at。
+    // query! 对真实 schema 编译期校验表/列/参数/返回类型（幻表幻列在此归零）。
+    let row = sqlx::query!(
         r#"
         WITH agent_durations AS (
             SELECT
                 a.retired_at,
-                EXTRACT(EPOCH FROM (a.retired_at - d.deployment_time + a.birth_tick * t.real_seconds_per_tick * interval '1 second')) as duration
+                EXTRACT(EPOCH FROM (a.retired_at - d.deployed_at + a.birth_tick * $3::float8 * interval '1 second'))::float8 as duration
             FROM agents a
             CROSS JOIN server_deployment d
-            CROSS JOIN (SELECT real_seconds_per_tick FROM game_rules_config LIMIT 1) t
             WHERE (a.status = 'dead' OR a.status = 'retired')
             AND a.retired_at IS NOT NULL
             AND a.birth_tick IS NOT NULL
             AND a.retired_at BETWEEN $1 AND $2
         )
         SELECT
-            COUNT(*) as count,
+            COUNT(*) as "count!",
             AVG(duration) as avg_duration,
             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration) as p50_duration,
             PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration) as p95_duration
         FROM agent_durations
         "#,
+        period_start,
+        period_end,
+        real_seconds_per_tick,
     )
-    .bind(period_start)
-    .bind(period_end)
-    .fetch_all(db_pool)
+    .fetch_one(db_pool)
     .await
     .context("查询 survival_time 失败")?;
 
-    if rows.is_empty() {
-        return Ok(());
-    }
-
-    let row = &rows[0];
-    let count: i64 = row.try_get("count").unwrap_or(0);
+    let count: i64 = row.count;
 
     if count == 0 {
         return Ok(());
     }
 
-    let avg_duration: Option<f64> = row.try_get("avg_duration").ok();
-    let p50_duration: Option<f64> = row.try_get("p50_duration").ok();
-    let p95_duration: Option<f64> = row.try_get("p95_duration").ok();
+    let avg_duration: Option<f64> = row.avg_duration;
+    let p50_duration: Option<f64> = row.p50_duration;
+    let p95_duration: Option<f64> = row.p95_duration;
 
     let mut metrics_map = serde_json::Map::new();
     metrics_map.insert("count".to_string(), serde_json::json!(count));
@@ -178,33 +200,33 @@ async fn collect_decision_distribution(
     group_by: &[String],
 ) -> Result<()> {
     // 按 action_type 分组统计
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         r#"
         SELECT
             action_type,
-            COUNT(*) as cnt,
-            COUNT(*) FILTER (WHERE result = 'success') as success_cnt
+            COUNT(*) as "cnt!",
+            COUNT(*) FILTER (WHERE result = 'success') as "success_cnt!"
         FROM agent_action_logs
         WHERE created_at BETWEEN $1 AND $2
         GROUP BY action_type
-        ORDER BY cnt DESC
+        ORDER BY COUNT(*) DESC
         "#,
+        period_start,
+        period_end,
     )
-    .bind(period_start)
-    .bind(period_end)
     .fetch_all(db_pool)
     .await
     .context("查询 decision_distribution 失败")?;
 
     for row in &rows {
-        let action_type: String = row.get("action_type");
-        let count: i64 = row.get("cnt");
+        let action_type: &str = &row.action_type;
+        let count: i64 = row.cnt;
 
         let mut metrics_map = serde_json::Map::new();
         metrics_map.insert("count".to_string(), serde_json::json!(count));
 
         if has_success_rate {
-            let success_cnt: i64 = row.get("success_cnt");
+            let success_cnt: i64 = row.success_cnt;
             let success_rate = if count > 0 {
                 success_cnt as f64 / count as f64
             } else {
@@ -220,7 +242,7 @@ async fn collect_decision_distribution(
             period_start,
             period_end,
             group_key,
-            Some(&action_type),
+            Some(action_type),
             &serde_json::Value::Object(metrics_map),
         )
         .await?;
@@ -237,23 +259,25 @@ async fn collect_action_outcomes(
     period_end: chrono::DateTime<chrono::Utc>,
     group_by: &[String],
 ) -> Result<()> {
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         r#"
-        SELECT result, COUNT(*) as cnt
+        SELECT result, COUNT(*) as "cnt!"
         FROM agent_action_logs
         WHERE created_at BETWEEN $1 AND $2
         GROUP BY result
         "#,
+        period_start,
+        period_end,
     )
-    .bind(period_start)
-    .bind(period_end)
     .fetch_all(db_pool)
     .await
     .context("查询 action_outcomes 失败")?;
 
     for row in &rows {
-        let result: String = row.get("result");
-        let count: i64 = row.get("cnt");
+        // result 列可空（无 NOT NULL 约束）：NULL 组映射为 "unknown"。
+        // 旧运行期实现在出现 NULL 组时解码直接失败，宏把该缺陷提前到编译期暴露。
+        let result = row.result.as_deref().unwrap_or("unknown");
+        let count: i64 = row.cnt;
 
         let mut metrics_map = serde_json::Map::new();
         metrics_map.insert("count".to_string(), serde_json::json!(count));
@@ -265,7 +289,7 @@ async fn collect_action_outcomes(
             period_start,
             period_end,
             group_key,
-            Some(&result),
+            Some(result),
             &serde_json::Value::Object(metrics_map),
         )
         .await?;
@@ -294,20 +318,20 @@ async fn collect_interaction_activity(
 
     if partner_conditions.is_empty() {
         // 无 partner 字段配置时，统计所有动作数
-        let action_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM agent_action_logs WHERE created_at BETWEEN $1 AND $2",
+        let action_count: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"v!\" FROM agent_action_logs WHERE created_at BETWEEN $1 AND $2",
+            period_start,
+            period_end,
         )
-        .bind(period_start)
-        .bind(period_end)
         .fetch_one(db_pool)
         .await
         .context("查询 interaction_activity action_count 失败")?;
 
-        let unique_agents: i64 = sqlx::query_scalar(
-            "SELECT COUNT(DISTINCT agent_id) FROM agent_action_logs WHERE created_at BETWEEN $1 AND $2",
+        let unique_agents: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(DISTINCT agent_id) AS \"v!\" FROM agent_action_logs WHERE created_at BETWEEN $1 AND $2",
+            period_start,
+            period_end,
         )
-        .bind(period_start)
-        .bind(period_end)
         .fetch_one(db_pool)
         .await
         .context("查询 interaction_activity unique_agents 失败")?;

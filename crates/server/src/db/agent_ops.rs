@@ -8,7 +8,7 @@
 // - 更新Agent状态（在线时间、位置）
 
 use anyhow::{Context, Result};
-use sqlx::{PgPool, Postgres, Row};
+use sqlx::{PgPool, Postgres};
 use std::collections::HashMap;
 use tracing::{debug, error, info};
 use uuid::Uuid;
@@ -461,9 +461,9 @@ pub async fn get_intent_timeout_stats(pool: &PgPool) -> Result<IntentTimeoutStat
     let timeout_window_secs = 30;
 
     // 查询总存活Agent数量
-    let total_alive_agents: i64 = sqlx::query(
+    let total_alive_agents: i64 = sqlx::query_scalar!(
         r#"
-        SELECT COUNT(DISTINCT s.agent_id) as count
+        SELECT COUNT(DISTINCT s.agent_id) as "count!"
         FROM agent_states s
         INNER JOIN (
             SELECT agent_id, MAX(tick_id) as max_tick
@@ -475,13 +475,12 @@ pub async fn get_intent_timeout_stats(pool: &PgPool) -> Result<IntentTimeoutStat
     )
     .fetch_one(pool)
     .await
-    .context("获取存活 Agent 总数失败")?
-    .get("count");
+    .context("获取存活 Agent 总数失败")?;
 
     // 查询超时Agent数量（30秒内未上报意图）
-    let timeout_agents: i64 = sqlx::query(
+    let timeout_agents: i64 = sqlx::query_scalar!(
         r#"
-        SELECT COUNT(DISTINCT s.agent_id) as count
+        SELECT COUNT(DISTINCT s.agent_id) as "count!"
         FROM agent_states s
         INNER JOIN (
             SELECT agent_id, MAX(tick_id) as max_tick
@@ -495,12 +494,11 @@ pub async fn get_intent_timeout_stats(pool: &PgPool) -> Result<IntentTimeoutStat
             OR a.last_tick_online < CURRENT_TIMESTAMP - INTERVAL '1 minute' * $1
         )
         "#,
+        timeout_window_secs as f64 / 60.0, // 转换为分钟
     )
-    .bind(timeout_window_secs as f64 / 60.0) // 转换为分钟
     .fetch_one(pool)
     .await
-    .context("获取超时 Agent 数量失败")?
-    .get("count");
+    .context("获取超时 Agent 数量失败")?;
 
     let timeout_rate = if total_alive_agents > 0 {
         timeout_agents as f64 / total_alive_agents as f64
@@ -746,13 +744,14 @@ pub async fn retire_agent(
 
     // 4. 插入 is_alive=false 的状态快照，防止归隐角色继续参与 Tick 处理
     // load_agent_states 先 DISTINCT ON 取最新记录再过滤 is_alive，确保最新记录为 false 即可排除
-    let latest_tick: Option<i64> =
-        sqlx::query_scalar("SELECT MAX(tick_id) FROM agent_states WHERE agent_id = $1")
-            .bind(agent_id)
-            .fetch_optional(pool)
-            .await
-            .context("查询 Agent 最新 tick_id 失败")?
-            .flatten();
+    let latest_tick: Option<i64> = sqlx::query_scalar!(
+        "SELECT MAX(tick_id) FROM agent_states WHERE agent_id = $1",
+        agent_id,
+    )
+    .fetch_optional(pool)
+    .await
+    .context("查询 Agent 最新 tick_id 失败")?
+    .flatten();
 
     // 使用下一个 tick_id 避免违反 UNIQUE(agent_id, tick_id) 约束
     let retired_tick_id = latest_tick.map(|t| t + 1).unwrap_or(0);

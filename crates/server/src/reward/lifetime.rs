@@ -130,25 +130,24 @@ fn ticks_per_game_day() -> Result<i64> {
 
 /// 取 agent 的 birth_tick / death_tick / name。
 async fn fetch_lifetime_span(pool: &DbPool, agent_id: Uuid) -> Result<(i64, i64, String)> {
-    use sqlx::Row;
     // death_tick：该 agent 最后一条 agent_states（is_alive=false 或最新）的 tick_id
     // birth_tick：agents 表的 birth_tick 字段
-    let row = sqlx::query(
+    let row = sqlx::query!(
         r#"
         SELECT a.birth_tick, a.name,
                (SELECT MAX(s.tick_id) FROM agent_states s WHERE s.agent_id = a.agent_id) AS death_tick
         FROM agents a
         WHERE a.agent_id = $1
         "#,
+        agent_id,
     )
-    .bind(agent_id)
     .fetch_one(pool)
-    .await?;
+    .await
+    .context("查询 agent 生命周期跨度失败")?;
 
-    let birth_tick: Option<i64> = row.try_get("birth_tick")?;
-    let name: String = row.try_get("name")?;
-    let death_tick: i64 = row.try_get::<Option<i64>, _>("death_tick")?.unwrap_or(0);
-    let birth_tick = birth_tick.unwrap_or(0);
+    let birth_tick = row.birth_tick.unwrap_or(0);
+    let name: String = row.name;
+    let death_tick: i64 = row.death_tick.unwrap_or(0);
 
     Ok((birth_tick, death_tick, name))
 }

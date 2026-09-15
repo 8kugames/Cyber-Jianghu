@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            action_type,\n            COUNT(*) as \"cnt!\",\n            COUNT(*) FILTER (WHERE result = 'success') as \"success_cnt!\"\n        FROM agent_action_logs\n        WHERE created_at BETWEEN $1 AND $2\n        GROUP BY action_type\n        ORDER BY COUNT(*) DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "action_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "cnt!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "success_cnt!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "d2177d8a01ea1ec7130600771adaa8b9cc60823bb43c3a4c17644be9a9a34466"
+}

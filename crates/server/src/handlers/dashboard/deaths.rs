@@ -97,10 +97,10 @@ pub async fn get_deaths(
     // 查 status='dead' 的 agent，LATERAL JOIN 取死亡时刻附近最近一条失败战斗动作
     // 以及最新 agent_states.node_id 近似死亡位置。
     //
-    // death_tick 推算：server_deployment.deployment_time + birth_tick * tick_duration 为出生时刻，
+    // death_tick 推算：server_deployment.deployed_at + birth_tick * tick_duration 为出生时刻，
     // retired_at 与之差除以 tick_duration 即死亡 tick。
-    // 为避免引入 game_rules_config JOIN 导致整查询失败，real_seconds_per_tick 与 deployment_time
-    // 单独取值，death_tick 在 Rust 层推算。tick_from 过滤基于 death_tick（推算后），亦在 Rust 层完成。
+    // real_seconds_per_tick 与 deployed_at 单独取值，death_tick 在 Rust 层推算。
+    // tick_from 过滤基于 death_tick（推算后），亦在 Rust 层完成。
     let sql = r#"
         WITH dead_agents AS (
             SELECT
@@ -150,21 +150,25 @@ pub async fn get_deaths(
         limit
     };
 
-    // death_tick 由 retired_at / birth_tick / real_seconds_per_tick 推算；为避免在此 SQL 中
-    // 强依赖 game_rules_config（可能为空导致整个查询失败），改在 Rust 层取 real_seconds_per_tick 后推算。
-    let real_seconds_per_tick: f64 =
-        sqlx::query_scalar("SELECT real_seconds_per_tick::float8 FROM game_rules_config LIMIT 1")
-            .fetch_optional(&state.db_pool)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or(1.0);
+    // death_tick 由 retired_at / birth_tick / real_seconds_per_tick 推算。
+    // tick 秒数取自内存 game_data（game_rules.yaml）——数据库中不存在
+    // game_rules_config 表，历史上查询失败后 unwrap_or(1.0) 把每 tick 当 1 秒，
+    // death_tick 被系统性放大（真实配置为 120 秒/tick）。
+    let real_seconds_per_tick: f64 = {
+        let gd = state.game_data.get();
+        gd.game_rules.data.agent_state.tick.real_seconds_per_tick as f64
+    };
 
     let deployment_time: Option<chrono::DateTime<chrono::Utc>> =
-        sqlx::query_scalar("SELECT MIN(deployment_time) FROM server_deployment")
+        sqlx::query_scalar!("SELECT MIN(deployed_at) FROM server_deployment",)
             .fetch_optional(&state.db_pool)
             .await
+            .map_err(|e| {
+                tracing::warn!("查询部署时间失败，death_tick 将不可用: {}", e);
+                e
+            })
             .ok()
+            .flatten()
             .flatten();
 
     let rows = match sqlx::query(sql)

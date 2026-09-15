@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT a.birth_tick, a.name,\n               (SELECT MAX(s.tick_id) FROM agent_states s WHERE s.agent_id = a.agent_id) AS death_tick\n        FROM agents a\n        WHERE a.agent_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "birth_tick",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "death_tick",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      null
+    ]
+  },
+  "hash": "d2aa13bfebf924f6af6c93cb820766313eedcd29995b8bb5e253c348950bb5dc"
+}

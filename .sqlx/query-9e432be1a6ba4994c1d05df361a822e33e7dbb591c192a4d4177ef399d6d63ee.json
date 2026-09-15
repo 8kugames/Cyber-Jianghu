@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COALESCE(SUM(quantity), 0) AS \"v!\" FROM agent_inventory WHERE agent_id = $1 AND item_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "v!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9e432be1a6ba4994c1d05df361a822e33e7dbb591c192a4d4177ef399d6d63ee"
+}
