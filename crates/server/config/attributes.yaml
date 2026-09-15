@@ -190,12 +190,13 @@ data:
         default_value: 100
         min_value: 0
         max_value_formula: "100 + constitution * 0.5"
-        # 满值(100)饿死 = 7 游戏日：100 / 168 tick ≈ 0.60/tick
+        # 满值(100)饿死 = 7 游戏日：100 / 168 tick ≈ 0.5952/tick，取 0.5955
+        # 保证小数累计器截断补偿后恰在第 168 tick（第 7 游戏日末）死亡。
         # （24 tick/游戏日，time.yaml；根骨抬升的 max 提供小幅缓冲。
         # 季节修饰乘入衰减后提前：夏 ×1.2 ≈ 5.8 日，冬 ×1.5 ≈ 4.7 日。
         # 2026-09-15 由 3 游戏日(2.78) 放宽到 7 日；同日游戏日 12→24 tick，
-        # 衰减由 1.19 重算为 0.60，维持 7 日不变。flaky LLM 决策延迟是放宽动因）
-        decay_per_tick: 0.6
+        # 衰减由 1.19 重算；哨兵测试 survival_pacing_test 锁定该节奏）
+        decay_per_tick: 0.5955
         death_condition:
           operator: equals
           value: 0
@@ -212,10 +213,10 @@ data:
         default_value: 100
         min_value: 0
         max_value_formula: "100 + constitution * 0.5"
-        # 与 satiation 同规：满值(100)渴死 = 7 游戏日（100 / 168 tick ≈ 0.60/tick；
-        # 季节修饰后夏 ×1.3 ≈ 5.4 日、冬 ×1.5 ≈ 4.7 日。
+        # 与 satiation 同规：满值(100)渴死 = 7 游戏日（100 / 168 tick ≈ 0.5952，
+        # 取 0.5955 补偿截断恰 168 tick；季节修饰后夏 ×1.3 ≈ 5.4 日、冬 ×1.5 ≈ 4.7 日。
         # 2026-09-15 与 satiation 同步放宽并随游戏日 12→24 tick 重算）
-        decay_per_tick: 0.6
+        decay_per_tick: 0.5955
         death_condition:
           operator: equals
           value: 0

@@ -1,13 +1,14 @@
 //! crates/server/tests/survival_pacing_test.rs
 //!
 //! 生存节奏锁定测试：对生产 config/attributes.yaml + time.yaml 断言
-//! 「满值饿死/渴死 = 3 个游戏日」这一截断敏感性质。
+//! 「满值饿死/渴死 = 7 个游戏日」这一截断敏感性质。
 //!
 //! 衰减经衰减小数累计器（state_mutation.rs：acc += raw_delta;
 //! delta = acc as i32 朝零截断; acc -= delta）逐 tick 扣减——该性质
-//! 对取值敏感：decay=2.77 时 36 tick 累计 99.72 < 100，死亡拖到
-//! 第 37 tick（跨入第 4 游戏日）；2.78 的进位恰好补偿截断损耗。
-//! 未来再调生存数值时，本测试保证目标节奏不被无意破坏。
+//! 对取值敏感：decay=0.5955 时 167 tick 累计不足 100，死亡落在
+//! 第 168 tick（第 7 游戏日末）；0.5955 的截断补偿恰对齐
+//! 100/(7*24) = 0.5952 的理论均值。未来再调生存数值时，本测试
+//! 保证目标节奏不被无意破坏。
 //!
 //! 运行: cargo test --test survival_pacing_test
 
@@ -36,14 +37,14 @@ mod tests {
     }
 
     #[test]
-    fn test_full_value_starvation_is_three_game_days() {
+    fn test_full_value_starvation_is_seven_game_days() {
         let data =
             load_from_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/config")).expect("加载生产配置");
 
         let time = &data.time.data;
         let ticks_per_day = (time.ticks_per_hour * time.hours_per_day) as i64;
         assert_eq!(
-            ticks_per_day, 12,
+            ticks_per_day, 24,
             "time.yaml 游戏日长度变化时需重审生存节奏"
         );
 
@@ -61,12 +62,12 @@ mod tests {
             assert!(decay > 0.0, "{} 衰减非正值，生存压力机制失效", attr);
 
             let death_tick = ticks_until_starvation(default_value, min_value, decay);
-            let target_days = 3;
+            let target_days = 7;
             assert_eq!(
                 death_tick,
                 target_days * ticks_per_day,
                 "{} 满值 {} 于第 {} tick 死亡，偏离 {} 游戏日目标（当前 decay={}）；\
-                 调整 decay 时注意 100/(3*{}) = {:.4} 的截断补偿方向",
+                 调整 decay 时注意 100/(7*{}) = {:.4} 的截断补偿方向",
                 attr,
                 default_value,
                 death_tick,
