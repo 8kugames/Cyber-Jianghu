@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+## [0.1.345] - 2026-09-15
+
+### Features
+
+- **好感度评估注入身份/性格/关系现状**（agent）：好感度评估不再只看交互历史，注入双方身份、性格与关系现状，产生主观认知分歧。
+- **经历日志按 tick 卡片重设计**（dashboard）：经历流水按 (agent, tick) 聚合为卡片视图，补现实时间与卡片级成败徽章。
+- **sqlx 编译期校验宏迁移与活库守卫体系**（server）：静态 SQL 两批共 34 条查询迁移 `sqlx::query!`/`query_scalar!` 宏，幻表/幻列/解码错配在编译期归零（`.sqlx` 离线缓存入库，CI 注入 `SQLX_OFFLINE=true` 覆盖四平台离线构建）；新增活库守卫测试 `sqlx_live_schema_guard_test`（4 条夹具用例，覆盖背包 SUM 解码、survival_time 聚合与两条动态拼接 SQL 路径）与每晚定时门禁 `sqlx-guard.yml`（postgres service 容器驱动）；AGENTS.md 增设 SQL/sqlx 规约章节（聚合解码类型表/禁止解码点吞错/prepare 工作流）。
+
+### Bug Fixes
+
+- **「背包持有量查询失败（服务端存储异常）」根因修复**（server）：PostgreSQL `SUM(int4)` 返回 BIGINT 被误以 i32 解码，吃/喝/用持有预检恒失败（线上 Agent 无法进食的根因）；修复解码并补底层错误日志。
+- **telemetry survival_time 从未成功采集**（server）：`EXTRACT(EPOCH)` 返回 numeric 被 `.ok()` 静默吞成 None，且 SQL 引用不存在的 `game_rules_config` 表与 `deployment_time` 幻列致每轮必败；tick 秒数改由内存 game_data registry 注入。
+- **deaths 时间线 death_tick 系统性放大 120 倍**（server）：幻表查询失败后 tick 秒数兜底 1.0（真实配置 120 秒/tick）；改从内存 game_data 读取并修正幻列。
+- **get_last_tick_time 引用 tick_logs.created_at 幻列**（server）：表内仅有 started_at/completed_at，该函数恒失败（死导出未暴露）。
+- **action_outcomes 遇 NULL result 组运行期解码必炸**（server）：result 列可空，宏在编译期强制暴露，NULL 组映射 "unknown"。
+- **chronicles 五个 JSONB 列与 created_at 可空崩溃隐患**（server）：旧实现在 NULL 上解码崩溃，宏暴露后降级空集链。
+- **关系图谱反查表键序颠倒**（admin）：反向认知恒等于好感度。
+- **分页偏移量溢出族收敛**（handlers）：越界页不再 panic。
+- **模型上报空值归一**（agent）：空转与后续意图不再写 None。
+
 ## [0.1.340] - 2026-09-15
 
 ### Features
