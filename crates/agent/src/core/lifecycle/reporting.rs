@@ -105,7 +105,10 @@ impl super::super::Agent {
                             dream_marker: None,
                         }
                     }),
-                    model_id: r.model_id,
+                    model_id: r
+                        .model_id
+                        .as_deref()
+                        .and_then(crate::component::llm::normalize_model_id),
                 }
             })
             .collect();
@@ -153,6 +156,15 @@ impl super::super::Agent {
             if subsequent_count > 0 {
                 let metadata = self.build_soul_cycle_metadata(tick_id_for_report).await;
                 let world_time = metadata.as_ref().and_then(|m| m.world_time.clone());
+                // 后续意图占位历史上把 model_id 硬编码为 None，导致同一 tick 在
+                // 经历日志里"主行有模型、后续行显示 -"。该 tick 的真实模型此时已在
+                // metadata 内，直接复用，不再丢字段。
+                let tick_model_id = metadata.as_ref().and_then(|m| {
+                    m.cycles
+                        .iter()
+                        .find_map(|c| c.model_id.as_deref())
+                        .map(str::to_string)
+                });
                 for (idx, subsequent) in final_intent.subsequent_intents.iter().enumerate() {
                     let pipe_seq = (idx + 1) as i32;
                     let simplified_metadata = cyber_jianghu_protocol::SoulCycleMetadata {
@@ -194,7 +206,7 @@ impl super::super::Agent {
                                 chaos_marker: subsequent.chaos_marker.clone(),
                                 dream_marker: subsequent.dream_marker.clone(),
                             }),
-                            model_id: None,
+                            model_id: tick_model_id.clone(),
                         }],
                         immediate_intents: vec![],
                     };

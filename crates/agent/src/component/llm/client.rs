@@ -184,9 +184,11 @@ pub trait LlmClient: Send + Sync {
 
     /// 获取模型名称（用于 token 统计）
     ///
-    /// 默认实现返回 "unknown"。
+    /// 默认实现返回 UNKNOWN_MODEL_PLACEHOLDER（"unknown"）；
+    /// 归一判定在 `component::llm::normalize_model_id`，两处必须同源，
+    /// 否则改动占位符会让"未上报"识别静默失效。
     fn model_name(&self) -> String {
-        "unknown".to_string()
+        super::UNKNOWN_MODEL_PLACEHOLDER.to_string()
     }
 
     /// 获取 (provider, model) 元组（用于 token 统计兜底记录）

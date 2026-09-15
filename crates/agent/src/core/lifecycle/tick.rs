@@ -109,8 +109,17 @@ impl super::super::Agent {
         // recorder 不可用时静默跳过——失败原因已在 soul_recorder_for 内 error 级记录。
         if let Some(recorder) = self.soul_recorder().await {
             let world_time_str = Self::format_world_time(&world_state.world_time);
+            // 空转 tick 不调用 LLM，但必须上报角色当前活跃模型：模型列的"未上报"
+            // 只应由"取不到模型配置"产生，不应由空转这种常规路径产生，
+            // 否则经历日志出现有经历无模型的空列。
+            let model_id = self.actor_model_name().await;
             recorder
-                .record_idle_skip(world_state.tick_id, flavor, Some(&world_time_str))
+                .record_idle_skip(
+                    world_state.tick_id,
+                    flavor,
+                    Some(&world_time_str),
+                    &model_id,
+                )
                 .await;
         }
     }

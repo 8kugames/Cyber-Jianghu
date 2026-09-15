@@ -664,6 +664,22 @@ impl Agent {
         }
     }
 
+    /// 当前人魂 LLM 的模型名（未装载容器时为空串）
+    ///
+    /// 取值口径供三魂记录与空转占位共用；注册上报走的是另一处容器
+    /// （`infra/api/handlers/character_register.rs` 的 `state.llm_container`），
+    /// 两条链路共享的是空值判定 `component::llm::normalize_model_id`，而非本访问器。
+    /// 取到的原始名可能是空串或占位符 "unknown"，归一同理由写入边界完成。
+    pub(crate) async fn actor_model_name(&self) -> String {
+        match self.actor_llm_container {
+            Some(ref container) => {
+                let llm = container.read().await;
+                crate::component::llm::LlmClient::model_name(&**llm)
+            }
+            None => String::new(),
+        }
+    }
+
     /// 组装原子意图队列
     ///
     /// 将多个独立的原子 Intent 组装为主 Intent + subsequent_intents 队列的结构

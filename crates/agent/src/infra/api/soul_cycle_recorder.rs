@@ -172,6 +172,9 @@ impl SoulCycleRecorder {
     }
 
     /// 记录人魂输出
+    ///
+    /// `model_id` 收原始模型名（可为空串或占位符 "unknown"），归一后落库：
+    /// 归一结果为空时写 NULL，使"未上报"在数据库中只有 NULL 一种表示。
     pub async fn record_renhun(
         &self,
         tick_id: i64,
@@ -185,6 +188,7 @@ impl SoulCycleRecorder {
             .lock()
             .expect("soul_cycle_recorder lock not poisoned");
         let created_at = Utc::now().to_rfc3339();
+        let model_id = crate::component::llm::normalize_model_id(model_id);
 
         let result = conn.execute(
             "INSERT INTO soul_cycle_record
@@ -460,18 +464,29 @@ impl SoulCycleRecorder {
     ///
     /// 让三魂纪事时间轴连续：下游可凭 route_type 区分"无经历的空转"与"记录加载失败"。
     /// INSERT OR IGNORE：同一 tick 若已有真实认知记录则绝不覆盖。
-    pub async fn record_idle_skip(&self, tick_id: i64, narrative: &str, world_time: Option<&str>) {
+    ///
+    /// `model_id` 为该角色当前活跃模型名——空转 tick 本身不调用 LLM，此处上报的是
+    /// 该角色的模型配置，使经历日志不再出现"有经历但无模型"的空列；"本 tick 未调用 LLM"
+    /// 这一语义由 route_type='idle_skip' 承载，不占用模型字段。
+    pub async fn record_idle_skip(
+        &self,
+        tick_id: i64,
+        narrative: &str,
+        world_time: Option<&str>,
+        model_id: &str,
+    ) {
         let conn = self
             .conn
             .lock()
             .expect("soul_cycle_recorder lock not poisoned");
         let created_at = Utc::now().to_rfc3339();
+        let model_id = crate::component::llm::normalize_model_id(model_id);
 
         let result = conn.execute(
             "INSERT OR IGNORE INTO soul_cycle_record
-             (tick_id, attempt, renhun_narrative, route_type, world_time, created_at)
-             VALUES (?1, 0, ?2, 'idle_skip', ?3, ?4)",
-            params![tick_id, narrative, world_time, created_at],
+             (tick_id, attempt, renhun_narrative, route_type, world_time, model_id, created_at)
+             VALUES (?1, 0, ?2, 'idle_skip', ?3, ?4, ?5)",
+            params![tick_id, narrative, world_time, model_id, created_at],
         );
 
         match result {
@@ -645,7 +660,9 @@ impl SoulCycleRecorder {
             )
             .context("get_tick_ids_page COUNT 失败")?;
 
-        let offset = ((page - 1) * limit) as i64;
+        // page=0 的 u32 下溢与极大页码的乘法溢出均按饱和语义处理，
+        // 越界页自然得到空结果
+        let offset = (page.max(1) as i64 - 1).saturating_mul(limit as i64);
         let mut stmt = conn
             .prepare(
                 "SELECT DISTINCT tick_id FROM soul_cycle_record ORDER BY tick_id DESC LIMIT ?1 OFFSET ?2",
@@ -1314,6 +1331,7 @@ mod tests {
                 7,
                 "（空转：无显著变化，未执行认知循环）",
                 Some("第三天 申时"),
+                "test-model",
             )
             .await;
 
@@ -1326,6 +1344,38 @@ mod tests {
             Some("（空转：无显著变化，未执行认知循环）")
         );
         assert_eq!(records[0].tianhun_result, None, "占位行不得伪装天魂结果");
+        assert_eq!(
+            records[0].model_id.as_deref(),
+            Some("test-model"),
+            "空转 tick 必须上报角色当前活跃模型，否则经历日志出现有经历无模型的空列"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_model_id_normalization_treats_empty_and_unknown_as_unreported() {
+        let (_dir, recorder) = make_recorder();
+        recorder
+            .record_renhun(1, 0, "甲", "...", "MiniMax-M2.7")
+            .await;
+        recorder.record_renhun(2, 0, "乙", "...", "").await;
+        recorder.record_renhun(3, 0, "丙", "...", "unknown").await;
+        recorder
+            .record_idle_skip(4, "（空转）", None, "unknown")
+            .await;
+
+        assert_eq!(
+            recorder.get_by_tick(1).await.expect("tick 1")[0]
+                .model_id
+                .as_deref(),
+            Some("MiniMax-M2.7")
+        );
+        for tick in [2, 3, 4] {
+            assert_eq!(
+                recorder.get_by_tick(tick).await.expect("tick")[0].model_id,
+                None,
+                "空串与占位符 unknown 必须归一为 NULL（tick {tick}）"
+            );
+        }
     }
 
     #[tokio::test]
@@ -1334,7 +1384,9 @@ mod tests {
         recorder
             .record_renhun(7, 0, "真实决策", "...", "test-model")
             .await;
-        recorder.record_idle_skip(7, "（空转）", None).await;
+        recorder
+            .record_idle_skip(7, "（空转）", None, "test-model")
+            .await;
 
         let records = recorder.get_by_tick(7).await.expect("get_by_tick in test");
         assert_eq!(records.len(), 1);
@@ -1347,7 +1399,9 @@ mod tests {
         let (_dir, recorder) = make_recorder();
         // 回归防线（triple-review 建议2/F4）：同一 tick 先空转后认知时，
         // 认知 upsert 必须把 route_type 翻回 main，真实叙事不得滞留 idle_skip 行
-        recorder.record_idle_skip(7, "（空转）", None).await;
+        recorder
+            .record_idle_skip(7, "（空转）", None, "test-model")
+            .await;
         recorder
             .record_renhun(7, 0, "真实决策", "...", "test-model")
             .await;
@@ -1364,7 +1418,9 @@ mod tests {
         recorder
             .record_renhun(10, 0, "真实行动", "...", "test-model")
             .await;
-        recorder.record_idle_skip(12, "（空转）", None).await;
+        recorder
+            .record_idle_skip(12, "（空转）", None, "test-model")
+            .await;
 
         let narrative = recorder
             .get_last_renhun_narrative(20)

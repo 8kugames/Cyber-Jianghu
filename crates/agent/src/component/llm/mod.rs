@@ -30,6 +30,27 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tracing::{info, warn};
 
+/// `LlmClient::model_name` 默认实现返回的占位符
+///
+/// 未覆写该方法的客户端（如外部推理路径 OpenClawBridge）会回出此值，
+/// 它表示"模型名未知"，不是真实模型名。
+pub const UNKNOWN_MODEL_PLACEHOLDER: &str = "unknown";
+
+/// 模型名归一：空串与占位符 `unknown` 一律视为"未上报"，返回 `None`。
+///
+/// 注册上报（`infra/api/handlers/character_register.rs`）与三魂记录
+/// （`infra/api/soul_cycle_recorder.rs`）必须共用同一判定，否则同一个模型
+/// 会在两条链路上出现两种空值语义（一处 `None`、一处 `"unknown"`），
+/// 使经历日志的模型列无法区分"未上报"与"模型真名就是 unknown"。
+pub fn normalize_model_id(raw: &str) -> Option<String> {
+    let name = raw.trim();
+    if name.is_empty() || name == UNKNOWN_MODEL_PLACEHOLDER {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
 /// 根据 LlmConfig 构建 FallbackLlmClient（含主模型 + fallback 模型）
 ///
 /// 用于启动时和热重载时统一构建逻辑。

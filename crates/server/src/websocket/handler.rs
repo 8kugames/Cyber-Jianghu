@@ -1367,6 +1367,10 @@ async fn handle_intent(
 
                 // subsequent 占位（pipe_seq≥1）
                 let world_time = metadata.world_time.clone();
+                // 该 tick 的模型与本条 intent 的元数据同时到达，占位行直接复用，
+                // 不再写死 None：否则 agent 后续的 SoulCycleReport 一旦丢失，
+                // 这些行在经历日志里就永久显示"模型未上报"
+                let tick_model_id = metadata.cycles.iter().find_map(|c| c.model_id.clone());
                 for (idx, (act_type, act_data, chaos, dream)) in
                     subsequent_summaries.iter().enumerate()
                 {
@@ -1410,7 +1414,7 @@ async fn handle_intent(
                                 chaos_marker: chaos.clone(),
                                 dream_marker: dream.clone(),
                             }),
-                            model_id: None,
+                            model_id: tick_model_id.clone(),
                         }],
                         immediate_intents: vec![],
                     };
