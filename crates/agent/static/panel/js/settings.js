@@ -1,7 +1,7 @@
 // Settings page: server + LLM config, setup wizard mode
 
 import { API, get, post } from './api.js';
-import { showSuccess, showError, fmtNum } from './ui.js';
+import { escapeHtml, showSuccess, showError, showWarning, showModal, hideModal, fmtNum } from './ui.js';
 import { appState } from './app.js';
 
 export const settingsPage = {
@@ -12,14 +12,26 @@ export const settingsPage = {
     unmount() {},
 };
 
+// 最近一次 update/status 快照（renderUpdateCard 与按钮 handler 共用）
+let lastUpdateStatus = null;
+
 async function loadData() {
     const isWizard = !appState.setupStatus?.server_configured || !appState.setupStatus?.llm_configured;
-    const [llmConfig, providers, usage, llmDisabled] = await Promise.allSettled([
+    const [llmConfig, providers, usage, llmDisabled, updateStatus] = await Promise.allSettled([
         get(API.CONFIG_LLM),
         get(API.CONFIG_LLM_PROVIDERS),
         get(API.CONFIG_LLM_USAGE),
         get(API.CONFIG_LLM_DISABLED),
+        get(API.UPDATE_STATUS),
     ]);
+
+    // 版本与更新卡片
+    if (updateStatus.status === 'fulfilled') {
+        lastUpdateStatus = updateStatus.value;
+        renderUpdateCard();
+    } else {
+        setText('s-update-body', '更新状态不可用');
+    }
 
     // Populate server form
     if (appState.setupStatus) {
@@ -252,6 +264,19 @@ function render(container) {
                 </div>
             </div>
         </section>
+
+        <section class="settings-section">
+            <div class="card">
+                <div class="card-header">版本与更新</div>
+                <div class="card-body">
+                    <div id="s-update-body" class="text-muted">加载中…</div>
+                    <div style="margin-top:12px;display:flex;gap:8px">
+                        <button type="button" class="btn btn-sm" id="s-update-check-btn">检查更新</button>
+                        <button type="button" class="btn btn-sm btn-primary" id="s-update-apply-btn" style="display:none">安装并重启</button>
+                    </div>
+                </div>
+            </div>
+        </section>
     </div>
     `;
 
@@ -345,9 +370,142 @@ function bindEvents() {
             btn.textContent = '保存配置';
         }
     });
+
+    // === 版本与更新 ===
+    const checkBtn = document.getElementById('s-update-check-btn');
+    checkBtn?.addEventListener('click', async () => {
+        checkBtn.disabled = true;
+        const original = checkBtn.textContent;
+        checkBtn.textContent = '检查中…';
+        try {
+            // 服务端同步请求 GitHub（含自身超时），放宽前端超时且不重试以免重复请求
+            const r = await post(API.UPDATE_CHECK, {}, { timeout: 30000, retries: 0 });
+            if (r.update_available) showSuccess(`发现新版本 ${r.release_tag}`);
+            else showSuccess('已是最新');
+        } catch (e) {
+            showError(e.message);
+        }
+        await refreshUpdateCard();
+        checkBtn.disabled = false;
+        checkBtn.textContent = original;
+    });
+
+    const applyBtn = document.getElementById('s-update-apply-btn');
+    applyBtn?.addEventListener('click', () => {
+        const tag = lastUpdateStatus?.latest?.tag_name || '最新版本';
+        showModal(`
+            <h3 style="margin-bottom:12px">安装更新</h3>
+            <p style="margin-bottom:16px;font-size:13px;color:var(--text-secondary)">
+                将下载并安装 ${escapeHtml(tag)}，随后进程自动重启，面板会短暂断开。确认继续？
+            </p>
+            <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button class="btn" id="s-update-cancel-btn">取消</button>
+                <button class="btn btn-primary" id="s-update-confirm-btn">确认安装</button>
+            </div>`);
+        document.getElementById('s-update-cancel-btn')?.addEventListener('click', hideModal);
+        document.getElementById('s-update-confirm-btn')?.addEventListener('click', async () => {
+            const confirmBtn = document.getElementById('s-update-confirm-btn');
+            if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = '下载安装中…'; }
+            try {
+                // apply 等待下载+校验+安装完成后才响应（20MB 级资产），放宽超时且不重试
+                const r = await post(API.UPDATE_APPLY, {}, { timeout: 600000, retries: 0 });
+                hideModal();
+                if (r.applied) {
+                    showWarning(`已安装 ${r.tag}，进程即将重启，面板将短暂断开…`);
+                    if (checkBtn) checkBtn.disabled = true;
+                    applyBtn.disabled = true;
+                } else {
+                    showSuccess('已是最新，无需更新');
+                    await refreshUpdateCard();
+                }
+            } catch (e) {
+                hideModal();
+                showError(e.message);
+            }
+        });
+    });
 }
 
 function setText(id, text) {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
+}
+
+// ============================================================================
+// 版本与更新卡片
+// ============================================================================
+
+/// 根据 update/status 快照渲染卡片正文与安装按钮可见性
+function renderUpdateCard() {
+    const st = lastUpdateStatus;
+    const body = document.getElementById('s-update-body');
+    if (!body || !st) return;
+
+    const badge = updateBadgeInfo(st);
+    const shortDigest = st.current_digest
+        ? st.current_digest.replace('sha256:', '').slice(0, 12) + '…'
+        : '-';
+    const lines = [];
+
+    // 环境守卫说明（apply 不可用时的原因）
+    if (st.dev_build) lines.push('cargo 本地构建产物，不参与自动更新');
+    else if (st.in_container) lines.push('容器内运行，请通过更新镜像升级（build-agent-image.sh）');
+    else if (st.hard_disabled) lines.push('自更新已被 CYBER_JIANGHU_SELF_UPDATE=0 禁用');
+
+    if (st.latest) {
+        const published = st.latest.published_at
+            ? new Date(st.latest.published_at).toLocaleString('zh-CN')
+            : '';
+        lines.push(`最新 release：${st.latest.tag_name}（${st.latest.asset_name}）${published ? '，发布于 ' + published : ''}`);
+    }
+    if (st.last_check_unix) {
+        lines.push(`上次检查：${new Date(st.last_check_unix * 1000).toLocaleString('zh-CN')}`);
+    } else {
+        lines.push('尚未检查');
+    }
+    if (st.last_error) lines.push(`上次检查失败：${st.last_error}`);
+    if (st.installed_tag) {
+        const at = st.installed_at_unix
+            ? new Date(st.installed_at_unix * 1000).toLocaleString('zh-CN')
+            : '';
+        lines.push(`已安装 ${st.installed_tag}${at ? '（' + at + '）' : ''}，重启后生效`);
+    }
+
+    body.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:13px;color:var(--text-secondary)">当前版本</span>
+            <span style="font-weight:600">v${escapeHtml(st.current_version)}</span>
+            <span class="mode-badge ${badge.cls}">${badge.text}</span>
+        </div>
+        <div style="margin-top:6px;font-size:12px;color:var(--text-muted);font-family:monospace">sha256: ${escapeHtml(shortDigest)}</div>
+        <div style="margin-top:8px;font-size:13px;color:var(--text-secondary);display:flex;flex-direction:column;gap:4px">
+            ${lines.map(l => `<div>${escapeHtml(l)}</div>`).join('')}
+        </div>`;
+
+    // 安装按钮：仅在具备自更新条件且确认有新版本时展示
+    const applyBtn = document.getElementById('s-update-apply-btn');
+    if (applyBtn) {
+        const canApply = st.update_available === true && !st.dev_build && !st.in_container && !st.hard_disabled;
+        applyBtn.style.display = canApply ? '' : 'none';
+    }
+}
+
+/// 状态徽标：claw（琥珀）表异常/待处理，cognitive（蓝）表正常
+function updateBadgeInfo(st) {
+    if (st.dev_build) return { cls: 'claw', text: '本地构建' };
+    if (st.in_container) return { cls: 'claw', text: '容器内' };
+    if (st.hard_disabled) return { cls: 'claw', text: '已禁用' };
+    if (st.update_available === true) return { cls: 'claw', text: '有新版本' };
+    if (st.update_available === false) return { cls: 'cognitive', text: '已是最新' };
+    return { cls: 'claw', text: '未检查' };
+}
+
+/// 重新拉取 update/status 并重渲染卡片（检查/安装动作后调用）
+async function refreshUpdateCard() {
+    try {
+        lastUpdateStatus = await get(API.UPDATE_STATUS);
+        renderUpdateCard();
+    } catch (e) {
+        showWarning('刷新更新状态失败: ' + e.message);
+    }
 }

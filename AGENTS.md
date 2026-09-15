@@ -64,6 +64,10 @@ cyber-jianghu-agent run
 # Run agent in Claw mode (external LLM via OpenClaw)
 cyber-jianghu-agent run --mode claw --port 0
 
+# Check / install agent self-update from GitHub Release (CLI never restarts itself)
+cyber-jianghu-agent update --check-only
+cyber-jianghu-agent update
+
 # Run with debug logging
 RUST_LOG=debug cargo run -p cyber-jianghu-server
 ```
@@ -533,6 +537,12 @@ Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env v
 
 - `POST /api/v1/validate` - Validate intent
 
+**Self-Update (GitHub Release)**:
+
+- `GET /api/v1/update/status` - Update status view (current version/digest, latest release, last check)
+- `POST /api/v1/update/check` - Check latest GitHub release now
+- `POST /api/v1/update/apply` - Download + install latest release and restart (refused inside containers and for cargo `target/` builds)
+
 **Events & Config**:
 
 - `GET /api/v1/events` - Death events SSE stream
@@ -540,6 +550,8 @@ Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env v
 - `GET /api/v1/state/stream` - WorldState + IntentSnapshot composite SSE stream (桌面窗口消费; view-shape payload per `docs/contracts/state_stream.schema.json`; accepts `?token=` for EventSource)
 
 **Agent HTTP Auth**: all agent HTTP endpoints (except public paths `/`, `/api/v1`, `/api/v1/health`, `/api/v1/version`, `/api/v1/setup`, static assets) require `Authorization: Bearer <token>`. Accepted tokens are the UNION of env `CYBER_JIANGHU_AGENT_TOKEN` (static token, enables auth before device registration for external clients) and the device `auth_token` from server registration (used by the local panel). SSE endpoints (`/api/v1/events`, `/api/v1/state/stream`) additionally accept `?token=<token>`. No token configured at all -> 503 (fail-closed).
+
+**Agent Self-Update**: agent can self-update from GitHub Releases (`update` section in `agent.yaml`: `enabled`/`auto_apply`/`check_interval_secs`/`repo`, defaults `true`/`true`/`21600`/`8kugames/Cyber-Jianghu`). Update decision is digest identity (current exe sha256 vs latest release platform asset `digest`) because release tags carry the SERVER version while agent crate versions are independent. Download is sha256-verified (missing digest => refuse to install). Background loop auto-applies and restarts (unix execve / Windows `*.exe.old` + spawn). Auto-apply is skipped inside containers (`/.dockerenv` / `/.containerenv` — update the image instead) and for cargo builds (exe under `target/`). Env `CYBER_JIANGHU_SELF_UPDATE=0` hard-disables all update network activity. The CLI `update` subcommand installs but never restarts itself.
 
 - `GET/POST /api/v1/config/llm-disabled` - LLM disable toggle
 - `GET/POST /api/v1/config/auto-rebirth` - Auto-rebirth toggle

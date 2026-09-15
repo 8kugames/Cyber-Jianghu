@@ -120,6 +120,13 @@ enum Commands {
         identity: Option<String>,
     },
 
+    /// 检查并安装 GitHub Release 新版本（只安装不重启，重启 agent 后生效）
+    Update {
+        /// 仅检查是否有新版本，不下载安装
+        #[arg(long)]
+        check_only: bool,
+    },
+
     /// 重置 Agent 身份（慎用，会清除所有数据）
     Reset,
 }
@@ -439,6 +446,10 @@ async fn main() -> Result<()> {
 
         Some(Commands::Reset) => {
             reset_agent()?;
+        }
+
+        Some(Commands::Update { check_only }) => {
+            cyber_jianghu_agent::infra::updater::run_cli_update(check_only).await?;
         }
 
         None => {
@@ -825,6 +836,13 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 early_actual_port
             );
         }
+    }
+
+    // 自更新后台任务（硬禁用/配置关闭/容器内时内部自行退出并记录原因）
+    if let Some(api_state) = _early_api_state.as_ref() {
+        tokio::spawn(cyber_jianghu_agent::infra::updater::run_background(
+            api_state.updater.clone(),
+        ));
     }
 
     // Now check if we need to wait for character creation

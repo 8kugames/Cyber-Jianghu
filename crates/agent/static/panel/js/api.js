@@ -63,6 +63,11 @@ export const API = {
     // Actions
     ACTIONS: '/api/v1/actions',
 
+    // Update (GitHub Release 自更新)
+    UPDATE_STATUS: '/api/v1/update/status',
+    UPDATE_CHECK: '/api/v1/update/check',
+    UPDATE_APPLY: '/api/v1/update/apply',
+
     // Context
     CONTEXT: '/api/v1/context',
 

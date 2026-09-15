@@ -211,6 +211,8 @@ pub struct HttpApiState {
     /// WorldStateStore（Agent 侧 WorldState 本地落存，供 Delta Engine 使用）
     pub world_state_store:
         Arc<std::sync::RwLock<Option<Arc<crate::component::state_store::WorldStateStore>>>>,
+    /// 自更新器（GitHub Release；见 infra/updater.rs）
+    pub updater: std::sync::Arc<crate::infra::updater::Updater>,
 }
 
 /// 决策上下文快照（lifecycle 每轮写入，HTTP API 读取）
@@ -565,6 +567,19 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/config/llm/usage",
             get(handlers::get_llm_usage_handler),
         ) // 获取 LLM Token 累计使用统计
+        // === 自更新端点（GitHub Release，需 Bearer 认证） ===
+        .route(
+            "/api/v1/update/status",
+            get(handlers::get_update_status_handler),
+        ) // 更新状态视图（当前版本/最新 release/上次检查）
+        .route(
+            "/api/v1/update/check",
+            post(handlers::post_update_check_handler),
+        ) // 立即检查最新 release
+        .route(
+            "/api/v1/update/apply",
+            post(handlers::post_update_apply_handler),
+        ) // 下载安装最新版并重启
 }
 
 /// 获取静态文件服务目录
@@ -859,9 +874,16 @@ pub fn create_http_state(
     }
     let data_dir_clone = data_dir.clone();
 
-    let (auto_rebirth_init, llm_disabled_init) = crate::config::Config::from_file(&config_path)
-        .map(|c| (c.runtime.auto_rebirth, c.runtime.llm_disabled))
-        .unwrap_or((true, false));
+    let (auto_rebirth_init, llm_disabled_init, update_config) =
+        crate::config::Config::from_file(&config_path)
+            .map(|c| {
+                (
+                    c.runtime.auto_rebirth,
+                    c.runtime.llm_disabled,
+                    c.update.clone(),
+                )
+            })
+            .unwrap_or((true, false, crate::config::UpdateConfig::default()));
 
     // 将持久化的 llm_disabled 同步到运行时全局标志，保持与 auto_rebirth 的读写对称
     crate::component::llm::direct_client::set_llm_disabled(llm_disabled_init);
@@ -905,6 +927,7 @@ pub fn create_http_state(
         llm_container: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         decision_context_snapshot: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         world_state_store: Arc::new(std::sync::RwLock::new(None)),
+        updater: std::sync::Arc::new(crate::infra::updater::Updater::new(update_config)),
     };
 
     let decision_state = Arc::new(HttpDecisionState {

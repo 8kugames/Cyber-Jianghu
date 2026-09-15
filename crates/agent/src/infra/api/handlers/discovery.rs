@@ -260,6 +260,39 @@ pub(crate) async fn api_list_handler(State(state): State<HttpApiState>) -> impl 
                 }]
             })),
         },
+        // === 自更新（GitHub Release） ===
+        ApiEndpoint {
+            path: "/api/v1/update/status".to_string(),
+            method: "GET".to_string(),
+            description: "自更新状态（当前版本/digest、最新 release、上次检查结果）".to_string(),
+            request_example: None,
+            response_example: Some(serde_json::json!({
+                "current_version": "0.1.386",
+                "update_available": true,
+                "latest": { "tag_name": "v0.1.345", "asset_name": "cyber-jianghu-agent-macos-arm64" }
+            })),
+        },
+        ApiEndpoint {
+            path: "/api/v1/update/check".to_string(),
+            method: "POST".to_string(),
+            description: "立即向 GitHub 检查最新 release".to_string(),
+            request_example: None,
+            response_example: Some(serde_json::json!({
+                "release_tag": "v0.1.345",
+                "update_available": true
+            })),
+        },
+        ApiEndpoint {
+            path: "/api/v1/update/apply".to_string(),
+            method: "POST".to_string(),
+            description: "下载安装最新版并重启进程（容器内/cargo 构建产物会被拒绝）".to_string(),
+            request_example: None,
+            response_example: Some(serde_json::json!({
+                "applied": true,
+                "tag": "v0.1.345",
+                "restarting": true
+            })),
+        },
     ];
 
     let agent_id = *state.agent_id.read().await;

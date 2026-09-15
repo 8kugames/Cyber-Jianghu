@@ -1050,6 +1050,57 @@ pub struct FieldSpec {
 }
 
 // ============================================================================
+// 自动更新配置（GitHub Release 自更新，逻辑见 infra/updater.rs）
+// ============================================================================
+
+fn default_update_enabled() -> bool {
+    true
+}
+
+fn default_update_auto_apply() -> bool {
+    true
+}
+
+fn default_update_check_interval_secs() -> u64 {
+    // 6 小时，叠加后台任务的随机抖动错峰
+    21_600
+}
+
+fn default_update_repo() -> String {
+    "8kugames/Cyber-Jianghu".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UpdateConfig {
+    /// 后台自动更新总开关（关闭后不再周期检查，CLI/HTTP 手动触发仍可用）
+    #[serde(default = "default_update_enabled")]
+    pub enabled: bool,
+
+    /// 发现新版本后是否自动下载安装并重启；false = 仅检查并记录日志
+    #[serde(default = "default_update_auto_apply")]
+    pub auto_apply: bool,
+
+    /// 检查间隔（秒），运行时下限钳位 600s
+    #[serde(default = "default_update_check_interval_secs")]
+    pub check_interval_secs: u64,
+
+    /// 更新源仓库（owner/repo，须为公开仓库的 GitHub Release）
+    #[serde(default = "default_update_repo")]
+    pub repo: String,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_update_enabled(),
+            auto_apply: default_update_auto_apply(),
+            check_interval_secs: default_update_check_interval_secs(),
+            repo: default_update_repo(),
+        }
+    }
+}
+
+// ============================================================================
 // 完整配置
 // ============================================================================
 
@@ -1096,6 +1147,10 @@ pub struct Config {
     /// Token 优化配置（总开关默认开启；serde 缺省与代码 Default 一致）
     #[serde(default)]
     pub token_optimization: TokenOptimizationConfig,
+
+    /// 自动更新配置（GitHub Release 自更新）
+    #[serde(default)]
+    pub update: UpdateConfig,
 
     /// 角色生成约束（必填，缺失时 serde 报错 fail-fast）
     pub character_generation: CharacterGenerationConfig,
@@ -1279,6 +1334,7 @@ mod tests {
             servers_dir: PathBuf::new(),
             earth_soul: crate::soul::earth::config::EarthSoulConfig::default(),
             token_optimization: TokenOptimizationConfig::default(),
+            update: UpdateConfig::default(),
             character_generation: test_cg(),
         };
         assert_eq!(
@@ -1308,6 +1364,7 @@ mod tests {
             servers_dir: PathBuf::new(),
             earth_soul: crate::soul::earth::config::EarthSoulConfig::default(),
             token_optimization: TokenOptimizationConfig::default(),
+            update: UpdateConfig::default(),
             character_generation: test_cg(),
         };
         assert_eq!(

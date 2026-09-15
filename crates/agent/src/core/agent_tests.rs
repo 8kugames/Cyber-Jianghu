@@ -16,6 +16,7 @@ fn test_config() -> Config {
         servers_dir: PathBuf::from("/tmp/test-agent-servers"),
         earth_soul: crate::soul::earth::config::EarthSoulConfig::default(),
         token_optimization: crate::config::TokenOptimizationConfig::default(),
+        update: crate::config::UpdateConfig::default(),
         character_generation: crate::config::CharacterGenerationConfig {
             world_setting: "测试世界".to_string(),
             fields: Vec::new(),

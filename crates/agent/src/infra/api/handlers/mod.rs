@@ -26,6 +26,7 @@ mod relationship;
 mod soul_cycle;
 mod state_stream;
 mod tick_notify;
+mod update;
 mod validate;
 
 // Re-export parent module items for sub-module access via `super::xxx`
@@ -54,4 +55,5 @@ pub(crate) use relationship::*;
 pub(crate) use soul_cycle::*;
 pub(crate) use state_stream::*;
 pub(crate) use tick_notify::*;
+pub(crate) use update::*;
 pub(crate) use validate::*;

@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Features
+
+- **Agent 自动更新（GitHub Release）**（agent）：新增 `infra/updater` 自更新模块——更新判定用 digest 恒等比较（当前 exe sha256 vs 最新 release 平台资产 digest，规避 tag=server 版本与 agent 版本不可比问题），下载后 sha256 校验（fail-safe：缺 digest 或校验不符拒绝安装）；apply 进程内互斥串行化（后台任务与手动触发并发不重复下载安装），安装后失效 digest 缓存使后续判定反映新文件；后台周期检查（默认 6h+抖动）自动下载安装并重启（unix execve 自替换/Windows exe.old 让位）；新增 CLI `cyber-jianghu-agent update [--check-only]` 与 HTTP 端点 `GET /api/v1/update/status`、`POST /api/v1/update/check`、`POST /api/v1/update/apply`（Bearer 认证）；面板设置页新增「版本与更新」卡片（当前版本/digest、最新 release、检查与安装按钮，守卫原因可见）；容器内（/.dockerenv）与 cargo 构建产物（target/ 下）自动跳过，`CYBER_JIANGHU_SELF_UPDATE=0` 可硬禁用；配置项见 agent.yaml `update` 段（enabled/auto_apply/check_interval_secs/repo）。
+
 ## [0.1.345] - 2026-09-15
 
 ### Features
