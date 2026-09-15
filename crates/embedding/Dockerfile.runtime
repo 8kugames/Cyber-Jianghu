@@ -1,0 +1,73 @@
+# ============================================================================
+# Embedding 服务运行时镜像配方（runtime-only，单一来源）
+# ============================================================================
+# 供"二进制注入"型构建复用（避免各脚本内联重复配方导致漂移）：
+#   - scripts/deploy/build-embedding-image.sh  弱机/离线镜像（BASE=local-debian-slim:runtime）
+#
+# 运行时阶段的权威结构来源是 crates/embedding/Dockerfile 的 Stage 2；本文件与其
+# 保持同步，仅两处来源改为 build context 中的现成文件：
+#   - 二进制 COPY 来源从 --from=builder 改为 EMBEDDING_BIN
+#   - 模型改为 COPY 现成目录（MODEL_DIR），下载与 SHA256 校验由调用脚本完成
+#
+# 用法（build context 必须是仓库根）：
+#   docker build -f crates/embedding/Dockerfile.runtime \
+#     --build-arg BASE=<runtime基镜像> \
+#     --build-arg EMBEDDING_BIN=<context 内二进制路径> \
+#     --build-arg MODEL_DIR=<context 内模型目录> \
+#     [--build-arg INSTALL_APT=0] \
+#     -t <tag> .
+#
+# INSTALL_APT：基镜像已烘焙运行时依赖（如 local-debian-slim:runtime）时传 0，
+# 跳过 apt 层，实现完全离线构建；公网基镜像（debian:trixie-slim）保持默认 1。
+# ============================================================================
+
+ARG BASE=debian:trixie-slim
+FROM ${BASE}
+
+# 配置 Debian 镜像源（阿里云）；基镜像已配置或无该文件时无害
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources || \
+    sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list
+
+# 安装运行时依赖；INSTALL_APT=0 时跳过（基镜像已含，离线构建场景）
+ARG INSTALL_APT=1
+RUN if [ "$INSTALL_APT" = "1" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl libssl3 && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+# 创建非root用户
+RUN groupadd -g 1000 cyberjianghu && \
+    useradd -u 1000 -g cyberjianghu -m -s /bin/bash cyberjianghu
+
+# 设置工作目录
+WORKDIR /app
+
+# 注入现成二进制（由调用方通过 EMBEDDING_BIN 指定 context 内路径）
+ARG EMBEDDING_BIN=.bin/embedding-bin
+COPY ${EMBEDDING_BIN} /app/embedding-service
+RUN chmod +x /app/embedding-service
+
+# 注入现成模型目录（下载与 SHA256 校验由调用脚本完成，本层不做网络操作）
+ARG MODEL_DIR=.bin/model/bge-small-zh-v1.5
+COPY ${MODEL_DIR}/ /app/data/models/BAAI/bge-small-zh-v1.5/
+
+# 创建目录结构并设置权限（与权威 Stage 2 同步：data + config）
+RUN mkdir -p /app/data /app/config && \
+    chown -R cyberjianghu:cyberjianghu /app
+
+# 暴露 HTTP API 端口（默认 23350，运行时可通过 EMBEDDING_PORT 环境变量覆盖）
+EXPOSE 23350
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:23350/api/health || exit 1
+
+# 设置环境变量
+ENV RUST_LOG=info \
+    CYBER_JIANGHU_DATA_DIR=/app/data \
+    EMBEDDING_PORT=23350
+
+USER cyberjianghu
+
+# 默认启动
+CMD ["./embedding-service"]
