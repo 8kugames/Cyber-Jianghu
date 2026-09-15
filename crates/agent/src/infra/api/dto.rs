@@ -258,4 +258,7 @@ pub struct SetupStatusResponse {
     /// 且请求对端为 loopback 时返回；远程/反代部署一律不暴露（fail-closed）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_token: Option<String>,
+    /// 自动注册剩余秒数（等待注册态布防了倒计时时返回；None = 未布防/已注册）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_register_remaining_secs: Option<u64>,
 }

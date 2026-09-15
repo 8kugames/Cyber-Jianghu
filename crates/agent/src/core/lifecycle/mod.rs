@@ -47,6 +47,16 @@ impl super::Agent {
             } else {
                 warn!("No active character, waiting for character creation");
             }
+            // 缺口修复 2026-09-15：此路径原先直接等待，容器重建会丢失原进程
+            // 调度的转世定时器（agent-4 事故），且全新安装无任何兑底。
+            // 现区分两种情况：
+            //   a) 存在可自动转世的死亡角色 → 重新调度转世（与注册返回 nil 路径对齐）
+            //   b) 无可转世角色（全新安装/全部归隐）→ 布防自动注册倒计时
+            //      （runtime.auto_register_timeout_secs，默认 30 分钟；面板引导
+            //      注册并显示倒计时，超时自动生成角色）
+            if !death::try_schedule_startup_rebirth(self).await {
+                self.arm_auto_register_if_absent().await;
+            }
             // 保持进程存活，等待 reconnect_rx 触发重连
             self.wait_for_rebirth().await?;
             return Ok(());
@@ -141,6 +151,9 @@ impl super::Agent {
                         "（注册时角色已死亡，自动转世）",
                     )
                     .await;
+                } else {
+                    // 无可自动转世角色（全新安装/全部归隐）→ 布防自动注册兑底
+                    self.arm_auto_register_if_absent().await;
                 }
                 self.wait_for_rebirth().await?;
                 return Ok(());
@@ -273,6 +286,11 @@ impl super::Agent {
                 }
             }
 
+            // 同类缺口：此路径原先也不调度转世/兑底，断连期间死亡后直等外部干预。
+            // 死亡角色可转世则调度，否则布防自动注册。
+            if !death::try_schedule_startup_rebirth(self).await {
+                self.arm_auto_register_if_absent().await;
+            }
             self.wait_for_rebirth().await?;
             return Ok(());
         }
@@ -746,14 +764,57 @@ impl super::Agent {
                     }
 
                     // 三魂循环（ActorSoul → ReflectorSoul 审查 + 后置处理）
-                    let soul_result = self
-                        .run_three_soul_cycle(
+                    //
+                    // 中断防护：认知循环内含 LLM 重试管线（game_rules.intent_batch
+                    // .max_retries 次退避重试），flaky LLM 下可运行数十分钟；期间主
+                    // select! 无法轮询死亡/转世/重连通道。2026-09-15 柳青崖事故：
+                    // 死亡到达时决策正处于重试中 → 死后持续空烧 LLM 且错过
+                    // rebirth_notify（Notify 只唤醒当前等待者），仅重启容器可恢复。
+                    // 此处与三类信号竞速，任一到达即放弃本轮决策（in-flight future
+                    // 被 drop），回到主循环由对应分支正式处理（AgentDied →
+                    // handle_death → maybe_schedule_auto_rebirth 自动转世链）。
+                    // 接收端用 resubscribe/subscribe 独立订阅，不与主分支争用广播。
+                    let interrupt_api_state = self.http_api_state.clone();
+                    let mut interrupt_death_rx =
+                        death_rx.as_ref().map(|rx| rx.resubscribe());
+                    let mut interrupt_reconnect_rx = interrupt_api_state
+                        .as_ref()
+                        .and_then(|s| s.reconnect_tx.as_ref().map(|tx| tx.subscribe()));
+                    let soul_result = tokio::select! {
+                        r = self.run_three_soul_cycle(
                             &world_state,
                             &memory_context,
                             active_dream.as_deref(),
                             &last_intents_for_narrative,
-                        )
-                        .await?;
+                        ) => r?,
+                        _ = async {
+                            match interrupt_death_rx.as_mut() {
+                                Some(rx) => { let _ = rx.recv().await; }
+                                None => std::future::pending::<()>().await,
+                            }
+                        } => {
+                            info!("[main] tick={} 认知循环期间收到死亡通知，中断本轮决策", world_state.tick_id);
+                            continue;
+                        }
+                        _ = async {
+                            match interrupt_reconnect_rx.as_mut() {
+                                Some(rx) => { let _ = rx.recv().await; }
+                                None => std::future::pending::<()>().await,
+                            }
+                        } => {
+                            info!("[main] tick={} 认知循环期间收到重连请求，中断本轮决策", world_state.tick_id);
+                            continue;
+                        }
+                        _ = async {
+                            match interrupt_api_state.as_ref() {
+                                Some(s) => s.rebirth_notify.notified().await,
+                                None => std::future::pending::<()>().await,
+                            }
+                        } => {
+                            info!("[main] tick={} 认知循环期间收到转世通知，中断本轮决策", world_state.tick_id);
+                            continue;
+                        }
+                    };
                     let mut final_intent = soul_result.intent;
                     let final_intent_validated = soul_result.validated;
                     let soul_cycle_attempt = soul_result.attempt;

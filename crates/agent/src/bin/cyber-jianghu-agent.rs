@@ -619,10 +619,23 @@ fn create_llm_client(
 
 /// Waits for a valid character to appear in the characters directory.
 /// HTTP API must be started before calling this function.
-async fn await_character_loop(server_dir: &Path) -> Result<()> {
+async fn await_character_loop(
+    server_dir: &Path,
+    config: &cyber_jianghu_agent::config::Config,
+    api_state: Option<&Arc<cyber_jianghu_agent::infra::api::HttpApiState>>,
+) -> Result<()> {
     let characters_dir = server_dir.join("characters");
 
     std::fs::create_dir_all(&characters_dir).context("Failed to create characters directory")?;
+
+    // 自动注册倒计时布防：等待期面板（setup/status）显示剩余秒数引导人工注册，
+    // 超时后自动生成角色（runtime.auto_register_timeout_secs，0 = 禁用）。
+    // 与运行期 wait_for_rebirth 共用 auto_register 模块，口径一致。
+    let timeout_secs = config.runtime.auto_register_timeout_secs;
+    if let Some(state) = api_state {
+        cyber_jianghu_agent::infra::api::auto_register::arm_deadline_if_absent(state, timeout_secs)
+            .await;
+    }
 
     info!("Waiting for character creation...");
     info!("Access web panel to create a character");
@@ -651,7 +664,40 @@ async fn await_character_loop(server_dir: &Path) -> Result<()> {
                 c.name,
                 c.agent_id.expect("character must have agent_id")
             );
+            if let Some(state) = api_state {
+                cyber_jianghu_agent::infra::api::auto_register::clear_deadline(state).await;
+            }
             return Ok(());
+        }
+
+        // 超时兑底：读共享截止时刻（与面板倒计时同一来源），到点自动生成角色。
+        // 注册 handler 成功后会落盘 character.yaml，下一轮循环经 select_character 退出。
+        if let Some(state) = api_state {
+            let due = state
+                .auto_register_deadline
+                .read()
+                .await
+                .is_some_and(|d| std::time::Instant::now() >= d);
+            if due {
+                match cyber_jianghu_agent::infra::api::auto_register::auto_register_via_loopback(
+                    state,
+                )
+                .await
+                {
+                    Ok(id) => info!("[auto-register] 自动注册成功: agent_id={}", id),
+                    Err(e) => {
+                        warn!(
+                            "[auto-register] 自动注册失败: {}，{}s 后重试",
+                            e, timeout_secs
+                        );
+                        cyber_jianghu_agent::infra::api::auto_register::rearm_deadline(
+                            state,
+                            timeout_secs,
+                        )
+                        .await;
+                    }
+                }
+            }
         }
 
         if watcher.is_none() {
@@ -803,7 +849,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 "请通过 Web 面板创建角色: http://localhost:{}/index.html",
                 early_actual_port
             );
-            await_character_loop(&server_dir).await?;
+            await_character_loop(&server_dir, &config, _early_api_state.as_ref()).await?;
             // After waiting, character MUST exist
             select_character(&server_dir).context("Character not found after waiting")?
         }

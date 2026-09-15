@@ -9,6 +9,9 @@ let activePanel = 'attributes';
 let characterData = null;
 let characterList = [];
 let unsubscribe = null;
+// 引导注册态：无角色时自动弹出创建弹窗并显示自动生成倒计时
+let autoRegisterTimer = null;
+let autoRegisterWatching = false;
 
 export const characterPage = {
     mount(container) {
@@ -22,6 +25,7 @@ export const characterPage = {
     },
     unmount() {
         if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+        stopAutoRegisterWatch();
     },
 };
 
@@ -171,6 +175,8 @@ async function loadCharacterData() {
         if (infoEl) infoEl.innerHTML = '<p class="text-muted">无角色数据</p>';
         if (e.message.includes('412') || e.message.includes('没有')) {
             if (infoEl) infoEl.innerHTML = '<p class="text-muted">当前无活跃角色，请创建新角色</p>';
+            // 无角色：自动打开引导注册（等待期显示自动生成倒计时）
+            openGuidedRegistration();
         }
     }
 }
@@ -211,6 +217,7 @@ async function loadPanel() {
 function showCreationModal() {
     showModal(`
         <h3 style="margin-bottom:12px">创建新角色</h3>
+        <div id="auto-register-banner" style="display:none;margin-bottom:12px;padding:8px 12px;border-radius:6px;background:rgba(255,193,7,.12);color:var(--text);font-size:13px"></div>
         <div style="display:flex;gap:8px;margin-bottom:16px">
             <button class="btn btn-primary" id="create-generate-btn">一键生成 (LLM)</button>
             <button class="btn" id="create-manual-btn">手动创建</button>
@@ -219,10 +226,81 @@ function showCreationModal() {
         <div id="create-content"></div>
     `);
 
-    document.getElementById('create-close-btn')?.addEventListener('click', hideModal);
+    document.getElementById('create-close-btn')?.addEventListener('click', () => {
+        stopAutoRegisterWatch();
+        hideModal();
+    });
 
     document.getElementById('create-generate-btn')?.addEventListener('click', startGeneration);
     document.getElementById('create-manual-btn')?.addEventListener('click', showManualForm);
+}
+
+// ============================================================================
+// Guided registration (no-character state)
+// 无角色时自动打开引导；等待期轮询 setup/status 显示自动生成倒计时；
+// 后端超时自动生成后刷新页面状态。
+// ============================================================================
+
+function openGuidedRegistration() {
+    if (autoRegisterWatching) return;
+    autoRegisterWatching = true;
+    showCreationModal();
+    startAutoRegisterWatch();
+}
+
+function formatMmss(totalSecs) {
+    const m = Math.floor(totalSecs / 60);
+    const s = totalSecs % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+async function renderAutoRegisterBanner() {
+    const el = document.getElementById('auto-register-banner');
+    if (!el) return;
+    try {
+        const status = await get(API.SETUP_STATUS, { timeout: 3000, retries: 0 });
+        const remaining = status?.auto_register_remaining_secs;
+        if (typeof remaining === 'number') {
+            el.style.display = 'block';
+            el.innerHTML = `距自动生成角色还有 <b>${formatMmss(remaining)}</b>（在此期间可手动创建）`;
+        } else {
+            el.style.display = 'none';
+        }
+    } catch (_) {
+        el.style.display = 'none';
+    }
+}
+
+function startAutoRegisterWatch() {
+    if (autoRegisterTimer) clearInterval(autoRegisterTimer);
+    let seenCountdown = false;
+    autoRegisterTimer = setInterval(async () => {
+        await renderAutoRegisterBanner();
+        let status = null;
+        try {
+            status = await get(API.SETUP_STATUS, { timeout: 3000, retries: 0 });
+        } catch (_) { return; }
+        const remaining = status?.auto_register_remaining_secs;
+        if (typeof remaining === 'number') seenCountdown = true;
+        // 倒计时消失（自动生成已执行/被取消）→ 检查角色是否已就绪
+        if (seenCountdown && typeof remaining !== 'number') {
+            try {
+                const data = await get(API.CHARACTER, { timeout: 3000, retries: 0 });
+                if (data && (data.name || data.agent_id)) {
+                    stopAutoRegisterWatch();
+                    hideModal();
+                    showSuccess('已自动生成角色：' + (data.name || ''));
+                    loadCharacterData();
+                    loadCharacterList();
+                }
+            } catch (_) { /* 412 = 仍无角色，继续等待 */ }
+        }
+    }, 1000);
+}
+
+function stopAutoRegisterWatch() {
+    if (autoRegisterTimer) { clearInterval(autoRegisterTimer); autoRegisterTimer = null; }
+    autoRegisterWatching = false;
 }
 
 async function startGeneration() {
@@ -248,6 +326,7 @@ async function startGeneration() {
         document.getElementById('create-confirm-btn')?.addEventListener('click', async () => {
             try {
                 await post(API.CHARACTER_REGISTER, charData);
+                stopAutoRegisterWatch();
                 showSuccess('角色创建成功');
                 hideModal();
                 loadCharacterData();

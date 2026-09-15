@@ -32,6 +32,7 @@
 // - 并发安全：所有可变状态都使用 tokio 的读写锁保护
 
 pub mod auth;
+pub mod auto_register;
 pub mod cognitive_context;
 mod context;
 mod dto;
@@ -195,6 +196,10 @@ pub struct HttpApiState {
     pub pending_rebirth_system_prompt: Arc<RwLock<Option<String>>>,
     /// 自动重生开关（运行时可热切换）
     pub auto_rebirth: std::sync::Arc<std::sync::atomic::AtomicBool>,
+
+    /// 自动注册倒计时截止时刻（等待注册态布防；Some 时 setup/status 暴露剩余秒数，
+    /// 面板显示倒计时；超时由 Agent 自动生成并注册角色）
+    pub auto_register_deadline: Arc<RwLock<Option<std::time::Instant>>>,
     /// HTTP API 服务器实际端口（用于 Web 面板链接）
     pub actual_port: u16,
     /// LLM Client 容器（支持热重载时重建）
@@ -896,6 +901,7 @@ pub fn create_http_state(
         pending_rebirth_system_prompt: Arc::new(RwLock::new(None)),
         auto_rebirth: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(auto_rebirth_init)),
         actual_port,
+        auto_register_deadline: Arc::new(RwLock::new(None)),
         llm_container: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         decision_context_snapshot: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         world_state_store: Arc::new(std::sync::RwLock::new(None)),

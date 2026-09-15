@@ -470,6 +470,7 @@ impl super::Agent {
                         Ok(()) => {
                             info!("[rebirth] 重连成功，退出等待转生模式");
                             // reconnect 成功后 death_reported 已重置
+                            self.clear_auto_register_deadline().await;
                             return Ok(());
                         }
                         Err(e) => {
@@ -509,6 +510,7 @@ impl super::Agent {
                                 }
                             }
                             info!("[rebirth] 自动转世重连成功，退出等待转生模式");
+                            self.clear_auto_register_deadline().await;
                             return Ok(());
                         }
                         Err(e) => {
@@ -516,8 +518,83 @@ impl super::Agent {
                         }
                     }
                 }
+                // 自动注册超时：等待期无人工注册且无转世 → 自行生成角色。
+                // 通过 loopback 调用自身的 generate/register handler（零逻辑重复，
+                // 401 刷新/校验/落盘/重连信号全部复用），成功后 register handler
+                // 发出 reconnect_tx，下一轮循环由重连分支退出等待。
+                _ = async {
+                    if let Some(ref api_state) = self.http_api_state {
+                        let deadline = *api_state.auto_register_deadline.read().await;
+                        if let Some(d) = deadline {
+                            tokio::time::sleep_until(tokio::time::Instant::from_std(d)).await;
+                        } else {
+                            std::future::pending::<()>().await;
+                        }
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {
+                    match self.auto_register_via_loopback().await {
+                        Ok(agent_id) => {
+                            info!("[auto-register] 自动注册成功: agent_id={}", agent_id);
+                        }
+                        Err(e) => {
+                            warn!(
+                                "[auto-register] 自动注册失败: {}，重新布防倒计时后重试",
+                                e
+                            );
+                            self.rearm_auto_register_deadline().await;
+                        }
+                    }
+                    // 不 return：等 reconnect_tx 信号走重连分支退出
+                }
             }
         }
+    }
+
+    /// 布防自动注册倒计时（仅当未布防且配置启用时）
+    ///
+    /// 调用时机：启动期无可自动转世角色（全新安装/全部归隐/auto_rebirth 关闭），
+    /// 或注册返回 nil 且无死亡角色可转世。面板通过 setup/status 读取剩余秒数
+    /// 渲染引导倒计时，超时由 [`Self::auto_register_via_loopback`] 兑现。
+    pub(crate) async fn arm_auto_register_if_absent(&mut self) {
+        if let Some(ref api_state) = self.http_api_state {
+            let api_state = api_state.clone();
+            crate::infra::api::auto_register::arm_deadline_if_absent(
+                &api_state,
+                self.config.runtime.auto_register_timeout_secs,
+            )
+            .await;
+        }
+    }
+
+    /// 重新布防（自动注册失败后重试用，无条件覆盖）
+    async fn rearm_auto_register_deadline(&mut self) {
+        if let Some(ref api_state) = self.http_api_state {
+            let api_state = api_state.clone();
+            crate::infra::api::auto_register::rearm_deadline(
+                &api_state,
+                self.config.runtime.auto_register_timeout_secs,
+            )
+            .await;
+        }
+    }
+
+    /// 清除倒计时（注册/转世成功后）
+    async fn clear_auto_register_deadline(&mut self) {
+        if let Some(ref api_state) = self.http_api_state {
+            let api_state = api_state.clone();
+            crate::infra::api::auto_register::clear_deadline(&api_state).await;
+        }
+    }
+
+    /// 超时自动生成并注册角色（委托 auto_register 模块，与冷启动路径共用）
+    async fn auto_register_via_loopback(&mut self) -> Result<Uuid, String> {
+        let api_state = self
+            .http_api_state
+            .clone()
+            .ok_or_else(|| "无 HttpApiState".to_string())?;
+        crate::infra::api::auto_register::auto_register_via_loopback(&api_state).await
     }
 }
 

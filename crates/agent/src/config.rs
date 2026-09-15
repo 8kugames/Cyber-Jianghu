@@ -483,6 +483,16 @@ pub struct RuntimeConfig {
     /// 自动重生开关：角色死亡后自动转世重生（复用角色信息）
     #[serde(default = "default_true")]
     pub auto_rebirth: bool,
+
+    /// 等待注册超时后自动生成角色（秒）。0 = 禁用；默认 1800（30 分钟）。
+    /// 触发条件：启动时无可自动转世角色（全新安装/全部归隐）。
+    /// 等待期面板显示倒计时引导人工注册，超时由 Agent 自行生成并注册。
+    #[serde(default = "default_auto_register_timeout_secs")]
+    pub auto_register_timeout_secs: u64,
+}
+
+fn default_auto_register_timeout_secs() -> u64 {
+    1800
 }
 
 impl Default for RuntimeConfig {
@@ -492,6 +502,7 @@ impl Default for RuntimeConfig {
             port: 0,
             llm_disabled: false,
             auto_rebirth: true,
+            auto_register_timeout_secs: default_auto_register_timeout_secs(),
         }
     }
 }
@@ -1195,6 +1206,18 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 自动注册倒计时默认 30 分钟（1800s）；显式 0 = 禁用；Default 与 serde 缺省一致
+    #[test]
+    fn test_auto_register_timeout_default_and_override() {
+        let default_cfg: RuntimeConfig = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(default_cfg.auto_register_timeout_secs, 1800);
+        assert_eq!(RuntimeConfig::default().auto_register_timeout_secs, 1800);
+
+        let disabled: RuntimeConfig =
+            serde_yaml::from_str("auto_register_timeout_secs: 0").unwrap();
+        assert_eq!(disabled.auto_register_timeout_secs, 0);
+    }
 
     /// 测试用 CharacterGenerationConfig (minimal schema)
     fn test_cg() -> CharacterGenerationConfig {

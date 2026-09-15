@@ -124,6 +124,62 @@ fn schedule_auto_rebirth(params: RebirthParams) {
     });
 }
 
+/// 启动期/断连期死亡角色的转世调度（无活跃角色入口的统一处理）。
+///
+/// 扫描本地角色目录找最新一世的死亡角色（含有效 agent_id），若 auto_rebirth
+/// 开启则调度转世并返回 true；无可转世角色（全新安装/全部归隐/开关关闭）
+/// 返回 false，由调用方布防自动注册倒计时。
+///
+/// 修复 2026-09-15 缺口：`run()` 无活跃角色路径与断连死亡路径原先直接进
+/// `wait_for_rebirth`，不调度转世——容器重建会丢掉原进程的转世定时器，
+/// 角色永久卡在等待态（agent-4 事故）。
+pub(super) async fn try_schedule_startup_rebirth(agent: &Agent) -> bool {
+    let auto_rebirth_enabled = agent
+        .http_api_state
+        .as_ref()
+        .map(|s| s.auto_rebirth.load(std::sync::atomic::Ordering::Relaxed))
+        .unwrap_or(true);
+    if !auto_rebirth_enabled {
+        return false;
+    }
+
+    let characters_dir = match agent.http_api_state.as_ref() {
+        Some(s) => s.character_dir.read().await.clone(),
+        None => return false,
+    };
+
+    let chars = match crate::infra::api::handlers::list_characters_from_fs(&characters_dir) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("启动期扫描角色目录失败: {}", e);
+            return false;
+        }
+    };
+
+    // 最新一世死亡角色：优先按最后连接时间，缺失时回退注册时间
+    let latest_dead = chars
+        .iter()
+        .filter(|c| c.status == crate::config::CharacterStatus::Dead)
+        .filter_map(|c| c.agent_id.filter(|id| !id.is_nil()).map(|id| (c, id)))
+        .max_by_key(|(c, _)| {
+            c.last_connected_real_time
+                .or(c.registered_at)
+                .map(|t| t.timestamp())
+                .unwrap_or(0)
+        });
+
+    let Some((char_cfg, old_agent_id)) = latest_dead else {
+        return false;
+    };
+
+    info!(
+        "启动期检测到死亡角色 {}（{}），调度自动转世",
+        char_cfg.name, old_agent_id
+    );
+    maybe_schedule_auto_rebirth(agent, old_agent_id, 0, "（启动期检测到死亡角色）").await;
+    true
+}
+
 pub(super) async fn maybe_schedule_auto_rebirth(
     agent: &Agent,
     dead_agent_id: Uuid,

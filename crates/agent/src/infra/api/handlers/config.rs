@@ -264,6 +264,7 @@ pub(crate) async fn setup_status_handler(
                 is_dead: false,
                 actual_port: state.actual_port,
                 auth_token,
+                auto_register_remaining_secs: None,
             })
             .into_response();
         }
@@ -287,6 +288,15 @@ pub(crate) async fn setup_status_handler(
 
     let needs_setup = !has_server || !has_llm;
 
+    // 自动注册倒计时剩余（未布防时为 None；面板据此渲染引导倒计时）
+    let auto_register_remaining_secs = {
+        let deadline = state.auto_register_deadline.read().await;
+        deadline.map(|d| {
+            d.saturating_duration_since(std::time::Instant::now())
+                .as_secs()
+        })
+    };
+
     Json(dto::SetupStatusResponse {
         needs_setup,
         has_server,
@@ -296,6 +306,7 @@ pub(crate) async fn setup_status_handler(
         is_dead,
         actual_port: state.actual_port,
         auth_token,
+        auto_register_remaining_secs,
     })
     .into_response()
 }

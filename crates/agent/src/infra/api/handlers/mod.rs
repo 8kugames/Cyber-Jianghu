@@ -9,6 +9,8 @@ mod basic;
 mod biography;
 mod character_helpers;
 pub(crate) use character_helpers::hierarchical_location_name;
+// list_characters_from_fs 供 core/lifecycle（启动期转世扫描）复用，单独再导出
+pub(crate) use character_helpers::list_characters_from_fs;
 mod character_info;
 mod character_register;
 mod character_reload;
