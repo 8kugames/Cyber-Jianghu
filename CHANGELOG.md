@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.1.350] - 2026-09-15
+
 ### Features
 
 - **人魂 Layer 0 目标校验优化：物品引用四形态解析与可照抄纠错回路**（agent）：物品引用统一接受四形态并归一化回写完整 uuid（完整 uuid / 名称[短uuid] / 裸中文名 / 短 uuid 前缀唯一匹配自动解析）；prompt 背包/附近/可采集渲染与全部天魂拒绝消息改为「名称[短uuid]」可照抄形态（消除完整 uuid 复制臆造英文 ID 的根因）；天魂驳回跨 tick 留痕（「上轮意图驳回记录」注入下一回合决策上下文，TTL 自过期）；空 item_id 专属指引与配置化唯一候选回填（`auto_fill_unique_item`，默认关）；自纠反馈结构化（复述原意图 + 定向修正指令）；Layer 2 规则链感知对齐（「取→用」链内动作不再被 valid_item_id_use 误拦）；物品展示格式单一真源上移 protocol（server/agent 同源防漂移）；layer0 拒绝消息模板化（`reject_feedback.layer0`）+ 模板占位符缺失自检告警；get_action_detail 提示与认知上下文「地上有…」同步可照抄口径。
