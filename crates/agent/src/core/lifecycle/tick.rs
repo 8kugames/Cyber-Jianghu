@@ -278,30 +278,7 @@ impl super::super::Agent {
                                                     cyber_jianghu_protocol::types::RelationshipMemory,
                                                 > = local_rels
                                                     .iter()
-                                                    .map(|r| {
-                                                        cyber_jianghu_protocol::types::RelationshipMemory {
-                                                            target_agent_id: r.target_agent_id,
-                                                            target_name: r.target_name.clone(),
-                                                            favorability: r.favorability,
-                                                            key_events: r
-                                                                .key_events
-                                                                .iter()
-                                                                .map(|e| {
-                                                                    cyber_jianghu_protocol::types::RelationshipKeyEvent {
-                                                                        tick_id: e.tick_id,
-                                                                        event_type: e.event_type.clone(),
-                                                                        description: e.description.clone(),
-                                                                        favorability_delta: e.favorability_delta,
-                                                                        timestamp: e.timestamp.timestamp_millis(),
-                                                                    }
-                                                                })
-                                                                .collect(),
-                                                            last_interaction_tick: r.last_interaction_tick,
-                                                            updated_at: r.updated_at.timestamp_millis(),
-                                                            self_description: r.self_description.clone(),
-                                                            description_tick: r.description_tick,
-                                                        }
-                                                    })
+                                                    .map(cyber_jianghu_protocol::types::RelationshipMemory::from)
                                                     .collect();
 
                                                 let count = proto_rels.len();

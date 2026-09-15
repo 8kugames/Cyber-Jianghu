@@ -234,6 +234,41 @@ impl Serialize for RelationshipMemory {
 }
 
 // ============================================================================
+// protocol 转换（快照同步唯一入口）
+// ============================================================================
+
+impl From<&KeyEvent> for cyber_jianghu_protocol::types::RelationshipKeyEvent {
+    fn from(e: &KeyEvent) -> Self {
+        Self {
+            tick_id: e.tick_id,
+            event_type: e.event_type.clone(),
+            description: e.description.clone(),
+            favorability_delta: e.favorability_delta,
+            timestamp: e.timestamp.timestamp_millis(),
+        }
+    }
+}
+
+/// agent 本地（DateTime 语义）→ protocol wire（i64 Unix 毫秒）唯一转换点。
+///
+/// 日终关系快照（`ClientMessage::RelationshipSnapshot`）由此构建；
+/// 字段映射与时间戳口径在此维护，禁止调用方逐字段手抄。
+impl From<&RelationshipMemory> for cyber_jianghu_protocol::types::RelationshipMemory {
+    fn from(r: &RelationshipMemory) -> Self {
+        Self {
+            target_agent_id: r.target_agent_id,
+            target_name: r.target_name.clone(),
+            favorability: r.favorability,
+            key_events: r.key_events.iter().map(Into::into).collect(),
+            last_interaction_tick: r.last_interaction_tick,
+            updated_at: r.updated_at.timestamp_millis(),
+            self_description: r.self_description.clone(),
+            description_tick: r.description_tick,
+        }
+    }
+}
+
+// ============================================================================
 // 测试
 // ============================================================================
 
