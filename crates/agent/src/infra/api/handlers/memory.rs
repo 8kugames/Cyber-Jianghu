@@ -195,10 +195,11 @@ pub(crate) async fn get_recent_memory_handler(
 
     let service = MemoryService::new(&mut mgr);
 
-    let fetch = (page * limit).min(MAX_PAGE_SIZE);
+    let fetch = page.saturating_mul(limit).min(MAX_PAGE_SIZE);
     match service.get_recent(fetch).await {
         Ok(all) => {
-            let offset = (page - 1) * limit;
+            // page 已在解析处 .max(1)；乘法按饱和语义防极大页码溢出
+            let offset = (page - 1).saturating_mul(limit);
             let page_slice: Vec<_> = all.into_iter().skip(offset).take(limit).collect();
             let has_more = page_slice.len() == limit;
             let results: Vec<serde_json::Value> = page_slice
@@ -232,10 +233,11 @@ async fn read_memories_for_agent(
     };
 
     // 按时间排序分页（与前端"近期记忆"语义一致）
-    let fetch = (page * limit).min(MAX_PAGE_SIZE);
+    let fetch = page.saturating_mul(limit).min(MAX_PAGE_SIZE);
     match store.get_recent_memories(fetch) {
         Ok(all) => {
-            let offset = (page - 1) * limit;
+            // page 已在解析处 .max(1)；乘法按饱和语义防极大页码溢出
+            let offset = (page - 1).saturating_mul(limit);
             let page_slice: Vec<_> = all.into_iter().skip(offset).take(limit).collect();
             let has_more = page_slice.len() == limit;
             let results: Vec<serde_json::Value> = page_slice.iter().map(memory_to_json).collect();
@@ -321,7 +323,7 @@ pub(crate) async fn get_daily_summaries_handler(
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_PAGE_SIZE)
         .min(MAX_PAGE_SIZE);
-    let offset = (page - 1) * limit;
+    let offset = (page - 1).saturating_mul(limit);
 
     let target_agent_id: Option<uuid::Uuid> = params
         .get("agent_id")

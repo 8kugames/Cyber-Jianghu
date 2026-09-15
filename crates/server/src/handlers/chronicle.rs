@@ -42,7 +42,7 @@ pub async fn list_chronicles(
 ) -> Result<Json<ListResponse>, axum::http::StatusCode> {
     let page = params.page.unwrap_or(1).max(1);
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
-    let offset = (page - 1) * limit;
+    let offset = crate::handlers::pagination::offset_of_i32(page, limit);
 
     let chronicles = crate::chronicle::storage::list_chronicles(&state.db_pool, limit, offset)
         .await

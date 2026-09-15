@@ -380,8 +380,10 @@ pub(crate) async fn get_dream_records_handler(
     dream.ensure_loaded(&dd, &agent_id);
 
     let total = dream.records.len() as u32;
-    let start = ((page - 1) * limit) as usize;
-    let end = std::cmp::min(start + limit as usize, dream.records.len());
+    // page/limit 直出查询参数：page=0 会让 u32 下溢，极大值让乘法溢出，
+    // 均按饱和语义钳成"极远页"，自然得到空结果（与 server 侧 offset_of 同规范）
+    let start = (page.max(1) as usize - 1).saturating_mul(limit as usize);
+    let end = std::cmp::min(start.saturating_add(limit as usize), dream.records.len());
     let records = if start < dream.records.len() {
         dream.records[start..end].to_vec()
     } else {

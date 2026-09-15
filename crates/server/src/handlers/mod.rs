@@ -11,6 +11,7 @@ pub mod config_reload;
 pub mod context;
 pub mod dashboard;
 pub mod device;
+mod pagination;
 pub mod role;
 pub mod system;
 pub mod training_export_handler {
