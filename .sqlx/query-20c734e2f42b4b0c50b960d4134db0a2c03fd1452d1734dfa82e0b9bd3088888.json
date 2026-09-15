@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH dead_agents AS (\n            SELECT\n                a.agent_id,\n                a.name,\n                a.birth_tick,\n                a.retired_at,\n                a.biography,\n                a.created_at\n            FROM agents a\n            WHERE a.status = 'dead'\n        )\n        SELECT\n            da.agent_id,\n            da.name,\n            da.birth_tick,\n            da.retired_at,\n            da.biography,\n            COALESCE(s.node_id, 'unknown') AS \"location!\",\n            COALESCE(cl.action_type, 'unknown') AS \"cause!\",\n            COALESCE(cl.narrative, cl.result_message) as narrative\n        FROM dead_agents da\n        LEFT JOIN LATERAL (\n            SELECT node_id FROM agent_states\n            WHERE agent_states.agent_id = da.agent_id\n            ORDER BY tick_id DESC LIMIT 1\n        ) s ON true\n        LEFT JOIN LATERAL (\n            SELECT action_type, narrative, result_message, created_at\n            FROM agent_action_logs\n            WHERE agent_action_logs.agent_id = da.agent_id\n              AND agent_action_logs.result = 'failed'\n              AND agent_action_logs.action_type = '攻击'\n            ORDER BY agent_action_logs.created_at DESC\n            LIMIT 1\n        ) cl ON true\n        WHERE da.retired_at IS NOT NULL\n        ORDER BY da.retired_at DESC\n        LIMIT $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "agent_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "birth_tick",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "retired_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "biography",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "location!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "cause!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "narrative",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "20c734e2f42b4b0c50b960d4134db0a2c03fd1452d1734dfa82e0b9bd3088888"
+}

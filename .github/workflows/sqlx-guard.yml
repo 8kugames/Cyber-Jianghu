@@ -1,0 +1,62 @@
+# SQL 活库守卫测试 — 定期验证（不阻塞 PR）
+#
+# 动态拼接 SQL（format! 构建）无法用 sqlx::query! 宏做编译期校验，
+# 其 schema/解码正确性只能靠活库夹具驱动验证（tests/sqlx_live_schema_guard_test.rs）。
+# PR 级 CI 无 DB 环境，守卫测试 #[ignore] 默认跳过；本工作流用 postgres service
+# 容器定期（每晚）+ 手动触发执行全部守卫用例，作为该盲区的门禁。
+#
+# 宏查询的编译期校验由 pr-check.yml/ci.yml 的 SQLX_OFFLINE 路径覆盖，此处不重复。
+
+name: SQL Live Guard Tests
+
+on:
+  schedule:
+    # UTC 19:30 = 北京时间 03:30（避开整点高峰）
+    - cron: "30 19 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  guard:
+    name: Live schema guard
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cyber_jianghu_guard
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Install deps
+        run: sudo apt-get install -y libssl-dev libpq-dev pkg-config
+
+      - name: Run live schema guard tests
+        env:
+          # 守卫测试内部自动执行 run_migrations（幂等）后写入夹具
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/cyber_jianghu_guard
+        run: |
+          cargo nextest run -p cyber-jianghu-server \
+            --test sqlx_live_schema_guard_test --run-ignored=only --nocapture

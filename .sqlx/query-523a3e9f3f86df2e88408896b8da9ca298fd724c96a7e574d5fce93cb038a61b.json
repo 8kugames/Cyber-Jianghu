@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE chronicles\n        SET summary = COALESCE(NULLIF(summary, ''), $1),\n            status = CASE\n                WHEN summary_llm IS NOT NULL AND summary_llm != '' THEN 'both'\n                ELSE status\n            END\n        WHERE chronicle_id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "523a3e9f3f86df2e88408896b8da9ca298fd724c96a7e574d5fce93cb038a61b"
+}

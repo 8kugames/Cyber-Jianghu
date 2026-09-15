@@ -189,16 +189,16 @@ pub async fn update_llm_summary(
     chronicle_id: &str,
     summary_llm: &str,
 ) -> Result<()> {
-    sqlx::query(
+    sqlx::query!(
         r#"
         UPDATE chronicles
         SET summary_llm = $1,
             status = CASE WHEN summary IS NOT NULL THEN 'both' ELSE status END
         WHERE chronicle_id = $2
         "#,
+        summary_llm,
+        chronicle_id,
     )
-    .bind(summary_llm)
-    .bind(chronicle_id)
     .execute(db_pool)
     .await
     .context("更新 LLM 摘要失败")?;
@@ -214,7 +214,7 @@ pub async fn update_template_summary(
 ) -> Result<()> {
     // 只有当 summary_llm 已存在时才更新 summary（作为补充版本）
     // 如果 summary 已存在，说明主版本就是模板，不覆盖
-    sqlx::query(
+    sqlx::query!(
         r#"
         UPDATE chronicles
         SET summary = COALESCE(NULLIF(summary, ''), $1),
@@ -224,9 +224,9 @@ pub async fn update_template_summary(
             END
         WHERE chronicle_id = $2
         "#,
+        summary_template,
+        chronicle_id,
     )
-    .bind(summary_template)
-    .bind(chronicle_id)
     .execute(db_pool)
     .await
     .context("更新模板摘要失败")?;
@@ -242,7 +242,7 @@ pub async fn get_previous_chronicle_summary(
     db_pool: &crate::db::DbPool,
     current_period_start: i64,
 ) -> Result<Option<String>> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         r#"
         SELECT summary_llm, summary
         FROM chronicles
@@ -250,17 +250,13 @@ pub async fn get_previous_chronicle_summary(
         ORDER BY period_start DESC
         LIMIT 1
         "#,
+        current_period_start,
     )
-    .bind(current_period_start)
     .fetch_optional(db_pool)
     .await
     .context("查询上一周期 chronicle 失败")?;
 
-    Ok(row.map(|r| {
-        let llm: Option<String> = r.get("summary_llm");
-        let tmpl: String = r.get("summary");
-        llm.filter(|s| !s.is_empty()).unwrap_or(tmpl)
-    }))
+    Ok(row.map(|r| r.summary_llm.filter(|s| !s.is_empty()).unwrap_or(r.summary)))
 }
 
 /// 获取所有群像传记（列表）
@@ -269,7 +265,7 @@ pub async fn list_chronicles(
     limit: i32,
     offset: i32,
 ) -> Result<Vec<ChronicleMeta>> {
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         r#"
         SELECT id, chronicle_id, period_start, period_end,
                game_day_start, game_day_end, season,
@@ -279,9 +275,9 @@ pub async fn list_chronicles(
         ORDER BY period_start DESC
         LIMIT $1 OFFSET $2
         "#,
+        i64::from(limit),
+        i64::from(offset),
     )
-    .bind(limit)
-    .bind(offset)
     .fetch_all(db_pool)
     .await
     .context("查询 chronicles 列表失败")?;
@@ -289,23 +285,25 @@ pub async fn list_chronicles(
     let chronicles: Vec<ChronicleMeta> = rows
         .iter()
         .map(|r| {
-            let game_day_start: i32 = r.get("game_day_start");
-            let game_day_end: i32 = r.get("game_day_end");
+            let game_day_start = r.game_day_start;
+            let game_day_end = r.game_day_end;
             ChronicleMeta {
-                id: r.get("id"),
-                chronicle_id: r.get("chronicle_id"),
-                period_start: r.get("period_start"),
-                period_end: r.get("period_end"),
+                id: r.id,
+                chronicle_id: r.chronicle_id.clone(),
+                period_start: r.period_start,
+                period_end: r.period_end,
                 game_day_start,
                 game_day_end,
-                season: r.get("season"),
-                summary_preview: super::truncate_text(&r.get::<String, _>("summary"), 200),
-                agent_count: r.get("agent_count"),
-                actions_count: r.get("actions_count"),
-                deaths: r.get("deaths"),
-                births: r.get("births"),
-                status: r.get("status"),
-                created_at: r.get("created_at"),
+                season: r.season.clone(),
+                // summary NOT NULL；created_at 无 NOT NULL 约束但插入恒写入，
+                // NULL 仅在手工改库时出现，降级为 epoch 零点
+                summary_preview: super::truncate_text(&r.summary, 200),
+                agent_count: r.agent_count,
+                actions_count: r.actions_count,
+                deaths: r.deaths,
+                births: r.births,
+                status: r.status.clone(),
+                created_at: r.created_at.unwrap_or_default(),
                 formatted_start_date: format_game_day(game_day_start as i64),
                 formatted_end_date: format_game_day(game_day_end as i64),
             }
@@ -320,7 +318,7 @@ pub async fn get_chronicle(
     db_pool: &crate::db::DbPool,
     chronicle_id: &str,
 ) -> Result<Option<Chronicle>> {
-    let row = sqlx::query(
+    let row = sqlx::query!(
         r#"
         SELECT id, chronicle_id, period_start, period_end,
                game_day_start, game_day_end, season,
@@ -331,16 +329,19 @@ pub async fn get_chronicle(
         FROM chronicles
         WHERE chronicle_id = $1
         "#,
+        chronicle_id,
     )
-    .bind(chronicle_id)
     .fetch_optional(db_pool)
     .await
     .context("查询 chronicle 详情失败")?;
 
     match row {
         Some(r) => {
+            // JSONB 列均可空：NULL 降级为 Value::Null 后走既有 as_array 链（空集）。
+            // 旧运行期实现在 NULL 上直接解码崩溃，宏把该缺陷提前到编译期暴露。
             let highlights: Vec<Highlight> = r
-                .get::<serde_json::Value, _>("highlights")
+                .highlights
+                .unwrap_or(serde_json::Value::Null)
                 .as_array()
                 .cloned()
                 .unwrap_or_default()
@@ -349,7 +350,8 @@ pub async fn get_chronicle(
                 .collect();
 
             let agent_summaries: Vec<AgentSummary> = r
-                .get::<serde_json::Value, _>("agent_summaries")
+                .agent_summaries
+                .unwrap_or(serde_json::Value::Null)
                 .as_array()
                 .cloned()
                 .unwrap_or_default()
@@ -358,7 +360,8 @@ pub async fn get_chronicle(
                 .collect();
 
             let location_stats: Vec<LocationStat> = r
-                .get::<serde_json::Value, _>("location_stats")
+                .location_stats
+                .unwrap_or(serde_json::Value::Null)
                 .as_array()
                 .cloned()
                 .unwrap_or_default()
@@ -367,8 +370,7 @@ pub async fn get_chronicle(
                 .collect();
 
             // 从 raw_data 解析涌现事件（旧记录 raw_data 可能为 NULL 或无此字段 → 降级为空）
-            let raw_data_json: Option<serde_json::Value> =
-                r.get::<Option<serde_json::Value>, _>("raw_data");
+            let raw_data_json: Option<serde_json::Value> = r.raw_data;
             let emergence_events: Vec<crate::emergence::EmergenceEvent> = raw_data_json
                 .as_ref()
                 .and_then(|d| d.get("emergence_events"))
@@ -379,7 +381,7 @@ pub async fn get_chronicle(
                 .filter_map(|v| serde_json::from_value(v).ok())
                 .collect();
 
-            let action_stats_json = r.get::<serde_json::Value, _>("action_stats");
+            let action_stats_json = r.action_stats.unwrap_or(serde_json::Value::Null);
             let action_stats = super::ActionStats {
                 total: action_stats_json
                     .get("total")
@@ -401,28 +403,28 @@ pub async fn get_chronicle(
             };
 
             Ok(Some(Chronicle {
-                id: r.get("id"),
-                chronicle_id: r.get("chronicle_id"),
-                period_start: r.get("period_start"),
-                period_end: r.get("period_end"),
-                game_day_start: r.get("game_day_start"),
-                game_day_end: r.get("game_day_end"),
-                season: r.get("season"),
-                summary: r.get("summary"),
-                summary_llm: r.get("summary_llm"),
-                agent_count: r.get("agent_count"),
-                actions_count: r.get("actions_count"),
+                id: r.id,
+                chronicle_id: r.chronicle_id,
+                period_start: r.period_start,
+                period_end: r.period_end,
+                game_day_start: r.game_day_start,
+                game_day_end: r.game_day_end,
+                season: r.season,
+                summary: r.summary,
+                summary_llm: r.summary_llm,
+                agent_count: r.agent_count,
+                actions_count: r.actions_count,
                 highlights,
                 emergence_events,
                 agent_summaries,
                 action_stats,
                 location_stats,
-                deaths: r.get("deaths"),
-                births: r.get("births"),
-                status: r.get("status"),
-                created_at: r.get("created_at"),
-                formatted_start_date: format_game_day(r.get::<i32, _>("game_day_start") as i64),
-                formatted_end_date: format_game_day(r.get::<i32, _>("game_day_end") as i64),
+                deaths: r.deaths,
+                births: r.births,
+                status: r.status,
+                created_at: r.created_at.unwrap_or_default(),
+                formatted_start_date: format_game_day(r.game_day_start as i64),
+                formatted_end_date: format_game_day(r.game_day_end as i64),
             }))
         }
         None => Ok(None),

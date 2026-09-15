@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, chronicle_id, period_start, period_end,\n               game_day_start, game_day_end, season,\n               summary, agent_count, actions_count,\n               deaths, births, status, created_at\n        FROM chronicles\n        ORDER BY period_start DESC\n        LIMIT $1 OFFSET $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "chronicle_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "period_start",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "period_end",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "game_day_start",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "game_day_end",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "season",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "summary",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "agent_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "actions_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "deaths",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "births",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 12,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "e50d2cd186beec2d7f7c695a835ce26cecf6199b2b8bb9731c86ed732d9399ac"
+}

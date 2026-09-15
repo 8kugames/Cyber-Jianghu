@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE chronicles\n        SET summary_llm = $1,\n            status = CASE WHEN summary IS NOT NULL THEN 'both' ELSE status END\n        WHERE chronicle_id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "556a7aa57b1b57a5ec5d327b0c0c062c4475b07e40473e74a244a7af6e46c568"
+}

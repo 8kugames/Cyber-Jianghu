@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT summary_llm, summary\n        FROM chronicles\n        WHERE period_end < $1\n        ORDER BY period_start DESC\n        LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "summary_llm",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "summary",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "b6d88bbce502856b593e71722060b7987e384dea85d419170dbdd6b89e8a19f2"
+}

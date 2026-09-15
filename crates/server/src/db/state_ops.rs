@@ -135,7 +135,7 @@ pub async fn get_or_init_deployment_time(pool: &PgPool) -> Result<DateTime<Utc>>
     .context("初始化服务器部署时间失败")?;
 
     let deployed_at: DateTime<Utc> =
-        sqlx::query_scalar(r#"SELECT deployed_at FROM server_deployment WHERE id = 1"#)
+        sqlx::query_scalar!(r#"SELECT deployed_at FROM server_deployment WHERE id = 1"#)
             .fetch_one(pool)
             .await
             .context("读取服务器部署时间失败")?;

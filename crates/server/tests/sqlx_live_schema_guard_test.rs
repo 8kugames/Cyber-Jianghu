@@ -31,8 +31,11 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use cyber_jianghu_server::actions::get_inventory_item_quantity;
-use cyber_jianghu_server::telemetry::collector::collect_from_agents;
+use cyber_jianghu_server::telemetry::collector::{collect_from_agents, run_aggregation};
 use cyber_jianghu_server::telemetry::storage::query_aggregations;
+
+/// 迁移段串行化的 advisory lock key（任意固定魔数，仅本测试文件使用）
+const GUARD_MIGRATION_LOCK_KEY: i64 = 715_573;
 
 /// 读取 DATABASE_URL；不存在则 skip
 fn test_db_url() -> Option<String> {
@@ -45,9 +48,25 @@ async fn test_pool(url: &str) -> PgPool {
         .connect(url)
         .await
         .expect("connect DATABASE_URL");
+    // run_migrations 是无版本表/无锁的幂等 DDL 重放，多个测试进程并行重放会
+    // 触发 DDL 竞态（CREATE INDEX/COMMENT 同名冲突）。在独占连接上持会话级
+    // advisory lock 串行化迁移段：其他进程的 lock 请求阻塞直至本段完成，
+    // 锁随连接归还自动释放，任意并行度下安全。
+    let mut conn = pool.acquire().await.expect("acquire guard conn");
+    sqlx::query("SELECT pg_advisory_lock($1)")
+        .bind(GUARD_MIGRATION_LOCK_KEY)
+        .execute(&mut *conn)
+        .await
+        .expect("advisory lock");
     cyber_jianghu_server::db::run_migrations(&pool)
         .await
         .expect("run_migrations");
+    sqlx::query("SELECT pg_advisory_unlock($1)")
+        .bind(GUARD_MIGRATION_LOCK_KEY)
+        .execute(&mut *conn)
+        .await
+        .expect("advisory unlock");
+    drop(conn);
     pool
 }
 
@@ -194,5 +213,145 @@ async fn survival_time_aggregation_decodes_numeric_as_f64() {
     .execute(&pool)
     .await
     .expect("cleanup aggregations");
+    cleanup(&pool, &[agent_id]).await;
+}
+
+/// interaction_activity 的 partner 分支：SQL 由 jsonb_partner_fields 配置
+/// format! 拼接（宏不可用），聚合列 COUNT(*)/COUNT(DISTINCT) 的解码只能靠
+/// 活库夹具验证——空窗口不触发解码，必须写入带 partner 字段的动作日志。
+#[tokio::test]
+#[ignore = "需要真实 PostgreSQL（DATABASE_URL）；见文件头说明"]
+async fn interaction_activity_partner_branch_decodes_counts() {
+    let Some(url) = test_db_url() else {
+        eprintln!("跳过: DATABASE_URL 未设置");
+        return;
+    };
+    let pool = test_pool(&url).await;
+    let test_started = chrono::Utc::now();
+
+    let agent_id = seed_agent(&pool, "解码守卫丙").await;
+    sqlx::query(
+        "INSERT INTO agent_action_logs (tick_id, agent_id, action_type, result, action_data) \
+         VALUES ($1, $2, '说话', 'success', $3::jsonb)",
+    )
+    .bind(9_100_000_000i64)
+    .bind(agent_id)
+    .bind(format!("{{\"recipient_id\": \"{}\"}}", Uuid::new_v4()))
+    .execute(&pool)
+    .await
+    .expect("insert action log");
+
+    run_aggregation(
+        &pool,
+        "interaction_activity",
+        "agent_action_logs",
+        &[],
+        &[],
+        &["recipient_id".to_string()],
+        60,
+    )
+    .await
+    .expect("interaction_activity 聚合应执行成功");
+
+    let rows = query_aggregations(&pool, "interaction_activity", 1, 0)
+        .await
+        .expect("读回聚合结果");
+    let row = rows.first().expect("应写入一条 interaction_activity 聚合");
+    let action_count = row
+        .metrics
+        .get("action_count")
+        .and_then(|v| v.as_i64())
+        .unwrap_or_else(|| panic!("action_count 应为数值（解码失败会缺字段）"));
+    let unique = row
+        .metrics
+        .get("unique_interacting_agents")
+        .and_then(|v| v.as_i64())
+        .unwrap_or_else(|| panic!("unique_interacting_agents 应为数值"));
+    assert_eq!(action_count, 1, "带 recipient_id 的动作应被计数");
+    assert_eq!(unique, 1);
+
+    sqlx::query(
+        "DELETE FROM telemetry_aggregations \
+         WHERE aggregation_name = 'interaction_activity' AND period_end >= $1",
+    )
+    .bind(test_started)
+    .execute(&pool)
+    .await
+    .expect("cleanup aggregations");
+    sqlx::query("DELETE FROM agent_action_logs WHERE agent_id = $1")
+        .bind(agent_id)
+        .execute(&pool)
+        .await
+        .expect("cleanup action logs");
+    cleanup(&pool, &[agent_id]).await;
+}
+
+/// location_traffic：select_clause 由 metrics 配置拼接（宏不可用），
+/// COUNT(DISTINCT agent_id)/COUNT(*) 聚合列解码靠活库夹具验证。
+#[tokio::test]
+#[ignore = "需要真实 PostgreSQL（DATABASE_URL）；见文件头说明"]
+async fn location_traffic_dynamic_select_decodes_counts() {
+    let Some(url) = test_db_url() else {
+        eprintln!("跳过: DATABASE_URL 未设置");
+        return;
+    };
+    let pool = test_pool(&url).await;
+    let test_started = chrono::Utc::now();
+
+    let agent_id = seed_agent(&pool, "解码守卫丁").await;
+    sqlx::query(
+        "INSERT INTO agent_states (agent_id, tick_id, node_id) VALUES ($1, $2, 'guard-node')",
+    )
+    .bind(agent_id)
+    .bind(9_100_000_000i64)
+    .execute(&pool)
+    .await
+    .expect("insert agent state");
+
+    run_aggregation(
+        &pool,
+        "location_traffic",
+        "agent_states",
+        &["node_id".to_string()],
+        &["agent_count".to_string(), "state_count".to_string()],
+        &[],
+        60,
+    )
+    .await
+    .expect("location_traffic 聚合应执行成功");
+
+    let rows = query_aggregations(&pool, "location_traffic", 5, 0)
+        .await
+        .expect("读回聚合结果");
+    let row = rows
+        .iter()
+        .find(|r| r.group_by_value.as_deref() == Some("guard-node"))
+        .expect("应写入 guard-node 的 location_traffic 聚合");
+    let agent_count = row
+        .metrics
+        .get("agent_count")
+        .and_then(|v| v.as_i64())
+        .unwrap_or_else(|| panic!("agent_count 应为数值（解码失败会缺字段）"));
+    let state_count = row
+        .metrics
+        .get("state_count")
+        .and_then(|v| v.as_i64())
+        .unwrap_or_else(|| panic!("state_count 应为数值"));
+    assert_eq!(agent_count, 1);
+    assert_eq!(state_count, 1);
+
+    sqlx::query(
+        "DELETE FROM telemetry_aggregations \
+         WHERE aggregation_name = 'location_traffic' AND period_end >= $1",
+    )
+    .bind(test_started)
+    .execute(&pool)
+    .await
+    .expect("cleanup aggregations");
+    sqlx::query("DELETE FROM agent_states WHERE agent_id = $1")
+        .bind(agent_id)
+        .execute(&pool)
+        .await
+        .expect("cleanup agent states");
     cleanup(&pool, &[agent_id]).await;
 }

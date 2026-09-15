@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT l.tick_id,\n               l.agent_id,\n               l.pipe_seq,\n               l.action_type,\n               l.result,\n               l.action_data,\n               COALESCE(l.thought_log,\n                        l.soul_cycle_metadata->'cycles'->0->'renhun'->>'thought_log') AS thought_text,\n               s.node_id AS \"node_id?\"\n        FROM agent_action_logs l\n        LEFT JOIN agent_states s\n          ON s.agent_id = l.agent_id AND s.tick_id = l.tick_id\n        WHERE l.tick_id BETWEEN $1 AND $2\n        ORDER BY l.tick_id, l.agent_id, l.pipe_seq\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tick_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "agent_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "pipe_seq",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "action_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "result",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "action_data",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "thought_text",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "node_id?",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      null,
+      false
+    ]
+  },
+  "hash": "83220835faa879166d36f7299854d51d684d82346459df94b2b269c449ec753d"
+}

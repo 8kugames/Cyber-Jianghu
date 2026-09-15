@@ -24,7 +24,6 @@ use axum::{
     extract::{Query, State},
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -101,47 +100,7 @@ pub async fn get_deaths(
     // retired_at 与之差除以 tick_duration 即死亡 tick。
     // real_seconds_per_tick 与 deployed_at 单独取值，death_tick 在 Rust 层推算。
     // tick_from 过滤基于 death_tick（推算后），亦在 Rust 层完成。
-    let sql = r#"
-        WITH dead_agents AS (
-            SELECT
-                a.agent_id,
-                a.name,
-                a.birth_tick,
-                a.retired_at,
-                a.biography,
-                a.created_at
-            FROM agents a
-            WHERE a.status = 'dead'
-        )
-        SELECT
-            da.agent_id,
-            da.name,
-            da.birth_tick,
-            da.retired_at,
-            da.biography,
-            COALESCE(s.node_id, 'unknown') as location,
-            COALESCE(cl.action_type, 'unknown') as cause,
-            COALESCE(cl.narrative, cl.result_message) as narrative
-        FROM dead_agents da
-        LEFT JOIN LATERAL (
-            SELECT node_id FROM agent_states
-            WHERE agent_states.agent_id = da.agent_id
-            ORDER BY tick_id DESC LIMIT 1
-        ) s ON true
-        LEFT JOIN LATERAL (
-            SELECT action_type, narrative, result_message, created_at
-            FROM agent_action_logs
-            WHERE agent_action_logs.agent_id = da.agent_id
-              AND agent_action_logs.result = 'failed'
-              AND agent_action_logs.action_type = '攻击'
-            ORDER BY agent_action_logs.created_at DESC
-            LIMIT 1
-        ) cl ON true
-        WHERE da.retired_at IS NOT NULL
-        ORDER BY da.retired_at DESC
-        LIMIT $1
-        "#;
-
+    // query! 对真实 schema 编译期校验（LATERAL JOIN + COALESCE 是幻列高发形态）。
     // tick_from 过滤基于推算后的 death_tick，需先取配置在 Rust 层过滤；
     // 为避免过滤后条数不足，SQL 层取 4 倍 limit 预留余量。
     let sql_limit = if query.tick_from.is_some() {
@@ -171,10 +130,51 @@ pub async fn get_deaths(
             .flatten()
             .flatten();
 
-    let rows = match sqlx::query(sql)
-        .bind(sql_limit)
-        .fetch_all(&state.db_pool)
-        .await
+    let rows = match sqlx::query!(
+        r#"
+        WITH dead_agents AS (
+            SELECT
+                a.agent_id,
+                a.name,
+                a.birth_tick,
+                a.retired_at,
+                a.biography,
+                a.created_at
+            FROM agents a
+            WHERE a.status = 'dead'
+        )
+        SELECT
+            da.agent_id,
+            da.name,
+            da.birth_tick,
+            da.retired_at,
+            da.biography,
+            COALESCE(s.node_id, 'unknown') AS "location!",
+            COALESCE(cl.action_type, 'unknown') AS "cause!",
+            COALESCE(cl.narrative, cl.result_message) as narrative
+        FROM dead_agents da
+        LEFT JOIN LATERAL (
+            SELECT node_id FROM agent_states
+            WHERE agent_states.agent_id = da.agent_id
+            ORDER BY tick_id DESC LIMIT 1
+        ) s ON true
+        LEFT JOIN LATERAL (
+            SELECT action_type, narrative, result_message, created_at
+            FROM agent_action_logs
+            WHERE agent_action_logs.agent_id = da.agent_id
+              AND agent_action_logs.result = 'failed'
+              AND agent_action_logs.action_type = '攻击'
+            ORDER BY agent_action_logs.created_at DESC
+            LIMIT 1
+        ) cl ON true
+        WHERE da.retired_at IS NOT NULL
+        ORDER BY da.retired_at DESC
+        LIMIT $1
+        "#,
+        sql_limit,
+    )
+    .fetch_all(&state.db_pool)
+    .await
     {
         Ok(rows) => rows,
         Err(e) => {
@@ -189,8 +189,8 @@ pub async fn get_deaths(
     let mut deaths: Vec<DeathEntry> = rows
         .into_iter()
         .map(|row| {
-            let retired_at: Option<chrono::DateTime<chrono::Utc>> = row.get("retired_at");
-            let birth_tick: Option<i64> = row.get("birth_tick");
+            let retired_at = row.retired_at;
+            let birth_tick = row.birth_tick;
 
             // 推算 death_tick = birth_tick + (retired_at - origin) / tick_duration
             let death_tick = match (retired_at, birth_tick, deployment_time) {
@@ -202,21 +202,15 @@ pub async fn get_deaths(
                 _ => None,
             };
 
-            let narrative: Option<String> = row
-                .get::<Option<String>, _>("narrative")
-                .or_else(|| row.get::<Option<String>, _>("biography"));
-
             DeathEntry {
-                agent_id: row.get("agent_id"),
-                name: row
-                    .get::<Option<String>, _>("name")
-                    .unwrap_or_else(|| "unknown".to_string()),
+                agent_id: row.agent_id,
+                name: row.name,
                 death_tick,
                 birth_tick,
                 death_at: retired_at,
-                cause: row.get("cause"),
-                narrative,
-                location: row.get("location"),
+                cause: row.cause,
+                narrative: row.narrative.or(row.biography),
+                location: row.location,
             }
         })
         .collect();

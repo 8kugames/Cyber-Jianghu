@@ -553,17 +553,17 @@ pub async fn register_agent_transactional(
     let mut tx = pool.begin().await.context("开始事务失败")?;
 
     // 步骤0: 检查是否已有活跃角色
-    let active_count: (i64,) = sqlx::query_as(
+    let active_count: i64 = sqlx::query_scalar!(
         r#"
-        SELECT COUNT(*) FROM agents WHERE device_id = $1 AND status = 'active'
+        SELECT COUNT(*) AS "count!" FROM agents WHERE device_id = $1 AND status = 'active'
         "#,
+        device_id,
     )
-    .bind(device_id)
     .fetch_one(&mut *tx)
     .await
     .context("检查活跃角色失败")?;
 
-    if active_count.0 > 0 {
+    if active_count > 0 {
         anyhow::bail!("该设备已有活跃角色，请先归隐当前角色后再创建新角色");
     }
 
@@ -1026,10 +1026,10 @@ pub async fn assign_initial_recipes(
 
 /// 查询 Agent 已知配方 ID 列表
 pub async fn get_known_recipe_ids(pool: &PgPool, agent_id: Uuid) -> Result<Vec<String>> {
-    let rows = sqlx::query_scalar::<_, String>(
+    let rows: Vec<String> = sqlx::query_scalar!(
         "SELECT recipe_id FROM agent_known_recipes WHERE agent_id = $1",
+        agent_id,
     )
-    .bind(agent_id)
     .fetch_all(pool)
     .await
     .context("查询已知配方失败")?;

@@ -24,7 +24,7 @@ pub async fn fetch_window(
     tick_start: i64,
     tick_end: i64,
 ) -> Result<(Vec<ActionRow>, HashMap<Uuid, String>)> {
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         r#"
         SELECT l.tick_id,
                l.agent_id,
@@ -34,51 +34,41 @@ pub async fn fetch_window(
                l.action_data,
                COALESCE(l.thought_log,
                         l.soul_cycle_metadata->'cycles'->0->'renhun'->>'thought_log') AS thought_text,
-               s.node_id
+               s.node_id AS "node_id?"
         FROM agent_action_logs l
         LEFT JOIN agent_states s
           ON s.agent_id = l.agent_id AND s.tick_id = l.tick_id
         WHERE l.tick_id BETWEEN $1 AND $2
         ORDER BY l.tick_id, l.agent_id, l.pipe_seq
         "#,
+        tick_start,
+        tick_end,
     )
-    .bind(tick_start)
-    .bind(tick_end)
     .fetch_all(db_pool)
     .await
     .context("查询动作流窗口失败")?;
 
     let action_rows: Vec<ActionRow> = rows
         .into_iter()
-        .map(|row| {
-            let action_data: serde_json::Value = row
-                .get::<Option<serde_json::Value>, _>("action_data")
-                .unwrap_or(serde_json::Value::Null);
-            ActionRow {
-                tick_id: row.get("tick_id"),
-                agent_id: row.get("agent_id"),
-                pipe_seq: row.get::<i32, _>("pipe_seq"),
-                action_type: row.get("action_type"),
-                result: row.get::<Option<String>, _>("result").unwrap_or_default(),
-                action_data,
-                thought_text: row.get("thought_text"),
-                node_id: row.get("node_id"),
-            }
+        .map(|row| ActionRow {
+            tick_id: row.tick_id,
+            agent_id: row.agent_id,
+            pipe_seq: row.pipe_seq,
+            action_type: row.action_type,
+            result: row.result.unwrap_or_default(),
+            action_data: row.action_data.unwrap_or(serde_json::Value::Null),
+            thought_text: row.thought_text,
+            node_id: row.node_id,
         })
         .collect();
 
     // agent 名字
-    let name_rows = sqlx::query("SELECT agent_id, name FROM agents")
+    let agent_names: HashMap<Uuid, String> = sqlx::query!("SELECT agent_id, name FROM agents")
         .fetch_all(db_pool)
         .await
-        .context("查询 agent 名字失败")?;
-    let agent_names: HashMap<Uuid, String> = name_rows
+        .context("查询 agent 名字失败")?
         .into_iter()
-        .map(|row| {
-            let id: Uuid = row.get("agent_id");
-            let name: String = row.get("name");
-            (id, name)
-        })
+        .map(|r| (r.agent_id, r.name))
         .collect();
 
     Ok((action_rows, agent_names))

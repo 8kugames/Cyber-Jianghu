@@ -1,0 +1,136 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, chronicle_id, period_start, period_end,\n               game_day_start, game_day_end, season,\n               summary, summary_llm, agent_count, actions_count,\n               highlights, agent_summaries, action_stats,\n               location_stats, deaths, births, status, created_at,\n               raw_data\n        FROM chronicles\n        WHERE chronicle_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "chronicle_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "period_start",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "period_end",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "game_day_start",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "game_day_end",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "season",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "summary",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "summary_llm",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "agent_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "actions_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "highlights",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 12,
+        "name": "agent_summaries",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 13,
+        "name": "action_stats",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 14,
+        "name": "location_stats",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 15,
+        "name": "deaths",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 16,
+        "name": "births",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 18,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 19,
+        "name": "raw_data",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "66e18194a97c15b1730b79b08066bbaf5ca07631e3eaf54f42f92fd2c851726f"
+}
