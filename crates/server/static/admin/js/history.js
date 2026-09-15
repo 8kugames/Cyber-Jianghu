@@ -391,7 +391,9 @@ async function loadExperiences() {
     if (aid) params.set("agent_id", aid);
     if (loc) params.set("location", loc);
     if (act) params.set("action_type", act);
-    if (resultVal && resultVal !== "all") params.set("result", resultVal);
+    // 必须无条件发送 result：服务端缺省值是 success，若选「全部」时不发该参数，
+    // 用户看到的「全部」实际只是「仅成功」，失败卡片永远不可见
+    params.set("result", resultVal || "all");
     if (from) params.set("from_tick", from);
     if (to) params.set("to_tick", to);
 
@@ -424,147 +426,230 @@ function renderExpCards() {
     }
     empty.style.display = "none";
 
-    cardsEl.innerHTML = experiences
-        .map((e) => {
-            const metadata = e.soul_cycle_metadata || {};
-            const cycles = metadata.cycles || [];
-            const executionResults = metadata.execution_results || null;
-            const isSuccess = e.result === "success";
-            const resultBadge = `<span class="result-badge ${isSuccess ? "result-success" : "result-failed"}">${isSuccess ? "成功" : "失败"}</span>`;
-
-            const timeStr = e.formatted_time
-                || (e.created_at
-                    ? new Date(e.created_at).toLocaleString("zh-CN", {
-                          month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
-                      })
-                    : "-");
-
-            // 三魂内容（复用现有渲染逻辑）
-            const renhunHtml = renderRenhunCell(cycles, e, executionResults);
-            const dihunHtml = renderDihunCell(cycles);
-            const tianhunHtml = renderTianhunCell(cycles, e);
-            // model_id 权威归一值 (WI-006): server SQL 已 COALESCE(soul_cycle_metadata->'cycles'->0->>'model_id', agents.model_id)
-            // 直接读 e.model_id, 不再做 JSONB 字符串扫描。回退仅在前端层: 旧 agent 数据无 agents.model_id 时显示 "-"。
-            const modelId = e.model_id || "-";
-
-            // 动作摘要行（首条 pipeline action 或主 intent）
-            let actionSummary = "-";
-            if (cycles.length > 0) {
-                const fi = cycles[0].final_intent;
-                if (fi) {
-                    if (fi.pipeline_actions && fi.pipeline_actions.length > 0) {
-                        const pa = fi.pipeline_actions[0];
-                        actionSummary = renderActionText(pa.action_type, parseActionData(pa.action_data));
-                    } else if (fi.action_type) {
-                        actionSummary = renderActionText(fi.action_type, parseActionData(fi.action_data));
-                    }
-                }
-            }
-            if (actionSummary === "-" && e.action_type) {
-                actionSummary = renderActionText(e.action_type, parseActionData(e.action_data));
-            }
-
-            return (
-                `<div class="exp-card">` +
-                // 头部：Tick · 时间 · 角色 · 位置 · 结果
-                `<div class="exp-card-header">` +
-                `<span class="tick-badge">T${escapeHtml(e.tick_id || "-")}</span>` +
-                `<span class="exp-card-time">${escapeHtml(timeStr)}</span>` +
-                `<span class="exp-card-agent">${escapeHtml(e.agent_name ? formatNameId(e.agent_name, e.agent_id) : "-")}</span>` +
-                `<span class="exp-card-loc">@ ${escapeHtml(getLocationName(e.location || "-"))}</span>` +
-                resultBadge +
-                `</div>` +
-                // 动作摘要行
-                `<div class="exp-card-action"><span class="exp-action-badge">${escapeHtml(e.action_type_display || e.action_type || "-")}</span> ${actionSummary}</div>` +
-                // 三魂区块
-                `<div class="exp-card-body">` +
-                (renhunHtml !== "-" ? `<div class="exp-soul-block"><span class="exp-soul-label">人魂</span><div class="exp-soul-content">${renhunHtml}</div></div>` : "") +
-                (dihunHtml !== "-" ? `<div class="exp-soul-block"><span class="exp-soul-label">地魂</span><div class="exp-soul-content">${dihunHtml}</div></div>` : "") +
-                (tianhunHtml !== "-" ? `<div class="exp-soul-block"><span class="exp-soul-label">天魂</span><div class="exp-soul-content">${tianhunHtml}</div></div>` : "") +
-                `</div>` +
-                // 底部次要信息：模型 ID
-                `<div class="exp-card-footer"><span class="mono-text">模型: ${escapeHtml(modelId)}</span></div>` +
-                `</div>`
-            );
-        })
-        .join("");
+    cardsEl.innerHTML =
+        `<div class="exp-list">` + experiences.map(renderExpCard).join("") + `</div>`;
 }
 
-// 渲染人魂单元格（叙事 + 推理 + JSON action）
-function renderRenhunCell(cycles, entry, executionResults) {
-    let html = "";
-    if (!cycles || cycles.length === 0) {
-        if (!entry.thought_log) return "-";
-        return `<div class="exp-meta-text" style="font-style:italic;color:var(--text-secondary);">${escapeHtml(entry.thought_log)}</div>`;
+// 属性上下文转义：escapeHtml 走 textContent→innerHTML，不处理引号，
+// 直接放进 title="..." 会被参数里的引号截断属性，故补一层引号转义
+function escapeAttr(text) {
+    return escapeHtml(text).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// 现实时间（服务端落库时刻）：固定 YYYY-MM-DD HH:mm:ss，本地时区，便于与排障时间对齐
+function formatRealTime(iso) {
+    if (!iso) return "-";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "-";
+    const p = (n) => String(n).padStart(2, "0");
+    return (
+        d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+        " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds())
+    );
+}
+
+// 单张 tick 卡片
+//
+// 结构对齐 agent-web 经历页（时间轴节点 + 卡片头 + 行动尝试盒子 + 三魂色条块）：
+// 人魂块 = 叙事/推理/地魂工具调用，天魂块 = 四层审查，地魂块 = 最终行动与执行结果。
+// server 端已按 (agent_id, tick_id) 聚合分页，故一张卡片即一个 tick。
+//
+// 与 agent-web 的三处有意偏离（其余按 agent-web 视觉语言为准）：
+// 1. 模型为空时始终渲染"模型未上报"芯片，agent-web 是 if (modelId) 整块省略。
+//    流水页需要区分"未上报"与"没显示"，故保留占位文案。
+// 2. 卡片外壳用 dashboard.css 的 .tick-card，agent-web 侧是 .tl-content
+//    （两个静态目录各自加载自己的样式表，类名不同但视觉等价）。
+// 3. 现实时间固定格式 YYYY-MM-DD HH:mm:ss，agent-web 用 toLocaleString('zh-CN')；
+//    流水页逐行比对时间，固定格式更易读且不随 locale 变化。
+function renderExpCard(e) {
+    const metadata = e.soul_cycle_metadata || {};
+    const cycles = metadata.cycles || [];
+    const executionResults = metadata.execution_results || null;
+    // 徽章用服务端给的卡片级成败（与 result 筛选同口径，故徽章与筛选视图必然一致）。
+    // 不在前端从 execution_results 自行聚合：无元数据的卡片没有该字段，
+    // 只能退回主行 result，会出现"仅失败"视图里顶着成功徽章。
+    const isSuccess = e.card_success === true;
+    const resultBadge =
+        `<span class="result-badge ${isSuccess ? "result-success" : "result-failed"}">` +
+        `${isSuccess ? "成功" : "失败"}</span>`;
+
+    // 卡片主体复用 dashboard.css 的 .tick-card（与 agent-web 经历卡片同一套视觉语言）
+    let html = `<div class="tl-item"><div class="tl-dot"></div><div class="tick-card">`;
+
+    // 卡片头：Tick · 游戏内时间 · 模型 · 现实时间
+    html += `<div class="tick-card-header">`;
+    html += `<span class="tick-badge">T${escapeHtml(e.tick_id || "-")}</span>`;
+    html += `<span class="tick-world-time">${escapeHtml(e.formatted_time || "-")}</span>`;
+    html += `<span class="tick-model">${escapeHtml(e.model_id || "模型未上报")}</span>`;
+    html += `<span class="tick-real-time" title="服务端记录时刻">${escapeHtml(formatRealTime(e.created_at))}</span>`;
+    html += `</div>`;
+
+    // 卡片元信息行（admin 专有：全局流水需标注角色与位置）
+    html += `<div class="exp-card-meta">`;
+    html += `<span class="exp-card-agent">${escapeHtml(e.agent_name ? formatNameId(e.agent_name, e.agent_id) : "-")}</span>`;
+    html += `<span class="exp-card-loc">@ ${escapeHtml(getLocationName(e.location || "-"))}</span>`;
+    html += resultBadge;
+    html += `</div>`;
+
+    // 行动区：每个 attempt 一个盒子（三魂并列）
+    html += `<div class="tick-section"><div class="tick-section-title">行动</div>`;
+    html += `<div class="tick-attempts-container">`;
+    if (cycles.length === 0) {
+        html += renderDegradedAttemptBox(e);
+    } else {
+        cycles.forEach((cycle, idx) => {
+            html += renderAttemptBox(cycle, idx, cycles.length, executionResults);
+        });
     }
-    cycles.forEach((cycle, idx) => {
-        if (cycles.length > 1) html += `<div class="tick-attempt-label">第${idx + 1}次</div>`;
-        const rh = cycle.renhun;
-        if (rh) {
-            if (rh.narrative) html += `<div class="exp-meta-text">${escapeHtml(rh.narrative)}</div>`;
-            if (rh.thought_log) html += `<div class="exp-meta-text" style="font-style:italic;color:var(--text-secondary);">${escapeHtml(rh.thought_log)}</div>`;
-        }
-        const fi = cycle.final_intent;
-        if (fi) {
-            if (fi.pipeline_actions && fi.pipeline_actions.length > 0) {
-                fi.pipeline_actions.forEach((item, pidx) => {
-                    const aType = item.action_type || "";
-                    const aData = parseActionData(item.action_data);
-                    html += `<div class="exp-meta-text" style="color:var(--text-subtle);">${renderSingleAction(aType, aData)}</div>`;
-                    if (executionResults && executionResults[String(pidx)]) {
-                        const er = executionResults[String(pidx)];
-                        const ok = er.success;
-                        html += `<div style="margin-top:2px;"><span class="result-badge ${ok ? "result-success" : "result-failed"}" style="font-size:11px;">${ok ? "成功" : (er.error || "失败")}</span></div>`;
-                    }
-                });
-            } else if (fi.action_type) {
-                const aType = fi.action_type || "";
-                const aData = parseActionData(fi.action_data);
-                html += `<div class="exp-meta-text" style="color:var(--text-subtle);">${renderSingleAction(aType, aData)}</div>`;
-                if (executionResults && executionResults["0"]) {
-                    const er = executionResults["0"];
-                    const ok = er.success;
-                    html += `<div style="margin-top:2px;"><span class="result-badge ${ok ? "result-success" : "result-failed"}" style="font-size:11px;">${ok ? "成功" : (er.error || "失败")}</span></div>`;
-                }
-            }
-        }
-        // 执行结果（仅已通过天魂审查的 cycle）
-        const thApproved = cycle.tianhun && cycle.tianhun.result === "approved";
-        if (thApproved && entry.result) {
-            const isOk = entry.result === "success";
-            html += `<div style="margin-top:2px;"><span class="result-badge ${isOk ? "result-success" : "result-failed"}" style="font-size:11px;">${isOk ? "成功" : "失败"}</span></div>`;
-        }
-    });
-    return html || "-";
+    html += `</div></div>`;
+
+    html += `</div></div>`;
+    return html;
 }
 
-// 渲染天魂单元格
-function renderTianhunCell(cycles, entry) {
-    if (!cycles || cycles.length === 0) {
-        if (!entry.result) return "-";
-        const isApproved = entry.result === "success";
-        return `<span class="soul-layer-tag ${isApproved ? "passed" : "failed"}">${isApproved ? "✓通过" : "✗驳回"}</span>`;
+// 单个 attempt 盒子：人魂 / 天魂 / 地魂
+function renderAttemptBox(cycle, idx, total, executionResults) {
+    let html = `<div class="tick-attempt-box">`;
+    if (total > 1) html += `<div class="tick-attempt-label">行动 ${idx + 1}</div>`;
+    html += renderRenhunBlock(cycle);
+    html += renderTianhunBlock(cycle);
+    html += renderDihunBlock(cycle, executionResults);
+    html += `</div>`;
+    return html;
+}
+
+// 元数据缺失时的降级盒子：用扁平行字段拼出同样的三魂结构，避免空白卡片
+function renderDegradedAttemptBox(e) {
+    let html = `<div class="tick-attempt-box">`;
+
+    // 叙事与推理各自独立成行：老实现只在 narrative 缺失时才退回 thought_log，
+    // 会把同时存在的推理文本丢掉
+    let renhunInner = "";
+    if (e.narrative) renhunInner += `<div class="soul-text">${escapeHtml(e.narrative)}</div>`;
+    if (e.thought_log) renhunInner += `<div class="soul-thought">${escapeHtml(e.thought_log)}</div>`;
+    if (renhunInner) {
+        html += `<div class="exp-renhun"><span class="exp-soul-label">人魂</span>` +
+            `<div class="exp-soul-content">${renhunInner}</div></div>`;
     }
-    let html = "";
-    cycles.forEach((cycle, idx) => {
-        if (cycles.length > 1) html += `<div class="tick-attempt-label">第${idx + 1}次</div>`;
-        const th = cycle.tianhun;
-        if (!th) return;
-        // 多意图逐意图审查结果（新格式）：按意图分组展示；旧数据回退平铺 layers
-        if (th.per_intent_layers && th.per_intent_layers.length > 0) {
-            th.per_intent_layers.forEach((pil) => {
-                html += `<div style="margin-top:3px;font-size:10px;color:var(--text-muted);">意图「${escapeHtml(pil.intent || "-")}」</div>`;
-                html += renderLayerTagsAdmin(pil.layers || []);
-            });
-        } else if (th.layers && th.layers.length > 0) {
-            html += renderLayerTagsAdmin(th.layers);
-        }
-        if (th.reason) html += `<div class="exp-meta-text" style="color:var(--text-secondary);">${escapeHtml(th.reason)}</div>`;
+
+    if (e.result) {
+        const ok = e.result === "success";
+        // 无元数据卡片没有四层审查结论，此处只有主行的 Server 执行结果，
+        // 故标注为「主行执行」而非「天魂审查通过/驳回」；并显式说明整卡判定，
+        // 否则会出现"头部失败徽章 + 卡体天魂通过"的自相矛盾
+        html += `<div class="exp-tianhun"><span class="exp-soul-label">天魂</span>` +
+            `<div class="exp-soul-content"><div class="soul-result ${ok ? "approved" : "rejected"}">` +
+            `主行执行${ok ? "成功" : "失败"}</div>` +
+            (e.card_success === false && ok
+                ? `<div class="soul-reason">该 tick 另有动作失败，整卡判定为失败</div>`
+                : "") +
+            (e.reflector_thought ? `<div class="soul-reason">${escapeHtml(e.reflector_thought)}</div>` : "") +
+            `</div></div>`;
+    }
+
+    if (e.action_type) {
+        html += `<div class="exp-action"><span class="exp-soul-label">地魂</span>` +
+            `<div class="exp-soul-content">` +
+            renderSingleAction(e.action_type, parseActionData(e.action_data)) +
+            (e.result_message ? `<div class="soul-reason">${escapeHtml(e.result_message)}</div>` : "") +
+            `</div></div>`;
+    }
+
+    // 该 tick 的其余失败动作：降级卡片没有 execution_results 可渲染，
+    // 不列出的话用户只看到主行，与卡片级徽章的口径不一致
+    (e.other_failed_actions || []).forEach((a) => {
+        const name = a.action_type_display || a.action_type;
+        html += `<div class="exp-action"><span class="exp-soul-label">地魂</span>` +
+            `<div class="exp-soul-content">` +
+            `<div class="exp-failed-action">${escapeHtml(name)}</div>` +
+            (a.result_message
+                ? `<div class="soul-reason">${escapeHtml(a.result_message)}</div>`
+                : "") +
+            `</div></div>`;
     });
-    return html || "-";
+
+    html += `</div>`;
+    return html;
 }
 
-// 天魂层标签组渲染（renderTianhunCell 内部复用）
+// 人魂块：叙事 + 推理 + 地魂工具调用（工具调用嵌入人魂推理循环，故同块展示）
+function renderRenhunBlock(cycle) {
+    const rh = cycle.renhun || {};
+    const tools = rh.earth_tool_calls || [];
+    let inner = "";
+    if (rh.narrative) inner += `<div class="soul-text">${escapeHtml(rh.narrative)}</div>`;
+    if (rh.thought_log) inner += `<div class="soul-thought">${escapeHtml(rh.thought_log)}</div>`;
+    tools.forEach((t) => {
+        const full = `${t.name}(${t.arguments || ""}) → ${t.success ? "成功" : "失败"}: ${t.result_summary || ""}`;
+        const brief = `${t.name}(${String(t.arguments || "").substring(0, 60)}) → ${t.success ? "成功" : "失败"}`;
+        inner += `<div class="soul-tool" title="${escapeAttr(full)}">${escapeHtml(brief)}</div>`;
+    });
+    if (!inner) return "";
+    return `<div class="exp-renhun"><span class="exp-soul-label">人魂</span>` +
+        `<div class="exp-soul-content">${inner}</div></div>`;
+}
+
+// 天魂块：审查结论 + 四层标签
+function renderTianhunBlock(cycle) {
+    const th = cycle.tianhun;
+    if (!th) return "";
+    let inner = "";
+    if (th.result) {
+        const isApproved = th.result === "approved";
+        inner += `<div class="soul-result ${isApproved ? "approved" : "rejected"}">` +
+            `${isApproved ? "通过" : "驳回"}</div>`;
+    }
+    // 多意图逐意图审查（新格式）优先；旧数据回退平铺 layers
+    if (th.per_intent_layers && th.per_intent_layers.length > 0) {
+        th.per_intent_layers.forEach((pil) => {
+            inner += `<div class="soul-intent-label">意图「${escapeHtml(pil.intent || "-")}」</div>`;
+            inner += renderLayerTagsAdmin(pil.layers || []);
+        });
+    } else if (th.layers && th.layers.length > 0) {
+        inner += renderLayerTagsAdmin(th.layers);
+    }
+    if (th.reason) inner += `<div class="soul-reason">${escapeHtml(th.reason)}</div>`;
+    if (!inner) return "";
+    return `<div class="exp-tianhun"><span class="exp-soul-label">天魂</span>` +
+        `<div class="exp-soul-content">${inner}</div></div>`;
+}
+
+// 地魂块：最终行动（含多意图流水）与逐条执行结果
+function renderDihunBlock(cycle, executionResults) {
+    const fi = cycle.final_intent;
+    if (!fi) return "";
+    let inner = "";
+
+    const pipeline = fi.pipeline_actions;
+    if (pipeline && pipeline.length > 0) {
+        const multi = pipeline.length > 1;
+        pipeline.forEach((item, pidx) => {
+            if (multi) inner += `<div class="soul-intent-label">意图 ${pidx + 1}</div>`;
+            inner += renderSingleAction(item.action_type || "", parseActionData(item.action_data));
+            inner += renderExecutionBadgeAdmin(executionResults, pidx);
+        });
+    } else if (fi.action_type) {
+        inner += renderSingleAction(fi.action_type, parseActionData(fi.action_data));
+        inner += renderExecutionBadgeAdmin(executionResults, 0);
+    }
+
+    if (!inner) return "";
+    return `<div class="exp-action"><span class="exp-soul-label">地魂</span>` +
+        `<div class="exp-soul-content">${inner}</div></div>`;
+}
+
+// 执行结果徽章：execution_results 以 pipe_seq 为键，与 pipeline 下标一一对应
+function renderExecutionBadgeAdmin(executionResults, pipeSeq) {
+    if (!executionResults) return "";
+    const er = executionResults[String(pipeSeq)];
+    if (!er) return "";
+    const ok = er.success;
+    const text = ok ? "执行成功" : (er.error || "执行失败");
+    return `<div class="soul-exec-badge"><span class="result-badge ` +
+        `${ok ? "result-success" : "result-failed"}">${escapeHtml(text)}</span></div>`;
+}
+
+// 天魂层标签组渲染（renderTianhunBlock 内部复用）
 function renderLayerTagsAdmin(layers) {
     let html = `<div class="soul-layers">`;
     layers.forEach((l) => {
@@ -578,8 +663,6 @@ function renderLayerTagsAdmin(layers) {
     html += `</div>`;
     return html;
 }
-
-// 地魂 action_type 中文映射（说话检测函数在 utils.js: isSpeakAtype / isWhisperAtype / isShoutAtype，纯 channel 字段判断）
 
 function parseActionData(raw) {
     if (!raw) return {};
@@ -595,33 +678,13 @@ function renderSingleAction(aType, aData) {
     return renderActionText(aType, aData);
 }
 
-// 渲染地魂单元格（地魂 tool calling 日志）
-function renderDihunCell(cycles) {
-    if (!cycles || cycles.length === 0) return "-";
-    let calls = [];
-    cycles.forEach((cycle) => {
-        if (cycle.renhun && cycle.renhun.earth_tool_calls) {
-            cycle.renhun.earth_tool_calls.forEach((tc) => { if (tc.success) calls.push(tc); });
-        }
-    });
-    if (calls.length === 0) return "-";
-    return calls.map((tc) => {
-        let argsPreview = tc.arguments || "{}";
-        try { argsPreview = Object.entries(JSON.parse(argsPreview)).map(([k, v]) => k + ': ' + String(v).substring(0, 20)).join(', '); } catch(e) {}
-        let summary = tc.result_summary ? escapeHtml(tc.result_summary.substring(0, 40)) : '';
-        return '<div style="font-size:11px;color:var(--text-secondary);">' +
-            escapeHtml(tc.name) + '(' + escapeHtml(argsPreview) + ') ' +
-            '<span style="color:var(--text-subtle);">→ ' + summary + '</span></div>';
-    }).join('');
-}
-
 function updateExpPagination() {
     const totalPages = Math.ceil(expTotal / expPageSize);
     const pg = document.getElementById("exp-pagination");
     const info = document.getElementById("exp-page-info");
     if (expTotal === 0) { pg.style.display = "none"; return; }
     pg.style.display = "flex";
-    info.textContent = `第 ${expPage} / ${totalPages} 页，共 ${expTotal} 条`;
+    info.textContent = `第 ${expPage} / ${totalPages} 页，共 ${expTotal} 个 tick`;
     document.getElementById("exp-prev-btn").disabled = expPage <= 1;
     document.getElementById("exp-next-btn").disabled = expPage >= totalPages;
     document.getElementById("exp-page-size").value = expPageSize;

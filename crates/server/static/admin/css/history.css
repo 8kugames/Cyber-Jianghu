@@ -396,53 +396,6 @@ body {
     color: var(--error);
 }
 
-.tick-badge {
-    font-family: monospace;
-    font-size: 12px;
-}
-
-.mono-text {
-    font-family: monospace;
-    font-size: 12px;
-    color: var(--text-secondary);
-}
-
-.exp-action-badge {
-    display: inline-block;
-    padding: 2px 8px;
-    background: var(--bg-level-2);
-    border: 1px solid var(--border-subtle);
-    border-radius: 4px;
-    font-size: 12px;
-}
-
-.exp-narrative-full {
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--text-secondary);
-}
-
-.exp-meta-text {
-    font-size: 11px;
-    line-height: 1.4;
-    color: var(--text-primary);
-    margin: 2px 0;
-}
-
-.tick-attempt-label {
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--accent);
-    margin-top: 4px;
-}
-
-.soul-layers {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 3px;
-    margin: 2px 0;
-}
-
 .exp-pagination {
     display: flex;
     justify-content: center;
@@ -1142,81 +1095,112 @@ body {
 }
 
 /* ============================================================================
-   经历日志卡片流（替换原 10 列密表）
+   经历日志卡片流（对齐 agent-web 经历页视觉语言）
+   —— 时序轴 + tick 卡片 + 行动尝试盒子 + 三魂色条块。
+
+   卡片头（.tick-card-header/.tick-badge/.tick-world-time/.tick-model/
+   .tick-real-time）、卡片主体（.tick-card）、行动区（.tick-section/
+   .tick-section-title/.tick-attempts-container/.tick-attempt-box/
+   .tick-attempt-label）与三魂块（.exp-renhun/.exp-tianhun/.exp-action/
+   .exp-soul-label/.exp-soul-content）统一由 dashboard.css 提供；
+   地魂块在 dashboard.css 中的类名是 .exp-action（不是 agent-web 的 .exp-dihun），
+   渲染侧须沿用该名字，否则地魂块会失去色条与标签底色。
+
+   本文件只补 dashboard.css 未覆盖的四处：时序轴、卡片元信息行（全局流水
+   需标注角色与位置，agent-web 是单角色视图故无此行）、以及多意图分组标签与
+   执行结果徽章、以及人魂块内的工具调用条目（.soul-tool）。切勿在此重复定义 dashboard.css 已有的类：history.css 在
+   dashboard.css 之后加载，重复定义会静默压掉统一视觉语言。
    ============================================================================ */
 .exp-cards-list {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    display: block;
 }
 
-.exp-card {
-    background: var(--bg-level-1, #161b22);
-    border: 1px solid var(--border-color, #30363d);
-    border-radius: var(--radius-md, 8px);
-    padding: 14px 16px;
+/* 时序轴 */
+.exp-list {
+    position: relative;
+    margin-left: 10px;
+    padding: 4px 0;
 }
 
-.exp-card-header {
+.exp-list::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 12px;
+    bottom: 12px;
+    width: 2px;
+    background: var(--border-color);
+    border-radius: 1px;
+}
+
+.tl-item {
+    position: relative;
+    padding-left: 20px;
+    margin-bottom: 10px;
+}
+
+.tl-dot {
+    position: absolute;
+    left: -5px;
+    top: 14px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg-level-1);
+    border: 2px solid var(--accent);
+    z-index: 1;
+}
+
+.tl-item:last-child .tl-dot {
+    border-color: var(--success);
+}
+
+/* 卡片元信息行：角色 / 位置 / 结果 */
+.exp-card-meta {
     display: flex;
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border-subtle, #21262d);
-}
-
-.exp-card-time {
+    margin-bottom: 8px;
     font-size: 12px;
-    color: var(--text-secondary, #8b949e);
 }
 
 .exp-card-agent {
     font-weight: 600;
-    color: var(--text-primary, #e6edf3);
+    color: var(--text-primary);
 }
 
 .exp-card-loc {
-    font-size: 12px;
-    color: var(--text-secondary, #8b949e);
+    color: var(--text-secondary);
 }
 
-.exp-card-action {
-    font-size: 13px;
-    color: var(--text-primary, #e6edf3);
-    padding: 8px 0;
-    line-height: 1.6;
+/* 地魂工具调用行（嵌入人魂块内联展示） */
+.soul-tool {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--soul-renhun);
+    margin-top: 2px;
+    word-break: break-all;
 }
 
-.exp-card-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding-top: 4px;
-}
-
-.exp-soul-block {
-    font-size: 12px;
-    line-height: 1.6;
-}
-
-.exp-soul-label {
-    display: inline-block;
-    color: var(--accent, #14b8a6);
+/* 降级卡片中该 tick 其余失败动作的名称（失败原因走 .soul-reason） */
+.exp-failed-action {
+    font-size: 11px;
     font-weight: 600;
-    font-size: 11px;
-    margin-right: 6px;
+    color: var(--error);
 }
 
-.exp-soul-content {
-    display: inline;
-    color: var(--text-secondary, #8b949e);
+/* 多意图分组标签 */
+.soul-intent-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-subtle);
+    margin-top: 4px;
 }
 
-.exp-card-footer {
-    margin-top: 8px;
-    padding-top: 6px;
-    border-top: 1px solid var(--border-subtle, #21262d);
-    font-size: 11px;
-    color: var(--text-subtle, #6e7681);
+/* 执行结果徽章（挂在单个动作之后） */
+.soul-exec-badge {
+    display: block;
+    margin-top: 2px;
 }
