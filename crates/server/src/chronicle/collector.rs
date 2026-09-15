@@ -564,7 +564,7 @@ async fn collect_highlights(
                                     crate::display::display_agent_name(target_name, tid)
                                 )
                             }
-                            None => format!("（对手：{}）", &tid.to_string()[..8]),
+                            None => format!("（对手：{}）", cyber_jianghu_protocol::short_id(&tid)),
                         })
                         .unwrap_or_default();
                     let h = Highlight {

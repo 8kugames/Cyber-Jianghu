@@ -14,6 +14,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 use uuid::Uuid;
 
 use crate::types::{
@@ -608,6 +609,45 @@ impl ServerMessage {
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(self)
     }
+
+    /// 全量配置下发：content 与 content_hash 由同一 payload 序列化产生，保证两者口径一致
+    pub fn config_update_full<T: serde::Serialize>(
+        config_type: ConfigType,
+        version: impl Into<String>,
+        payload: &T,
+    ) -> Self {
+        Self::config_update_full_value(
+            config_type,
+            version,
+            serde_json::to_value(payload).unwrap_or_default(),
+            payload_hash(payload),
+        )
+    }
+
+    /// 全量配置下发（内容已就绪；content_hash 可为 None）
+    pub fn config_update_full_value(
+        config_type: ConfigType,
+        version: impl Into<String>,
+        content: serde_json::Value,
+        content_hash: Option<String>,
+    ) -> Self {
+        Self::ConfigUpdate {
+            config_type,
+            update_type: "full".to_string(),
+            version: version.into(),
+            content,
+            content_hash,
+            updated_items: vec![],
+            removed_items: vec![],
+        }
+    }
+}
+
+/// 序列化 payload 并计算 SHA256 hex（用于 ConfigUpdate 的 skip-optimization）
+pub fn payload_hash<T: serde::Serialize>(payload: &T) -> Option<String> {
+    serde_json::to_vec(payload)
+        .ok()
+        .map(|bytes| format!("{:x}", sha2::Sha256::digest(&bytes)))
 }
 
 // ============================================================================

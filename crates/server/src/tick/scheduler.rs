@@ -234,15 +234,12 @@ impl TickScheduler {
                         crate::game_data::ActionRegistry::build_available_actions();
 
                     // 广播给所有在线 Agent
-                    let config_update = ServerMessage::ConfigUpdate {
-                        config_type: ConfigType::Actions,
-                        update_type: "full".to_string(),
+                    let config_update = ServerMessage::config_update_full_value(
+                        ConfigType::Actions,
                         version,
-                        content: serde_json::to_value(available_actions)?,
-                        content_hash: None,
-                        updated_items: vec![],
-                        removed_items: vec![],
-                    };
+                        serde_json::to_value(available_actions)?,
+                        None,
+                    );
 
                     if let Err(e) =
                         broadcast_config_update(config_update, &self.connection_manager).await
@@ -299,15 +296,12 @@ impl TickScheduler {
                     info!("游戏规则已热重载: version={}", version);
 
                     // 广播给所有在线 Agent
-                    let config_update = ServerMessage::ConfigUpdate {
-                        config_type: ConfigType::GameRules,
-                        update_type: "full".to_string(),
+                    let config_update = ServerMessage::config_update_full_value(
+                        ConfigType::GameRules,
                         version,
-                        content: serde_json::to_value(&self.game_data_cache.get().game_rules)?,
-                        content_hash: None,
-                        updated_items: vec![],
-                        removed_items: vec![],
-                    };
+                        serde_json::to_value(&self.game_data_cache.get().game_rules)?,
+                        None,
+                    );
 
                     if let Err(e) =
                         broadcast_config_update(config_update, &self.connection_manager).await
@@ -361,15 +355,12 @@ impl TickScheduler {
                 info!("世界观规则已热重载: version={}", version);
 
                 // 广播给所有在线 Agent
-                let config_update = ServerMessage::ConfigUpdate {
-                    config_type: ConfigType::WorldBuildingRules,
-                    update_type: "full".to_string(),
+                let config_update = ServerMessage::config_update_full_value(
+                    ConfigType::WorldBuildingRules,
                     version,
-                    content: serde_json::to_value(&world_building_rules)?,
-                    content_hash: None,
-                    updated_items: vec![],
-                    removed_items: vec![],
-                };
+                    serde_json::to_value(&world_building_rules)?,
+                    None,
+                );
 
                 if let Err(e) =
                     broadcast_config_update(config_update, &self.connection_manager).await
@@ -474,15 +465,12 @@ impl TickScheduler {
         if let Some(cache) = &self.prompt_template_cache {
             let guard = cache.read().await;
             if let Some(ref pt_cache) = *guard {
-                let config_update = ServerMessage::ConfigUpdate {
-                    config_type: ConfigType::PromptTemplates,
-                    update_type: "full".to_string(),
-                    version: pt_cache.version.clone(),
-                    content: pt_cache.json_value.clone(),
-                    content_hash: Some(pt_cache.hash.clone()),
-                    updated_items: vec![],
-                    removed_items: vec![],
-                };
+                let config_update = ServerMessage::config_update_full_value(
+                    ConfigType::PromptTemplates,
+                    pt_cache.version.clone(),
+                    pt_cache.json_value.clone(),
+                    Some(pt_cache.hash.clone()),
+                );
 
                 if let Err(e) =
                     broadcast_config_update(config_update, &self.connection_manager).await
@@ -547,15 +535,12 @@ impl TickScheduler {
                             .collect();
 
                     // 广播给所有在线 Agent
-                    let config_update = ServerMessage::ConfigUpdate {
-                        config_type: ConfigType::Skills,
-                        update_type: "full".to_string(),
+                    let config_update = ServerMessage::config_update_full_value(
+                        ConfigType::Skills,
                         version,
-                        content: serde_json::to_value(skill_contents).unwrap_or_default(),
-                        content_hash: None,
-                        updated_items: vec![],
-                        removed_items: vec![],
-                    };
+                        serde_json::to_value(skill_contents).unwrap_or_default(),
+                        None,
+                    );
 
                     // 使用广播函数
                     let connections = self.connection_manager.read().await;
@@ -620,24 +605,10 @@ impl TickScheduler {
         self.last_narrative_config_mtime = Some(modified);
 
         // 从 GameData 重新加载 narrative_config（在块内克隆以避免跨 await 持有锁）
-        let (nc, nc_hash) = {
-            let gd = self.game_data_cache.get();
-            let nc = gd.narrative.clone();
-            let nc_hash = serde_json::to_vec(&nc)
-                .ok()
-                .map(|bytes| format!("{:x}", sha2::Sha256::digest(&bytes)));
-            (nc, nc_hash)
-        };
+        let nc = self.game_data_cache.get().narrative.clone();
 
-        let config_update = ServerMessage::ConfigUpdate {
-            config_type: ConfigType::NarrativeConfig,
-            update_type: "full".to_string(),
-            version: "1.0".to_string(),
-            content: serde_json::to_value(&nc).unwrap_or_default(),
-            content_hash: nc_hash,
-            updated_items: vec![],
-            removed_items: vec![],
-        };
+        let config_update =
+            ServerMessage::config_update_full(ConfigType::NarrativeConfig, "1.0", &nc);
 
         if let Err(e) = broadcast_config_update(config_update, &self.connection_manager).await {
             warn!("广播 narrative_config 更新失败: {}", e);

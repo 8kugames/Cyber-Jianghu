@@ -42,9 +42,12 @@ impl RecipeRegistry {
             Some(recipe) => format!(
                 "{}[{}]",
                 recipe.name,
-                &Self::uuid(recipe_id).to_string()[..8]
+                cyber_jianghu_protocol::short_id(&Self::uuid(recipe_id))
             ),
-            None => format!("未知配方[{}]", &Self::uuid(recipe_id).to_string()[..8]),
+            None => format!(
+                "未知配方[{}]",
+                cyber_jianghu_protocol::short_id(&Self::uuid(recipe_id))
+            ),
         }
     }
 

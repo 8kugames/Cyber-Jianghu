@@ -12,9 +12,8 @@
 /// 角色展示名：姓名[短 uuid 前 8 位]。
 ///
 /// 既可读（姓名），又可还原（短 uuid 可对应 dashboard 查询）。
-pub fn display_agent_name(name: &str, agent_id: uuid::Uuid) -> String {
-    format!("{}[{}]", name, &agent_id.to_string()[..8])
-}
+/// 实现上移 protocol（与 short_id 同源），Server/Agent 共享单一事实源。
+pub use cyber_jianghu_protocol::display_agent_name;
 
 /// 物品展示名：名称[短 uuid 前 8 位]。
 ///

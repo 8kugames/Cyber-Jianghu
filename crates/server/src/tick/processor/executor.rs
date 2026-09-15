@@ -59,12 +59,12 @@ pub async fn apply_state_change(
                     .iter()
                     .find(|s| s.agent_id == *to)
                     .map(|s| crate::display::display_agent_name(&s.name, *to))
-                    .unwrap_or_else(|| format!("未知[{}]", &to.to_string()[..8]));
+                    .unwrap_or_else(|| format!("未知[{}]", cyber_jianghu_protocol::short_id(to)));
                 let from_name = all_states
                     .iter()
                     .find(|s| s.agent_id == *from)
                     .map(|s| crate::display::display_agent_name(&s.name, *from))
-                    .unwrap_or_else(|| format!("未知[{}]", &from.to_string()[..8]));
+                    .unwrap_or_else(|| format!("未知[{}]", cyber_jianghu_protocol::short_id(from)));
 
                 let event = WorldEvent {
                     event_type: WorldEventType::SocialInteraction,

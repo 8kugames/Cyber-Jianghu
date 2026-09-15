@@ -20,7 +20,6 @@ use axum::{
 };
 use futures_util::SinkExt;
 use futures_util::stream::StreamExt;
-use sha2::Digest as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use tracing::{debug, error, info, warn};
@@ -291,14 +290,8 @@ async fn handle_websocket(
         let world_building_rules = load_world_building_rules();
 
         // 加载叙事化配置
-        let (narrative_config, narrative_config_hash) = {
-            let gd = state.game_data.get();
-            let nc = gd.narrative.clone();
-            let hash = serde_json::to_vec(&nc)
-                .ok()
-                .map(|bytes| format!("{:x}", sha2::Sha256::digest(&bytes)));
-            (Some(nc), hash)
-        };
+        let narrative_config = state.game_data.get().narrative.clone();
+        let narrative_config_hash = cyber_jianghu_protocol::payload_hash(&narrative_config);
 
         let registered_msg = ServerMessage::Registered {
             agent_id,
@@ -310,7 +303,7 @@ async fn handle_websocket(
             } else {
                 None
             },
-            narrative_config,
+            narrative_config: Some(narrative_config),
             narrative_config_hash,
         };
         serde_json::to_string(&registered_msg).ok()
@@ -361,15 +354,12 @@ async fn handle_websocket(
             .collect();
 
         if !skill_contents.is_empty() {
-            let config_update = ServerMessage::ConfigUpdate {
-                config_type: cyber_jianghu_protocol::ConfigType::Skills,
-                update_type: "full".to_string(),
-                version: "1.0.0".to_string(),
-                content: serde_json::to_value(&skill_contents).unwrap_or_default(),
-                content_hash: None,
-                updated_items: vec![],
-                removed_items: vec![],
-            };
+            let config_update = ServerMessage::config_update_full_value(
+                cyber_jianghu_protocol::ConfigType::Skills,
+                "1.0.0",
+                serde_json::to_value(&skill_contents).unwrap_or_default(),
+                None,
+            );
 
             if let Err(e) = broadcast::send_config_update(
                 agent_id,
@@ -398,15 +388,12 @@ async fn handle_websocket(
     if agent_id != uuid::Uuid::nil() {
         let cache = state.prompt_template_cache.read().await;
         if let Some(ref pt_cache) = *cache {
-            let config_update = ServerMessage::ConfigUpdate {
-                config_type: cyber_jianghu_protocol::ConfigType::PromptTemplates,
-                update_type: "full".to_string(),
-                version: pt_cache.version.clone(),
-                content: pt_cache.json_value.clone(),
-                content_hash: Some(pt_cache.hash.clone()),
-                updated_items: vec![],
-                removed_items: vec![],
-            };
+            let config_update = ServerMessage::config_update_full_value(
+                cyber_jianghu_protocol::ConfigType::PromptTemplates,
+                pt_cache.version.clone(),
+                pt_cache.json_value.clone(),
+                Some(pt_cache.hash.clone()),
+            );
 
             if let Err(e) = broadcast::send_config_update(
                 agent_id,
@@ -435,15 +422,12 @@ async fn handle_websocket(
         match std::fs::read_to_string(&rules_path) {
             Ok(yaml_content) => match serde_yaml::from_str::<serde_json::Value>(&yaml_content) {
                 Ok(json_value) => {
-                    let config_update = ServerMessage::ConfigUpdate {
-                        config_type: cyber_jianghu_protocol::ConfigType::PersonaEventRules,
-                        update_type: "full".to_string(),
-                        version: "1.0".to_string(),
-                        content: json_value,
-                        content_hash: None,
-                        updated_items: vec![],
-                        removed_items: vec![],
-                    };
+                    let config_update = ServerMessage::config_update_full_value(
+                        cyber_jianghu_protocol::ConfigType::PersonaEventRules,
+                        "1.0",
+                        json_value,
+                        None,
+                    );
 
                     if let Err(e) = broadcast::send_config_update(
                         agent_id,
@@ -482,23 +466,12 @@ async fn handle_websocket(
 
     // ===== 发送 narrative_config（ConfigUpdate，JSON 格式） =====
     if agent_id != uuid::Uuid::nil() {
-        let (nc, nc_hash) = {
-            let gd = state.game_data.get();
-            let narrative = gd.narrative.clone();
-            let hash = serde_json::to_vec(&narrative)
-                .ok()
-                .map(|bytes| format!("{:x}", sha2::Sha256::digest(&bytes)));
-            (narrative, hash)
-        };
-        let config_update = ServerMessage::ConfigUpdate {
-            config_type: cyber_jianghu_protocol::ConfigType::NarrativeConfig,
-            update_type: "full".to_string(),
-            version: "1.0".to_string(),
-            content: serde_json::to_value(&nc).unwrap_or_default(),
-            content_hash: nc_hash,
-            updated_items: vec![],
-            removed_items: vec![],
-        };
+        let nc = state.game_data.get().narrative.clone();
+        let config_update = ServerMessage::config_update_full(
+            cyber_jianghu_protocol::ConfigType::NarrativeConfig,
+            "1.0",
+            &nc,
+        );
 
         if let Err(e) = broadcast::send_config_update(
             agent_id,

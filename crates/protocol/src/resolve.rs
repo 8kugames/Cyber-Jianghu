@@ -90,6 +90,15 @@ pub fn short_id(uuid: &Uuid) -> String {
         .to_string()
 }
 
+/// 角色展示名：姓名[短 uuid 前 8 位]。
+///
+/// 既可读（姓名），又可还原（短 uuid 可对应 dashboard 查询）。
+/// Server（动作结果消息、WorldEvent、chronicle、dashboard）与 Agent（prompt、
+/// 对话上下文）统一使用本函数，禁止各处自行拼接。
+pub fn display_agent_name(name: &str, agent_id: Uuid) -> String {
+    format!("{}[{}]", name, short_id(&agent_id))
+}
+
 // ============================================================================
 // 物品展示引用（Server/Agent 共享单一真源）
 // ============================================================================

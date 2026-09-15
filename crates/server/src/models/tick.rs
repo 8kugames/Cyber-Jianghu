@@ -4,46 +4,9 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str::FromStr;
 
-/// Tick执行状态
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[serde(rename_all = "lowercase")]
-#[sqlx(type_name = "text", rename_all = "lowercase")]
-pub enum TickStatus {
-    /// 运行中
-    Running,
-
-    /// 已完成
-    Completed,
-
-    /// 失败
-    Failed,
-}
-
-impl fmt::Display for TickStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Running => write!(f, "running"),
-            Self::Completed => write!(f, "completed"),
-            Self::Failed => write!(f, "failed"),
-        }
-    }
-}
-
-impl FromStr for TickStatus {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "running" => Ok(Self::Running),
-            "completed" => Ok(Self::Completed),
-            "failed" => Ok(Self::Failed),
-            _ => Err(format!("Invalid tick status: {}", s)),
-        }
-    }
-}
+// TickStatus 与 protocol::sqlx_types 逐字同源，统一以 protocol 为唯一事实源
+pub use cyber_jianghu_protocol::sqlx_types::TickStatus;
 
 /// Tick日志
 ///

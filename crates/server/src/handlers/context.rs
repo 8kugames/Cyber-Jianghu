@@ -100,7 +100,7 @@ pub async fn get_agent_context(
     // Agent 名称：AgentState.name 已在 get_all_alive_agents_latest_states 中
     // 通过 JOIN agents 表填充（state_ops.rs）。直接使用真实名称，避免伪造 Agent-<前8位>。
     let agent_name = if agent_state.name.is_empty() {
-        format!("Agent-{}", &agent_id.to_string()[..8])
+        format!("Agent-{}", cyber_jianghu_protocol::short_id(&agent_id))
     } else {
         agent_state.name.clone()
     };
@@ -183,7 +183,7 @@ pub async fn get_agent_context(
         .filter(|a| a.agent_id != agent_id && a.node_id == agent_state.node_id)
         .map(|a| {
             let display_name = if a.name.is_empty() {
-                format!("Agent-{}", &a.agent_id.to_string()[..8])
+                format!("Agent-{}", cyber_jianghu_protocol::short_id(&a.agent_id))
             } else {
                 a.name.clone()
             };

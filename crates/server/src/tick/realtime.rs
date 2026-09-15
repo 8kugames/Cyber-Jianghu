@@ -865,16 +865,12 @@ impl IntentWorker {
     /// 候选），使下一次决策即使用有效动作词汇。
     async fn push_fresh_actions(&self, agent_id: uuid::Uuid, tick_id: i64) {
         let available_actions = ActionRegistry::build_available_actions();
-        let msg = cyber_jianghu_protocol::ServerMessage::ConfigUpdate {
-            config_type: cyber_jianghu_protocol::ConfigType::Actions,
-            update_type: "full".to_string(),
-            version: format!("unknown-action-heal-{tick_id}"),
-            content: serde_json::to_value(&available_actions)
-                .unwrap_or(serde_json::Value::Array(vec![])),
-            content_hash: None,
-            updated_items: vec![],
-            removed_items: vec![],
-        };
+        let msg = cyber_jianghu_protocol::ServerMessage::config_update_full_value(
+            cyber_jianghu_protocol::ConfigType::Actions,
+            format!("unknown-action-heal-{tick_id}"),
+            serde_json::to_value(&available_actions).unwrap_or(serde_json::Value::Array(vec![])),
+            None,
+        );
         if let Err(e) = super::send_to_agent(
             agent_id,
             &msg,

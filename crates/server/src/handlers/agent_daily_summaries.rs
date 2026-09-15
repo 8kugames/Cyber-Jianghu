@@ -13,16 +13,9 @@ use axum::extract::{Path, Query, State};
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::chronicle::format_game_day;
 use crate::db;
-use crate::game_data::registry::TimeRegistry;
 use crate::state::AppState;
-use cyber_jianghu_protocol::game_day_to_chinese;
-
-fn format_game_day(game_day: i64) -> String {
-    TimeRegistry::get_calendar_config()
-        .map(|cal| game_day_to_chinese(game_day, &cal))
-        .unwrap_or_else(|| format!("第{}日", game_day))
-}
 
 /// 查询参数
 #[derive(Debug, Deserialize)]

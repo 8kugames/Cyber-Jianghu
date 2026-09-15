@@ -363,15 +363,12 @@ async fn init_governance(
                                                     continue;
                                                 }
                                             };
-                                            let config_update = cyber_jianghu_protocol::messages::ServerMessage::ConfigUpdate {
-                                                config_type: cyber_jianghu_protocol::ConfigType::Actions,
-                                                update_type: "full".to_string(),
-                                                version: chrono::Utc::now().to_rfc3339(),
-                                                content: serde_json::json!({"yaml": actions_content}),
-                                                content_hash: None,
-                                                updated_items: vec![],
-                                                removed_items: vec![],
-                                            };
+                                            let config_update = cyber_jianghu_protocol::messages::ServerMessage::config_update_full_value(
+                                                cyber_jianghu_protocol::ConfigType::Actions,
+                                                chrono::Utc::now().to_rfc3339(),
+                                                serde_json::json!({"yaml": actions_content}),
+                                                None,
+                                            );
                                             if let Err(e) = crate::websocket::broadcast_config_update(config_update, &cm_clone).await {
                                                 warn!("Approved group {} broadcast 失败: {}", group_id, e);
                                             }
