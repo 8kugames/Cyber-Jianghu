@@ -27,6 +27,10 @@ FROM rust:trixie AS builder
 # 使用标准 crates.io sparse 协议
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
+# sqlx::query! 宏离线校验：编译进程必须能看到 .sqlx/ 查询缓存。
+# Docker 构建不继承宿主 env，SQLX_OFFLINE 必须在此显式声明。
+ENV SQLX_OFFLINE=true
+
 # 工作目录
 WORKDIR /app
 
@@ -45,6 +49,9 @@ COPY crates/protocol/Cargo.toml ./crates/protocol/
 COPY crates/embedding/Cargo.toml ./crates/embedding/
 COPY crates/server/Cargo.toml ./crates/server/
 COPY crates/agent/Cargo.toml ./crates/agent/
+
+# sqlx 离线查询缓存（宏编译期 schema 校验的数据源；与 Cargo.toml 同层缓存友好）
+COPY .sqlx ./.sqlx/
 
 # 创建占位 src 目录，用于预下载依赖
 RUN mkdir -p crates/protocol/src crates/server/src crates/agent/src/bin && \
