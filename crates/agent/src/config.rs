@@ -519,6 +519,12 @@ impl Default for RuntimeConfig {
 /// agent 本地决策常量，非 wire 契约默认值，故定义于 agent crate 而非 protocol。
 pub(crate) const REJECTION_FEEDBACK_TTL_TICKS: i64 = 1;
 
+/// 上轮天魂驳回记录的显示窗口（age = 当前 tick - 记录 tick）。
+/// 常规路径 soul_cycle 每 tick 重写，实际显示仅最近 1 tick；
+/// 上界 2 为防御性余量（容忍连续决策被跳过的异常路径）。
+/// agent 本地决策常量，非 wire 契约默认值。
+pub(crate) const REJECTION_RECORD_TTL_TICKS: i64 = 2;
+
 pub(crate) use cyber_jianghu_protocol::{
     DEFAULT_CONTEXT_WINDOW_TOKENS, DEFAULT_ENABLE_STREAMING, DEFAULT_EXECUTION_RESULT_TIMEOUT_MS,
     DEFAULT_IDLE_ROTATE_THRESHOLD, DEFAULT_KEEP_RECENT_TURNS, DEFAULT_LLM_CONNECT_TIMEOUT_SECS,
@@ -947,6 +953,9 @@ pub struct ReflectorOptConfig {
     pub chaos_on_double_reject: bool,
     /// self-correction LLM 失败累计达到此值后，跳过 self_correct 直接 chaos_fallback
     pub chaos_on_llm_fail: u32,
+    /// layer0 空 item_id 且背包唯一候选时自动回填（零 token 自愈，
+    /// 默认关闭：存在语义偏移风险——模型想用的未必是唯一候选）
+    pub auto_fill_unique_item: bool,
 }
 
 /// Attention Controller 配置
@@ -973,6 +982,7 @@ impl Default for ReflectorOptConfig {
             self_correction: true,
             chaos_on_double_reject: true,
             chaos_on_llm_fail: 2,
+            auto_fill_unique_item: false,
         }
     }
 }

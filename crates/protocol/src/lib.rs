@@ -53,8 +53,8 @@ pub use error::GameError;
 // 重导出 agent ID 解析工具与物品 uuid 派生（Server/Agent 共享真源）
 pub use action_alias::normalize_action_type;
 pub use resolve::{
-    ITEM_UUID_NAMESPACE, ResolveAgentIdError, item_uuid, parse_item_ref, resolve_agent_id,
-    resolve_agent_id_lenient, short_id,
+    ITEM_UUID_NAMESPACE, ResolveAgentIdError, display_item_ref, item_uuid, parse_item_ref,
+    resolve_agent_id, resolve_agent_id_lenient, short_id, short_item_hex,
 };
 
 /// 协议版本（semver，独立于 crate 版本号）

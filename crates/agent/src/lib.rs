@@ -38,7 +38,7 @@
 //   直连 WorldState            三层审核
 //   action_type=eat         ──→  action_type 合法性
 //   action_data={item_id:       RuleEngine 规则校验
-//     "mantou"}                  LLM 人设/世界观审查
+//     "馒头[a65df604]"}         LLM 人设/世界观审查
 // ```
 // 人魂直连 WorldState，直接输出含精确 ID 的结构化 Intent，
 // 天魂对格式化 Intent 进行三层审查。驳回原因通过 last_rejection_reason

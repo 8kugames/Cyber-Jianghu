@@ -179,8 +179,11 @@ fn build_action_example(
         );
     }
     if has_item_id {
+        // 与 layer0 四形态对齐：名称[短uuid] 照抄 / 裸中文名 / 完整 uuid / 短 uuid 前缀。
+        // 旧提示「复制完整 uuid，不要填物品名字」禁止了最容易正确的中文名形态，
+        // 是 LLM 臆造英文 ID 的直接诱因之一
         fields.push(
-            "\"item_id\": \"(必填: 从背包/地面物品列表复制完整物品 uuid，不要填物品名字)\""
+            "\"item_id\": \"(必填: 从背包/附近/可采集列表照抄「名称[短uuid]」标识，或直接填物品中文名；禁止自造英文 ID)\""
                 .to_string(),
         );
     }
@@ -229,6 +232,12 @@ pub async fn execute_query_world(
                     serde_json::json!({
                         "item_id": item.item_id,
                         "name": item.name,
+                        // 可照抄引用形态，与主 prompt 渲染、layer0 接受口径同源；
+                        // 附加字段不破坏既有消费方
+                        "name_ref": cyber_jianghu_protocol::display_item_ref(
+                            &item.name,
+                            &item.item_id
+                        ),
                         "quantity": item.quantity,
                         "item_type": item.item_type,
                     })

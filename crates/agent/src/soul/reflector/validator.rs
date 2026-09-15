@@ -19,8 +19,8 @@ use cyber_jianghu_protocol::{GradedValidationConfig, WorldBuildingRules, WorldSt
 
 use super::prompt::ReflectorPrompt;
 use super::rule_engine::{
-    RuleEngine, RuleValidationContext, types::canonicalize_move_target,
-    types::extract_ids_from_world_state,
+    RuleEngine, RuleValidationContext, types::available_item_ids_with_acquired,
+    types::canonicalize_move_target,
 };
 use super::types::{
     LayerResult, LlmValidationResponse, PersonaInfo, PipelineValidationResult, RejectionType,
@@ -310,7 +310,9 @@ impl ReflectorSoul {
             return Ok(());
         };
 
-        let (available_item_ids, reachable_node_ids) = extract_ids_from_world_state(world_state);
+        // 链感知：与 Layer 0 口径对齐，链内「取→用」不被 Layer 2 误拦
+        let (available_item_ids, reachable_node_ids) =
+            available_item_ids_with_acquired(Some(world_state), &request.runtime.acquired_item_ids);
         let context = RuleValidationContext {
             intent: request.intent.clone(),
             persona_info: request.persona.clone(),
@@ -375,6 +377,8 @@ impl ReflectorSoul {
                 detail: None,
             }),
             Err(reason) => {
+                // 拒绝消息过 reject_feedback.layer0 模板（无模板时原样透传）
+                let reason = self.rule_engine.render_layer0_rejection(&reason);
                 layers.push(LayerResult {
                     layer: "layer0",
                     passed: false,
@@ -740,3 +744,7 @@ mod tests;
 #[cfg(test)]
 #[path = "hard_logic_tests.rs"]
 mod tests_layer0;
+
+#[cfg(test)]
+#[path = "hard_logic_ref_tests.rs"]
+mod tests_layer0_ref;

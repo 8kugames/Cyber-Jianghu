@@ -356,9 +356,11 @@ impl CognitiveContextBuilder {
         }
 
         for item in &world_state.nearby_items {
+            // 名称[短uuid] 可照抄形态，与主 prompt 渲染、layer0 接受口径同源
             observations.push(format!(
-                "地上有{} [{}] x{}",
-                item.name, item.item_id, item.quantity
+                "地上有{} x{}",
+                cyber_jianghu_protocol::display_item_ref(&item.name, &item.item_id),
+                item.quantity
             ));
         }
 

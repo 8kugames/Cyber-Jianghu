@@ -14,6 +14,9 @@
 
 use cyber_jianghu_protocol::AvailableAction;
 
+// 物品展示引用单一真源在 protocol（Server display_item_name / Agent 照抄指引同源）
+pub use cyber_jianghu_protocol::{display_item_ref, short_item_hex};
+
 /// 物品动作的物品来源语义
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemActionSource {
@@ -121,6 +124,22 @@ mod tests {
         // 陈旧缓存（取 缺 source_type 字段）不得把内置「取」误判为 Inventory
         let stale = vec![action("取", &["item_id", "quantity"], &[])];
         assert_eq!(classify_item_action("取", &stale), ItemActionSource::World);
+    }
+
+    #[test]
+    fn test_short_item_hex() {
+        let uuid = cyber_jianghu_protocol::item_uuid("馒头").to_string();
+        assert_eq!(short_item_hex(&uuid), &uuid[..8]);
+        // 非 uuid 形态（测试夹具遗留的英文 id）原样返回
+        assert_eq!(short_item_hex("mantou"), "mantou");
+        // 空/短串安全
+        assert_eq!(short_item_hex(""), "");
+    }
+
+    #[test]
+    fn test_display_item_ref() {
+        let uuid = cyber_jianghu_protocol::item_uuid("水").to_string();
+        assert_eq!(display_item_ref("水", &uuid), format!("水[{}]", &uuid[..8]));
     }
 
     #[test]

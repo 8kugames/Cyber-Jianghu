@@ -114,12 +114,14 @@ pub fn item_uuid(item_id: &str) -> uuid::Uuid {
 /// 物品展示名：名称[短 uuid 前 8 位]。
 ///
 /// 与角色展示名（姓名[短 uuid]）同构：既可读（名称），又可还原（短 uuid）。
+/// 格式化单一真源在 [`cyber_jianghu_protocol::display_item_ref`]（与 agent 端
+/// 照抄指引、天魂 Layer 0 形态 2 判定同源，防双端格式漂移）。
 /// 未注册物品理论上不可达（入口全量校验）；
 /// 一旦出现（配置漂移/LLM 幻觉穿透），大声标注而非静默退化。
 pub fn display_item_name(item_id: &str) -> String {
     match get_item_definition(item_id) {
-        Some(def) => format!("{}[{}]", def.name, &item_uuid(item_id).to_string()[..8]),
-        None => format!("未知物品[{}]", &item_uuid(item_id).to_string()[..8]),
+        Some(def) => cyber_jianghu_protocol::display_item_ref(&def.name, item_id),
+        None => cyber_jianghu_protocol::display_item_ref("未知物品", item_id),
     }
 }
 

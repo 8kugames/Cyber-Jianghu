@@ -7,8 +7,18 @@
 // ============================================================================
 
 use super::types::ValidationRequest;
-use crate::soul::item_source::{ItemActionSource, classify_item_action};
+use crate::soul::item_source::{
+    ItemActionSource, classify_item_action, display_item_ref, short_item_hex,
+};
 use cyber_jianghu_protocol::WorldBuildingRules;
+
+/// 预览列表最大条数（防 prompt 膨胀；超出由调用方标注总数）
+const PREVIEW_MAX_ITEMS: usize = 8;
+/// 歧义匹配候选展示上限
+const AMBIGUOUS_PREVIEW_MAX_ITEMS: usize = 5;
+/// 短 uuid 前缀合法长度范围（下限保证区分度，上限防与完整 uuid 混淆）
+const HEX_PREFIX_MIN_LEN: usize = 4;
+const HEX_PREFIX_MAX_LEN: usize = 16;
 
 /// Layer 0：硬性逻辑审查（目标可见性，纯确定性检查，无 LLM 参与）
 ///
@@ -103,10 +113,12 @@ pub(super) async fn validate_hard_targets(
     // 物品目标：按动作来源分类（用/吃/喝/取/予 等 item_id 动作，
     // 分类器含 actions.json 数据驱动 + 五原语内置兜底，见 soul/item_source）
     // 引用体系（全面 uuid 化）：协议字段携带完整 uuid（v5 从裸 item_id 派生），
-    // LLM 可能提交三种形态，统一规范化为完整 uuid 回写：
+    // LLM 可能提交四种形态，统一规范化为完整 uuid 回写：
     // 1. 完整 uuid（从背包/prompt 复制）→ 直接可见性校验
     // 2. `名称[短uuid]`（照抄观察/执行文本）→ 一致性校验后派生完整 uuid
-    // 3. 裸 item_id（纯名字）→ 派生完整 uuid（known_item_ids 存在性仍适用）
+    // 3. 裸 item_id（纯中文名）→ 派生完整 uuid（known_item_ids 存在性仍适用）
+    // 4. 纯短 uuid 前缀（4-16 位 hex，如 a65df604）→ 世界定义内唯一匹配时
+    //    自动派生完整 uuid（与 target_agent_id 短 ID 方案对齐）
     let item_source = classify_item_action(
         action_type,
         &crate::infra::api::cognitive_context::load_available_actions_from_file(),
@@ -121,7 +133,75 @@ pub(super) async fn validate_hard_targets(
         return Ok(());
     };
 
-    let normalized_item_id: String;
+    // 预览构造：一律用「名称[短uuid]」可照抄形态（完整 uuid 复制错误率高，
+    // 是 LLM 臆造英文 ID 的主要诱因）
+    let inventory_preview = || -> Vec<String> {
+        world_state
+            .self_state
+            .inventory
+            .iter()
+            .take(PREVIEW_MAX_ITEMS)
+            .map(|i| display_item_ref(&i.name, &i.item_id))
+            .collect()
+    };
+    let nearby_preview = || -> Vec<String> {
+        world_state
+            .nearby_items
+            .iter()
+            .take(PREVIEW_MAX_ITEMS)
+            .map(|i| display_item_ref(&i.name, &i.item_id))
+            .collect()
+    };
+    let gatherable_preview = || -> Vec<String> {
+        world_state
+            .location
+            .gatherable_items
+            .iter()
+            .take(PREVIEW_MAX_ITEMS)
+            .map(|g| display_item_ref(&g.name, &g.item_id))
+            .collect()
+    };
+
+    // 空 item_id：LLM 遗漏字段。唯一背包候选时可选自动回填（零 token 自愈，
+    // 默认关闭），否则以专属消息驳回（存在性消息的「物品「」不存在」对空值无指引价值）；
+    // 指引按动作来源分支：消耗类看背包，采集/拾取类看附近与可采集
+    if raw_item_id.trim().is_empty() {
+        if request.runtime.auto_fill_unique_item
+            && item_source == ItemActionSource::Inventory
+            && world_state.self_state.inventory.len() == 1
+        {
+            let filled = world_state.self_state.inventory[0].item_id.clone();
+            tracing::info!(
+                "layer0 auto-fill: 空 item_id 回填唯一背包物品 {}",
+                display_item_ref(&world_state.self_state.inventory[0].name, &filled)
+            );
+            if let Some(obj) = request
+                .intent
+                .action_data
+                .as_mut()
+                .and_then(|d| d.as_object_mut())
+            {
+                obj.insert("item_id".to_string(), serde_json::Value::String(filled));
+            }
+            return Ok(());
+        }
+        let guidance = if item_source == ItemActionSource::Inventory {
+            format!(
+                "item_id 为空：请从背包列表照抄「名称[短uuid]」标识，或直接填物品中文名，禁止自造英文 ID。你的背包: [{}]",
+                inventory_preview().join(", ")
+            )
+        } else {
+            format!(
+                "item_id 为空：请从附近/可采集列表照抄「名称[短uuid]」标识，或直接填物品中文名，禁止自造英文 ID。你的背包: [{}]，附近物品: [{}]，可采集: [{}]",
+                inventory_preview().join(", "),
+                nearby_preview().join(", "),
+                gatherable_preview().join(", ")
+            )
+        };
+        return Err(guidance);
+    }
+
+    let item_id: String;
     let mut known_item_name: Option<String> = None;
     if let Ok(full_uuid) = uuid::Uuid::parse_str(raw_item_id) {
         // 形态 1：完整 uuid。known_item_ids 非空时校验 uuid 必须派生自已知物品
@@ -137,9 +217,9 @@ pub(super) async fn validate_hard_targets(
                 raw_item_id
             ));
         }
-        normalized_item_id = full_uuid.to_string();
+        item_id = full_uuid.to_string();
     } else {
-        // 形态 2/3：剥 `名称[短uuid]` 后缀或接受裸名，派生完整 uuid
+        // 形态 2/3/4：剥 `名称[短uuid]` 后缀，或接受裸名/短 uuid 前缀
         let (bare, short_uuid) = cyber_jianghu_protocol::parse_item_ref(raw_item_id);
 
         // uuid 一致性：短 uuid 必须与裸名派生结果一致，否则为臆造/篡造引用
@@ -151,22 +231,68 @@ pub(super) async fn validate_hard_targets(
                 raw_item_id
             ));
         }
-        known_item_name = Some(bare.clone());
-        normalized_item_id = cyber_jianghu_protocol::item_uuid(&bare).to_string();
-    }
-    let item_id = normalized_item_id;
-
-    // 存在性：世界定义中不存在的物品 = LLM 臆造。
-    // 仅对裸名/名称[短uuid] 形态适用（known_item_ids 为裸名清单，
-    // 完整 uuid 形态已在形态 1 分支用派生 uuid 集合校验）
-    if let Some(bare) = &known_item_name {
         let known = rules.read().await.known_item_ids.clone();
-        if !known.is_empty() && !known.contains(bare) {
-            let preview = known.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+        let name_known = !known.is_empty() && known.contains(&bare);
+        if name_known {
+            // 形态 2（名称[短uuid]，一致性已校验）/ 形态 3（裸中文名）：已知名称，派生完整 uuid。
+            // 名称优先于短 uuid 前缀判定，防「beef」类 hex 英文名被误走形态 4
+            known_item_name = Some(bare.clone());
+            item_id = cyber_jianghu_protocol::item_uuid(&bare).to_string();
+        } else if !known.is_empty() && short_uuid.is_none() && is_hex_prefix(&bare) {
+            // 形态 4：纯短 uuid 前缀（名称未知且非 名称[短uuid] 形态），
+            // 世界定义内唯一匹配时自动派生完整 uuid
+            let lower = bare.to_lowercase();
+            let matched: Vec<&String> = known
+                .iter()
+                .filter(|k| {
+                    cyber_jianghu_protocol::item_uuid(k)
+                        .to_string()
+                        .starts_with(&lower)
+                })
+                .collect();
+            match matched.len() {
+                0 => {
+                    let preview = known_item_preview(&known);
+                    return Err(format!(
+                        "短 uuid '{}' 不匹配任何世界物品定义。合法物品: [{}]。请照抄列表中的中文名或「名称[短uuid]」标识",
+                        bare, preview
+                    ));
+                }
+                1 => {
+                    item_id = cyber_jianghu_protocol::item_uuid(matched[0]).to_string();
+                    tracing::info!(
+                        "layer0 形态4: 短 uuid 前缀 '{}' 唯一匹配 → {}",
+                        bare,
+                        display_item_ref(matched[0], &item_id)
+                    );
+                }
+                _ => {
+                    let candidates = matched
+                        .iter()
+                        .take(AMBIGUOUS_PREVIEW_MAX_ITEMS)
+                        .map(|k| {
+                            display_item_ref(k, &cyber_jianghu_protocol::item_uuid(k).to_string())
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(format!(
+                        "短 uuid '{}' 匹配到多个物品，请改用完整「名称[短uuid]」或中文名。匹配: [{}]",
+                        bare, candidates
+                    ));
+                }
+            }
+        } else if !known.is_empty() {
+            // 未知名称（裸名或 名称[短uuid] 形态）= LLM 臆造（含英文翻译式 ID
+            // 如 bottled_water/mantou），存在性拒绝
+            let preview = known_item_preview(&known);
             return Err(format!(
-                "物品「{}」不存在于世界物品定义中。合法物品: [{}]",
+                "物品「{}」不存在于世界物品定义中。合法物品: [{}]。请照抄列表中任一标识（或直接写中文名），禁止自造英文 ID",
                 bare, preview
             ));
+        } else {
+            // known 为空（规则未下发）：维持宽口径，按裸名派生
+            known_item_name = Some(bare.clone());
+            item_id = cyber_jianghu_protocol::item_uuid(&bare).to_string();
         }
     }
 
@@ -214,25 +340,13 @@ pub(super) async fn validate_hard_targets(
         if owned {
             return Ok(());
         }
-        let inventory_preview: Vec<&str> = world_state
-            .self_state
-            .inventory
-            .iter()
-            .take(5)
-            .map(|i| i.item_id.as_str())
-            .collect();
-        let nearby_preview: Vec<&str> = world_state
-            .nearby_items
-            .iter()
-            .take(5)
-            .map(|i| i.item_id.as_str())
-            .collect();
+        let display = rejection_display(&item_id, known_item_name.as_deref(), rules).await;
         return Err(format!(
-            "物品「{}」不可见：{}需要背包中已持有的物品（附近物品须先「取」入背包）。你的背包: [{}]，附近可见: [{}]",
-            item_id,
+            "物品「{}」不可见：{}需要背包中已持有的物品（附近物品须先「取」入背包）。你的背包: [{}]，附近可见: [{}]。请从列表照抄「名称[短uuid]」或直接写中文名，禁止自造英文 ID",
+            display,
             action_type,
-            inventory_preview.join(", "),
-            nearby_preview.join(", ")
+            inventory_preview().join(", "),
+            nearby_preview().join(", ")
         ));
     }
 
@@ -263,34 +377,55 @@ pub(super) async fn validate_hard_targets(
         return Ok(());
     }
 
-    // 拒绝消息列出全部可观察物品，引导 LLM 改用真实目标
-    let inventory_preview: Vec<&str> = world_state
-        .self_state
-        .inventory
-        .iter()
-        .take(5)
-        .map(|i| i.item_id.as_str())
-        .collect();
-    let nearby_preview: Vec<&str> = world_state
-        .nearby_items
-        .iter()
-        .take(5)
-        .map(|i| i.item_id.as_str())
-        .collect();
-    let gatherable_preview: Vec<&str> = world_state
-        .location
-        .gatherable_items
-        .iter()
-        .take(5)
-        .map(|g| g.item_id.as_str())
-        .collect();
+    // 拒绝消息列出全部可观察物品（可照抄形态），引导 LLM 改用真实目标
+    let display = rejection_display(&item_id, known_item_name.as_deref(), rules).await;
     Err(format!(
-        "物品「{}」不可见：既不在你的背包中，也不在附近或本地点可采集。你的背包: [{}]，附近物品: [{}]，可采集: [{}]",
-        item_id,
-        inventory_preview.join(", "),
-        nearby_preview.join(", "),
-        gatherable_preview.join(", ")
+        "物品「{}」不可见：既不在你的背包中，也不在附近或本地点可采集。你的背包: [{}]，附近物品: [{}]，可采集: [{}]。请从列表照抄「名称[短uuid]」或直接写中文名，禁止自造英文 ID",
+        display,
+        inventory_preview().join(", "),
+        nearby_preview().join(", "),
+        gatherable_preview().join(", ")
     ))
+}
+
+/// 4-16 位纯 hex 前缀判定（短 uuid 形态；长上限防与完整 uuid 混淆）
+fn is_hex_prefix(s: &str) -> bool {
+    (HEX_PREFIX_MIN_LEN..=HEX_PREFIX_MAX_LEN).contains(&s.len())
+        && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// 世界定义合法物品预览（「名称[短uuid]」可照抄形态，前 8 项，超出标注总数）
+fn known_item_preview(known: &[String]) -> String {
+    let mut preview = known
+        .iter()
+        .take(PREVIEW_MAX_ITEMS)
+        .map(|k| display_item_ref(k, &cyber_jianghu_protocol::item_uuid(k).to_string()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if known.len() > PREVIEW_MAX_ITEMS {
+        preview.push_str(&format!(" …共{}种", known.len()));
+    }
+    preview
+}
+
+/// 拒绝消息 headline 用的可照抄物品标识：已知名称 → 名称[短uuid]；
+/// 仅剩 uuid 时反查世界定义，查无则降级为 [短uuid]
+async fn rejection_display(
+    item_id: &str,
+    known_name: Option<&str>,
+    rules: &std::sync::Arc<tokio::sync::RwLock<WorldBuildingRules>>,
+) -> String {
+    if let Some(name) = known_name {
+        return display_item_ref(name, item_id);
+    }
+    let known = rules.read().await.known_item_ids.clone();
+    if let Some(name) = known
+        .iter()
+        .find(|k| cyber_jianghu_protocol::item_uuid(k).to_string() == item_id)
+    {
+        return display_item_ref(name, item_id);
+    }
+    format!("[{}]", short_item_hex(item_id))
 }
 
 /// 格式化目标存在性校验的拒绝消息（复用现有 target_agent_id 校验的三分支格式）

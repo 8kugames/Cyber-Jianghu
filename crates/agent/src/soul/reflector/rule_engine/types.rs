@@ -114,7 +114,7 @@ pub struct RuleValidationContext {
     pub tick_id: i64,
     /// 额外的属性数据（用于规则检查）
     pub attributes: HashMap<String, serde_json::Value>,
-    /// 可用物品 ID 列表（从 WorldState.inventory 提取）
+    /// 可用物品 ID 列表（从 WorldState.inventory 提取，∪ 链内前序「取」获得物）
     pub available_item_ids: Vec<String>,
     /// 可达地点 ID 列表（从 WorldState.location.adjacent_nodes 提取）
     pub reachable_node_ids: Vec<String>,
@@ -127,11 +127,10 @@ impl RuleValidationContext {
         attributes: HashMap<String, serde_json::Value>,
     ) -> Self {
         let tick_id = request.intent.tick_id;
-        let (available_item_ids, reachable_node_ids) = request
-            .world_state
-            .as_ref()
-            .map(extract_ids_from_world_state)
-            .unwrap_or_default();
+        let (available_item_ids, reachable_node_ids) = available_item_ids_with_acquired(
+            request.world_state.as_ref(),
+            &request.runtime.acquired_item_ids,
+        );
         Self {
             intent: request.intent,
             persona_info: request.persona,
@@ -224,6 +223,27 @@ pub fn extract_ids_from_world_state(ws: &WorldState) -> (Vec<String>, Vec<String
         .iter()
         .map(|n| n.node_id.clone())
         .collect();
+    (items, nodes)
+}
+
+/// Layer 2 可用物品集合：inventory 快照 ∪ 链内前序「取」获得物（去重）。
+///
+/// 与 Layer 0 的 Inventory 可见性口径对齐：subsequent_intents 链内「取→用」的
+/// 后序动作经 acquired_item_ids 在 Layer 0 放行后，若 Layer 2 的
+/// valid_item_id_use 仍只看 inventory 快照，链内获得物会被误拦，
+/// 链路在此退化为盲目重试——两层级集合必须同源。
+pub fn available_item_ids_with_acquired(
+    world_state: Option<&WorldState>,
+    acquired: &[String],
+) -> (Vec<String>, Vec<String>) {
+    let (mut items, nodes) = world_state
+        .map(extract_ids_from_world_state)
+        .unwrap_or_default();
+    for id in acquired {
+        if !items.contains(id) {
+            items.push(id.clone());
+        }
+    }
     (items, nodes)
 }
 

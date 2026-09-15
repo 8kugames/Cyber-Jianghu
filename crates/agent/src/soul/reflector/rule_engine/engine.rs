@@ -4,7 +4,7 @@
 
 use super::evaluator::{ConditionEvaluator, DefaultEvaluator};
 use super::registry::{RuleRegistry, RuleSet};
-use super::types::{Rule, RuleValidationContext, extract_ids_from_world_state};
+use super::types::{Rule, RuleValidationContext, available_item_ids_with_acquired};
 use crate::soul::actor::prompt_template::PromptTemplateConfig;
 use crate::soul::reflector::{
     LayerResult, PersonaInfo, PipelineValidationResult, RejectionType, ValidationRequest,
@@ -51,11 +51,11 @@ impl Validator for RuleEngine {
     ) -> anyhow::Result<PipelineValidationResult> {
         // 构建验证上下文
         let tick_id = request.intent.tick_id;
-        let (available_item_ids, reachable_node_ids) = request
-            .world_state
-            .as_ref()
-            .map(extract_ids_from_world_state)
-            .unwrap_or_default();
+        // 链感知：与 Layer 0 口径对齐，链内「取→用」不被 Layer 2 误拦
+        let (available_item_ids, reachable_node_ids) = available_item_ids_with_acquired(
+            request.world_state.as_ref(),
+            &request.runtime.acquired_item_ids,
+        );
 
         let context = RuleValidationContext {
             intent: request.intent,
@@ -228,6 +228,32 @@ impl RuleEngine {
         *guard = Some(config);
     }
 
+    /// 渲染 Layer 0 硬性校验拒绝消息（模板化，元数据可运维调整）
+    ///
+    /// hard_logic 的拒绝消息自带可照抄上下文（背包/附近/合法物品清单），
+    /// 模板仅提供外层包装文案；无 layer0 模板段时原样透传（向后兼容旧配置）。
+    /// 渲染后自检：若结果丢失 {reason} 原文（模板编辑遗漏占位符），
+    /// 可照抄清单被静默剥离，大声告警而非静默退化
+    pub fn render_layer0_rejection(&self, base_reason: &str) -> String {
+        let guard = self.prompt_config.read().expect("rwlock poisoned");
+        if let Some(config) = guard.as_ref()
+            && let Some(tmpl) = config.get_template("reject_feedback")
+        {
+            let mut vars = HashMap::new();
+            vars.insert("reason".to_string(), base_reason.to_string());
+            if let Some(rendered) = tmpl.render_section("layer0", &vars) {
+                let rendered = rendered.trim().to_string();
+                if !rendered.contains(base_reason) {
+                    tracing::warn!(
+                        "reject_feedback.layer0 模板渲染结果丢失 {{reason}} 占位符，\n                    拒绝详情（可照抄清单）被剥离，请修复模板：{rendered}"
+                    );
+                }
+                return rendered;
+            }
+        }
+        base_reason.to_string()
+    }
+
     /// 增强 reject 消息：附加上下文数据帮助 LLM 自纠正
     ///
     /// 有模板配置时使用数据驱动模板，否则 fallback 到基础增强。
@@ -394,6 +420,7 @@ impl Default for RuleEngine {
 mod tests {
     use super::*;
     use crate::models::Intent;
+    use crate::soul::actor::prompt_template::TemplateDef;
     use crate::soul::reflector::types::PersonaInfo;
     use cyber_jianghu_protocol::ActionType;
     use std::collections::HashMap;
@@ -636,6 +663,58 @@ mod tests {
         assert!(
             matches!(result, ValidationResult::Rejected { .. }),
             "用应被拒绝"
+        );
+    }
+
+    #[test]
+    fn test_render_layer0_rejection_passthrough_without_template() {
+        // 无 layer0 模板段：原样透传（向后兼容旧配置）
+        let engine = RuleEngine::new();
+        let base = "物品「x」不存在于世界物品定义中。合法物品: [馒头]";
+        assert_eq!(engine.render_layer0_rejection(base), base);
+    }
+
+    #[test]
+    fn test_render_layer0_rejection_wraps_with_template() {
+        // 有 layer0 模板段：外层包装且保留 {reason} 原文（可照抄清单不丢失）
+        let engine = RuleEngine::new();
+        let config = PromptTemplateConfig {
+            version: "test".to_string(),
+            description: String::new(),
+            templates: {
+                let mut templates = HashMap::new();
+                let mut sections = HashMap::new();
+                sections.insert(
+                    "layer0".to_string(),
+                    "意图目标校验失败：{reason}".to_string(),
+                );
+                templates.insert(
+                    "reject_feedback".to_string(),
+                    TemplateDef {
+                        required_sections: vec![],
+                        sections,
+                        truncation: HashMap::new(),
+                        llm_parameters: HashMap::new(),
+                    },
+                );
+                templates
+            },
+            memory_narrative: None,
+            rule_sections: None,
+        };
+        engine.update_prompt_config(Arc::new(config));
+
+        let base = "物品「x」不存在于世界物品定义中。合法物品: [馒头]";
+        let rendered = engine.render_layer0_rejection(base);
+        assert!(
+            rendered.starts_with("意图目标校验失败："),
+            "模板应提供外层包装: {}",
+            rendered
+        );
+        assert!(
+            rendered.contains(base),
+            "包装后必须保留 reason 原文（自检告警依赖此不变量）: {}",
+            rendered
         );
     }
 }

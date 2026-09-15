@@ -252,6 +252,13 @@ impl super::CognitiveEngine {
             }
         };
 
+        // 上轮天魂驳回记录：天魂驳回不产生 ExecutionResult（不会出现在上轮行动结果里），
+        // 不注入则下一回合对失败零记忆 → 重复同样臆造。TTL 见 REJECTION_RECORD_TTL_TICKS
+        let rejection_record_section = {
+            let (lines, recorded_tick) = self.get_last_tick_rejection();
+            build_rejection_record_section(&lines, recorded_tick, world_state.tick_id)
+        };
+
         // FocusSummary 替代完整 WorldState
         let world_state_section = match focus_summary {
             Some(fs) => {
@@ -302,7 +309,21 @@ impl super::CognitiveEngine {
             "last_action_result_section".to_string(),
             last_action_result_section.clone(),
         );
+        ws_vars.insert(
+            "rejection_record_section".to_string(),
+            rejection_record_section.clone(),
+        );
         if let Some(rendered) = tmpl.render_section("world_state", &ws_vars) {
+            // 模板占位符缺失自检：有驳回留痕但渲染结果不含其内容 →
+            // 下发模板缺 {{rejection_record_section}} 占位符（Server 模板版本过旧），
+            // P0-2 跨 tick 留痕静默失效，大声告警而非静默空转
+            if !rejection_record_section.is_empty()
+                && !rendered.contains(rejection_record_section.trim())
+            {
+                tracing::warn!(
+                    "prompt 模板 world_state 段缺少 {{{{rejection_record_section}}}} 占位符，\n                上轮驳回留痕未注入决策上下文，请同步更新 Server 下发的 prompt_templates.yaml"
+                );
+            }
             result.push_str(&rendered);
         }
 
@@ -374,20 +395,25 @@ impl super::CognitiveEngine {
                     "tool" => "工具，不可食用",
                     _ => "",
                 };
-                ws_parts.push(format!(
-                    "- {} ({}) x{} [{}]",
-                    item.item_id, item.name, item.quantity, type_hint
-                ));
+                // 名称[短uuid] 可照抄形态：完整 uuid 复制错误率高（LLM 倾向翻译成
+                // 英文 snake_case 臆造 ID），与人物目标短 ID 方案对齐，
+                // 且为 layer0 形态 2 直接接受的合法提交形态
+                let item_ref =
+                    crate::soul::item_source::display_item_ref(&item.name, &item.item_id);
+                if type_hint.is_empty() {
+                    ws_parts.push(format!("- {} x{}", item_ref, item.quantity));
+                } else {
+                    ws_parts.push(format!("- {} ({}) x{}", item_ref, type_hint, item.quantity));
+                }
             }
         }
 
         if !world_state.nearby_items.is_empty() {
             ws_parts.push("\n## 附近可见物品".to_string());
             for item in &world_state.nearby_items {
-                ws_parts.push(format!(
-                    "- {} ({}) x{}",
-                    item.item_id, item.name, item.quantity
-                ));
+                let item_ref =
+                    crate::soul::item_source::display_item_ref(&item.name, &item.item_id);
+                ws_parts.push(format!("- {} x{}", item_ref, item.quantity));
             }
         }
 
@@ -453,7 +479,9 @@ impl super::CognitiveEngine {
         if !world_state.location.gatherable_items.is_empty() {
             ws_parts.push("\n## 当前位置可采集的资源".to_string());
             for item in &world_state.location.gatherable_items {
-                ws_parts.push(format!("- {} ({})", item.name, item.item_id));
+                let item_ref =
+                    crate::soul::item_source::display_item_ref(&item.name, &item.item_id);
+                ws_parts.push(format!("- {}", item_ref));
             }
         }
 
@@ -581,5 +609,43 @@ mod tests {
     fn build_skill_index_empty_cache_returns_empty() {
         let cache = std::collections::HashMap::new();
         assert_eq!(super::super::CognitiveEngine::build_skill_index(&cache), "");
+    }
+}
+
+/// 上轮驳回记录渲染：age ∈ 1..=REJECTION_RECORD_TTL_TICKS 内有效。
+/// 当前 tick（age=0）不显示——同 tick 自纠的反馈走 validation_feedback 通道；
+/// 空记录清除旧内容防陈旧污染。
+pub(super) fn build_rejection_record_section(
+    lines: &str,
+    recorded_tick: i64,
+    current_tick: i64,
+) -> String {
+    let age = current_tick - recorded_tick;
+    if lines.is_empty() || !(1..=crate::config::REJECTION_RECORD_TTL_TICKS).contains(&age) {
+        return String::new();
+    }
+    format!(
+        "\n### 上轮意图驳回记录（以下意图未执行。仔细阅读驳回原因，从给出的列表中照抄正确标识重新提交，不要重复同样错误）\n{}\n",
+        lines
+    )
+}
+
+#[cfg(test)]
+mod rejection_record_tests {
+    use super::build_rejection_record_section;
+
+    #[test]
+    fn test_rejection_record_ttl_window() {
+        let lines = "- 意图「喝」被驳回";
+        // age=1（下一回合）显示
+        assert!(build_rejection_record_section(lines, 100, 101).contains(lines));
+        // age=2（防御性余量）仍显示
+        assert!(build_rejection_record_section(lines, 100, 102).contains(lines));
+        // age=3 过期
+        assert!(build_rejection_record_section(lines, 100, 103).is_empty());
+        // 当前 tick（age=0，同 tick 自纠走 validation_feedback 通道）不显示
+        assert!(build_rejection_record_section(lines, 100, 100).is_empty());
+        // 空记录清除
+        assert!(build_rejection_record_section("", 100, 101).is_empty());
     }
 }

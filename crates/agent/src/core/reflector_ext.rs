@@ -65,6 +65,11 @@ impl super::Agent {
                 graded_config: graded_config.cloned(),
                 recent_same_type_decisions,
                 acquired_item_ids,
+                auto_fill_unique_item: self
+                    .config
+                    .token_optimization
+                    .reflector
+                    .auto_fill_unique_item,
             },
         };
 
@@ -107,15 +112,27 @@ impl super::Agent {
     /// 复用 decision_with_chain_callback 基础设施：
     /// 1. 设置 last_rejection_feedback（callback 会读取并传给 LLM）
     /// 2. 调用 callback 生成纠正后的 intent
+    ///
+    /// 反馈结构化（P1-2）：复述原意图 + 指明驳回原因 + 限定「只修正问题字段」，
+    /// 把全量重决策收敛为定向修正，降低纠正时的决策漂移
     pub(crate) async fn self_correct_intent(
         &mut self,
         world_state: &WorldState,
         memory_context: &str,
         rejection_reason: &str,
+        original: &cyber_jianghu_protocol::Intent,
         soul_cycle_attempt: i32,
     ) -> Result<cyber_jianghu_protocol::Intent> {
+        let original_json = serde_json::json!({
+            "action_type": original.action_type.as_str(),
+            "action_data": original.action_data,
+        });
+        let structured_feedback = format!(
+            "你的上一条意图被天魂驳回，未执行。\n原意图: {}\n驳回原因: {}\n请修正后重新输出完整意图：优先只修正被指出的错误字段、保持原决策方向不变；只有当驳回原因表明该动作本身不可行时才更换动作。所有物品/地点/人物 ID 必须从驳回原因给出的列表或世界状态中照抄，禁止自造。",
+            original_json, rejection_reason
+        );
         // 设置驳回反馈，使 callback 能传递给 LLM
-        self.set_rejection_feedback(rejection_reason.to_string(), world_state.tick_id);
+        self.set_rejection_feedback(structured_feedback, world_state.tick_id);
 
         let tick_id = world_state.tick_id;
         let agent_id = world_state.agent_id.unwrap_or_default();

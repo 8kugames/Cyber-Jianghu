@@ -106,6 +106,7 @@ pub(crate) async fn validate_intent_handler(
             graded_config,
             recent_same_type_decisions: vec![],
             acquired_item_ids: vec![],
+            auto_fill_unique_item: false,
         },
     };
 

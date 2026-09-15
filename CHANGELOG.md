@@ -6,7 +6,12 @@
 
 ### Features
 
+- **人魂 Layer 0 目标校验优化：物品引用四形态解析与可照抄纠错回路**（agent）：物品引用统一接受四形态并归一化回写完整 uuid（完整 uuid / 名称[短uuid] / 裸中文名 / 短 uuid 前缀唯一匹配自动解析）；prompt 背包/附近/可采集渲染与全部天魂拒绝消息改为「名称[短uuid]」可照抄形态（消除完整 uuid 复制臆造英文 ID 的根因）；天魂驳回跨 tick 留痕（「上轮意图驳回记录」注入下一回合决策上下文，TTL 自过期）；空 item_id 专属指引与配置化唯一候选回填（`auto_fill_unique_item`，默认关）；自纠反馈结构化（复述原意图 + 定向修正指令）；Layer 2 规则链感知对齐（「取→用」链内动作不再被 valid_item_id_use 误拦）；物品展示格式单一真源上移 protocol（server/agent 同源防漂移）；layer0 拒绝消息模板化（`reject_feedback.layer0`）+ 模板占位符缺失自检告警；get_action_detail 提示与认知上下文「地上有…」同步可照抄口径。
 - **Agent 自动更新（GitHub Release）**（agent）：新增 `infra/updater` 自更新模块——更新判定用 digest 恒等比较（当前 exe sha256 vs 最新 release 平台资产 digest，规避 tag=server 版本与 agent 版本不可比问题），下载后 sha256 校验（fail-safe：缺 digest 或校验不符拒绝安装）；apply 进程内互斥串行化（后台任务与手动触发并发不重复下载安装），安装后失效 digest 缓存使后续判定反映新文件；后台周期检查（默认 6h+抖动）自动下载安装并重启（unix execve 自替换/Windows exe.old 让位）；新增 CLI `cyber-jianghu-agent update [--check-only]` 与 HTTP 端点 `GET /api/v1/update/status`、`POST /api/v1/update/check`、`POST /api/v1/update/apply`（Bearer 认证）；面板设置页新增「版本与更新」卡片（当前版本/digest、最新 release、检查与安装按钮，守卫原因可见）；容器内（/.dockerenv）与 cargo 构建产物（target/ 下）自动跳过，`CYBER_JIANGHU_SELF_UPDATE=0` 可硬禁用；配置项见 agent.yaml `update` 段（enabled/auto_apply/check_interval_secs/repo）。
+
+### Bug Fixes
+
+- **生存节奏哨兵失守：满值饿死偏早 1 tick**（server）：`3f75732d` 将游戏日 12→24 tick 并放宽至 7 游戏日，但 decay 0.6 实际 167 tick 死亡（6.96 游戏日）且哨兵测试未同步；衰减精确化为 0.5955（截断补偿后恰第 168 tick = 第 7 游戏日末），哨兵测试 `survival_pacing_test` 对齐 24 tick/7 日新节奏。
 
 ## [0.1.345] - 2026-09-15
 

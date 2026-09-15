@@ -12,6 +12,7 @@ mod death;
 mod helpers;
 mod reporting;
 mod soul_cycle;
+mod soul_cycle_support;
 mod tick;
 
 use anyhow::Result;

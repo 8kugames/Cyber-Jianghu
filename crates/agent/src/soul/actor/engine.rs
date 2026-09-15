@@ -3,7 +3,7 @@
 // ============================================================================
 //
 // 人魂直连 WorldState：直接接收客观世界状态，输出结构化 Intent。
-// 不再输出叙事中间态（"吃馒头充饥"），直接输出精确 ID（item_id: "mantou"）。
+// 不再输出叙事中间态（"吃馒头充饥"），直接输出精确 ID（item_id: "馒头" 或 "馒头[a65df604]"）。
 // 天魂翻译步骤已消除。
 //
 // 地魂 tool-calling 集成：当 LLM 支持 tool calling 时，认知流程可调用
@@ -204,6 +204,10 @@ pub struct CognitiveEngine {
     pub(super) rule_cache: std::sync::RwLock<Option<crate::component::rule_cache::RuleCache>>,
     /// 上轮行动执行结果摘要（由 lifecycle 写入，供 build_tick_message 注入人魂推理上下文）
     last_tick_action_summary: std::sync::RwLock<String>,
+    /// 上轮天魂驳回记录（内容 + 发生 tick；由 soul_cycle 写入）。
+    /// 天魂驳回不产生 ExecutionResult，不写入 last_tick_action_summary，
+    /// 若不留痕下一回合 LLM 对失败零记忆 → 重复同样臆造。TTL 由读取端控制
+    last_tick_rejection: std::sync::RwLock<(String, i64)>,
 }
 
 impl CognitiveEngine {
@@ -250,6 +254,7 @@ impl CognitiveEngine {
             persona_ref: std::sync::RwLock::new(Some(std::sync::Arc::new(persona.clone()))),
             rule_cache: std::sync::RwLock::new(None),
             last_tick_action_summary: std::sync::RwLock::new(String::new()),
+            last_tick_rejection: std::sync::RwLock::new((String::new(), 0)),
         };
         engine.load_skill_cache_from_disk();
         engine.init_rule_cache_from_template();
@@ -389,6 +394,7 @@ impl CognitiveEngine {
             persona_ref: std::sync::RwLock::new(Some(std::sync::Arc::new(persona.clone()))),
             rule_cache: std::sync::RwLock::new(None),
             last_tick_action_summary: std::sync::RwLock::new(String::new()),
+            last_tick_rejection: std::sync::RwLock::new((String::new(), 0)),
         };
         engine.load_skill_cache_from_disk();
         engine.init_rule_cache_from_template();
@@ -889,6 +895,24 @@ impl CognitiveEngine {
         self.last_tick_action_summary
             .read()
             .expect("last_tick_action_summary lock not poisoned")
+            .clone()
+    }
+
+    /// 记录本 tick 天魂最终驳回（未执行的意图；由 soul_cycle 在循环收敛后写入）。
+    /// 空串表示本 tick 无最终驳回，会清除旧记录
+    pub fn set_last_tick_rejection(&self, lines: String, tick_id: i64) {
+        let mut guard = self
+            .last_tick_rejection
+            .write()
+            .expect("last_tick_rejection lock not poisoned");
+        *guard = (lines, tick_id);
+    }
+
+    /// 读取上轮驳回记录（内容, 发生 tick）；无记录返回 (空串, 0)
+    pub fn get_last_tick_rejection(&self) -> (String, i64) {
+        self.last_tick_rejection
+            .read()
+            .expect("last_tick_rejection lock not poisoned")
             .clone()
     }
 

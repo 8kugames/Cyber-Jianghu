@@ -200,6 +200,7 @@ async fn test_validator_trait_runs_full_pipeline() {
             graded_config: Some(GradedValidationConfig::default()),
             recent_same_type_decisions: vec![],
             acquired_item_ids: vec![],
+            auto_fill_unique_item: false,
         },
     };
 
@@ -238,6 +239,7 @@ async fn test_layer3_rejects_semantic_repeat() {
                 "说话：在下张三".to_string(),
             ],
             acquired_item_ids: vec![],
+            auto_fill_unique_item: false,
         },
     };
 
@@ -276,6 +278,7 @@ async fn test_no_dedup_section_when_empty_history() {
             graded_config: None,
             recent_same_type_decisions: vec![],
             acquired_item_ids: vec![],
+            auto_fill_unique_item: false,
         },
     };
 

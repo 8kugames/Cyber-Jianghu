@@ -2,12 +2,18 @@
 # Agent Prompt 模板配置
 # ============================================================================
 #
-# ActorSoul 的 prompt 模板，数据驱动替代硬编码。
+# Agent 的 prompt 模板，数据驱动替代硬编码。
 # 占位符格式：{variable_name}
 #
 # 必须包含 required_sections 中列出的所有 section，否则启动时 fail-fast。
 #
 # truncation 段：控制各处文本截断长度，消除 .take(N) 魔法数字。
+#
+# 部署时序注意：本文件由 Server 下发（ConfigUpdate）且在热重载监视清单内。
+# agent 端代码与模板占位符需同版本配套——如 world_state 段的
+# {rejection_record_section} 为 agent 注入变量，若旧 agent 收到含该占位符的
+# 新模板会泄漏字面占位符；新 agent 收到缺该占位符的旧模板则驳回留痕
+# 静默失效（agent 端有告警日志）。升级时先发 agent、后发或同发 Server 配置。
 # ============================================================================
 
 version: "0.0.1"
@@ -49,6 +55,7 @@ templates:
       world_state: |
         ## 当前世界状态
         {last_action_result_section}
+        {rejection_record_section}
         {world_state_section}
         {memory_section}
         {summary_context}
@@ -187,8 +194,8 @@ templates:
           (a) **独立并行**：同时做多件不冲突的事。社交行为是典型的并行场景——向张三说话后再向李四说话，观察环境后再做决定，检查背包后再行动。这些动作不需要等待彼此。
           (b) **因果链**：前一个动作的结果是后一个的前提（取→用，移动→观察）。仅在这种模式中注意"后续依赖前一个成功"。
         - **优先多步连续动作**：当你有明确的多步计划时，应一次性输出 2-3 个动作，而非只输出第一步
-        - 所有 ID 必须从世界状态数据中直接复制：
-          - item_id → 从"背包物品"或"附近可见物品"中的 ID 列表复制
+        - 所有 ID 必须从世界状态数据中直接复制，禁止自造或翻译成英文 ID：
+          - item_id → 从"背包物品"/"附近可见物品"/"可采集资源"列表照抄「名称[短uuid]」标识（整段照抄），或直接填该物品中文名；两种形态均合法。禁止 bottled_water、mantou 之类的自造英文 ID
           - target_location → 从"可前往的地点"列表复制
           - target_agent_id → 从"附近的人"列表中的 ID 复制（8 位短 ID 即可，如 a65df604），禁止填入角色名字
         - 不确定某个动作的字段要求时，调用 get_action_detail 查看详情和示例
@@ -226,6 +233,10 @@ templates:
         使用物品失败：item_id 无效。背包可用物品：[{available_items}]。请使用 `用`，item_id 必须是上述之一（从世界状态数据直接复制）。
       move: |
         移动失败：target_location 无效。可前往的地点：[{reachable_nodes}]。请使用 `移动`，target_location 必须是上述之一（从世界状态数据直接复制）。
+      # layer0 硬性校验拒绝的外层包装（{reason} 为 hard_logic 生成的完整拒绝消息，
+      # 自带可照抄的背包/附近/合法物品清单）
+      layer0: |
+        意图目标校验失败：{reason}
     truncation:
       max_items: 5
 

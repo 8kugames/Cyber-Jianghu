@@ -91,6 +91,30 @@ pub fn short_id(uuid: &Uuid) -> String {
 }
 
 // ============================================================================
+// 物品展示引用（Server/Agent 共享单一真源）
+// ============================================================================
+
+/// 完整物品 uuid 字符串的前 8 位 hex 短前缀；非 uuid 形态原样返回（测试夹具等）。
+///
+/// 与 [`short_id`] 对合法 uuid 输出逐位一致，区别仅在入参形态与非 uuid 容错。
+pub fn short_item_hex(item_uuid_str: &str) -> &str {
+    match item_uuid_str.get(..8) {
+        Some(prefix) if prefix.chars().all(|c| c.is_ascii_hexdigit()) => prefix,
+        _ => item_uuid_str,
+    }
+}
+
+/// LLM 可照抄的「名称[短uuid]」物品引用形态（Server `display_item_name` 与
+/// Agent 照抄指引同源）。
+///
+/// 36 位完整 uuid 复制错误率高（LLM 倾向「翻译」成英文 snake_case 臆造 ID），
+/// 名称[短uuid] 与人物目标的短 ID 方案对齐，且为天魂 Layer 0 形态 2
+/// 直接接受的合法提交形态。
+pub fn display_item_ref(name: &str, item_uuid_str: &str) -> String {
+    format!("{}[{}]", name, short_item_hex(item_uuid_str))
+}
+
+// ============================================================================
 // 物品标识解析
 // ============================================================================
 
@@ -283,5 +307,23 @@ mod tests {
         let (bare, short) = parse_item_ref("  刀[1a2b3c4d] ");
         assert_eq!(bare, "刀");
         assert_eq!(short.as_deref(), Some("1a2b3c4d"));
+    }
+
+    #[test]
+    fn test_short_item_hex() {
+        let uuid = item_uuid("馒头").to_string();
+        assert_eq!(short_item_hex(&uuid), &uuid[..8]);
+        // 非 uuid 形态（测试夹具遗留的英文 id）原样返回
+        assert_eq!(short_item_hex("mantou"), "mantou");
+        // 空/短串安全
+        assert_eq!(short_item_hex(""), "");
+    }
+
+    #[test]
+    fn test_display_item_ref() {
+        let uuid = item_uuid("水").to_string();
+        assert_eq!(display_item_ref("水", &uuid), format!("水[{}]", &uuid[..8]));
+        // 与 short_id 对合法 uuid 输出一致（同构契约）
+        assert_eq!(short_item_hex(&uuid), short_id(&item_uuid("水")));
     }
 }

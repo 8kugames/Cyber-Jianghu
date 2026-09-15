@@ -186,6 +186,7 @@ pub fn spawn_validation_task(params: ValidationTaskParams) -> tokio::task::JoinH
                             graded_config,
                             recent_same_type_decisions: vec![],
                             acquired_item_ids: vec![],
+                            auto_fill_unique_item: false,
                         },
                     };
 

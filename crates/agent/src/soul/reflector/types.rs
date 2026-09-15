@@ -176,6 +176,10 @@ pub struct ValidationRuntimeConfig {
     /// 后序"取后即用"类 intent 的目标物品尚不在快照可见集合中，
     /// 由调用方将前序已 approved 的取动作 item_id 传入以免误拦。
     pub acquired_item_ids: Vec<String>,
+    /// 空 item_id 且背包内仅有唯一候选物品时自动回填（默认关闭，
+    /// 由 token_optimization.reflector.auto_fill_unique_item 控制）。
+    /// 仅对 Inventory 来源动作生效，回填后记日志留痕。
+    pub auto_fill_unique_item: bool,
 }
 
 /// 验证请求
@@ -314,6 +318,7 @@ mod tests {
                 graded_config: Some(GradedValidationConfig::default()),
                 recent_same_type_decisions: vec![],
                 acquired_item_ids: vec![],
+                auto_fill_unique_item: false,
             },
         };
 
