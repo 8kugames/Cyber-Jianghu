@@ -4,6 +4,7 @@
 //
 // 定义人设中可演化的性格特质
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -45,10 +46,7 @@ impl TraitChange {
             delta,
             reason,
             tick_id,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system time is always after UNIX_EPOCH")
-                .as_secs() as i64,
+            timestamp: Utc::now().timestamp(),
             decay_rate: 0.1,
         }
     }

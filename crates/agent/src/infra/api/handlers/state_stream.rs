@@ -18,7 +18,7 @@
 use std::convert::Infallible;
 use std::time::Duration;
 
-use axum::{body::Body, extract::State, http::StatusCode, response::Response};
+use axum::{extract::State, response::Response};
 use bytes::Bytes;
 use http_body::Frame;
 use http_body_util::StreamBody;
@@ -26,9 +26,8 @@ use http_body_util::StreamBody;
 use cyber_jianghu_protocol::WorldState;
 
 use super::HttpApiState;
+use super::sse_util::{HEARTBEAT_INTERVAL_SECS, sse_frame, sse_response};
 
-/// 空闲心跳间隔（client 契约：30s 一次）
-const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 /// state 事件中 headline_events 的条数上限（控制单帧体积）
 const HEADLINE_EVENTS_LIMIT: usize = 10;
 
@@ -40,7 +39,7 @@ pub(crate) async fn state_stream_handler(State(state): State<HttpApiState>) -> R
     let mut tick_rx = state.tick_update_tx.subscribe();
 
     let stream = async_stream::stream! {
-        let data = Bytes::from_static(b"event: connected\ndata: {\"ok\":true}\n\n");
+        let data = sse_frame("connected", r#"{"ok":true}"#);
         yield Ok::<_, Infallible>(Frame::data(data));
 
         // 连接建立后立即推送当前状态（若有），避免 client 等待下一个 tick
@@ -71,22 +70,14 @@ pub(crate) async fn state_stream_handler(State(state): State<HttpApiState>) -> R
                         .map(|d| d.as_secs())
                         .unwrap_or(0);
                     let payload = serde_json::json!({"ts": ts}).to_string();
-                    let data = Bytes::from(format!("event: heartbeat\ndata: {}\n\n", payload));
+                    let data = sse_frame("heartbeat", &payload);
                     yield Ok::<_, Infallible>(Frame::data(data));
                 }
             }
         }
     };
 
-    let body = StreamBody::new(stream);
-    Response::builder()
-        .status(StatusCode::OK)
-        .header("Content-Type", "text/event-stream; charset=utf-8")
-        .header("Cache-Control", "no-cache")
-        .header("Connection", "keep-alive")
-        .header("X-Accel-Buffering", "no")
-        .body(Body::new(body))
-        .expect("valid HTTP response")
+    sse_response(StreamBody::new(stream))
 }
 
 /// view 构建的输入依赖（与 HttpApiState 解耦，便于单测）
@@ -136,7 +127,7 @@ async fn build_state_event_data(state: &HttpApiState) -> Option<Bytes> {
         "world_state": build_world_state_view(&ws, &deps),
         "intent_snapshot": null, // 保留字段（client 现阶段忽略）
     });
-    Some(Bytes::from(format!("event: state\ndata: {}\n\n", payload)))
+    Some(sse_frame("state", &payload.to_string()))
 }
 
 /// 读取当前角色的活跃托梦 (thought, remaining_ticks)；无托梦存储或无活跃托梦返回 None

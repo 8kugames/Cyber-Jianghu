@@ -11,6 +11,7 @@
 // - 追踪人设演化历史
 // ============================================================================
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -40,10 +41,7 @@ impl Default for PersonaState {
             current_emotion: "平静".to_string(),
             current_goal: None,
             stress_level: 0,
-            last_updated: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system time is always after UNIX_EPOCH")
-                .as_secs() as i64,
+            last_updated: Utc::now().timestamp(),
             core_affect: None,
         }
     }
@@ -170,19 +168,13 @@ impl DynamicPersona {
     /// 更新情绪状态
     pub fn update_emotion(&mut self, emotion: String) {
         self.current_state.current_emotion = emotion;
-        self.current_state.last_updated = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time is always after UNIX_EPOCH")
-            .as_secs() as i64;
+        self.current_state.last_updated = Utc::now().timestamp();
     }
 
     /// 设置当前目标
     pub fn set_goal(&mut self, goal: String) {
         self.current_state.current_goal = Some(goal);
-        self.current_state.last_updated = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time is always after UNIX_EPOCH")
-            .as_secs() as i64;
+        self.current_state.last_updated = Utc::now().timestamp();
     }
 
     /// 应用所有特质的衰减（每 Tick 调用）
@@ -190,10 +182,7 @@ impl DynamicPersona {
         for trait_obj in self.traits.values_mut() {
             trait_obj.apply_decay();
         }
-        self.current_state.last_updated = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time is always after UNIX_EPOCH")
-            .as_secs() as i64;
+        self.current_state.last_updated = Utc::now().timestamp();
     }
 
     /// 检查人设是否一致（用于测试）

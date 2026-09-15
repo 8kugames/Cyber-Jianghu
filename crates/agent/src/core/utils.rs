@@ -2,11 +2,9 @@ use crate::models::WorldState;
 
 /// 角色展示名：姓名[短 uuid 前 8 位]。
 ///
-/// 与 Server 端 `crate::display::display_agent_name` 同源同格式：
-/// 既可读（姓名），又可还原（短 uuid），供 prompt / 对话上下文统一使用。
-pub fn display_agent_name(name: &str, agent_id: uuid::Uuid) -> String {
-    format!("{}[{}]", name, &agent_id.to_string()[..8])
-}
+/// 实现上移 protocol（与 short_id 同源），与 Server 端共享同一格式，
+/// 供 prompt / 对话上下文统一使用。
+pub use cyber_jianghu_protocol::display_agent_name;
 
 /// 构建世界上下文
 ///

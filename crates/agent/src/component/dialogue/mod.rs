@@ -227,7 +227,10 @@ impl DialogueContextManager {
         for session in active_sessions {
             // 对话伙伴展示名统一 姓名[短 uuid]；名字缺失时退化为 未知角色[短 uuid]
             let partner_display = if session.partner_name.is_empty() {
-                format!("未知角色[{}]", &session.partner_id.to_string()[..8])
+                format!(
+                    "未知角色[{}]",
+                    cyber_jianghu_protocol::short_id(&session.partner_id)
+                )
             } else {
                 crate::core::utils::display_agent_name(&session.partner_name, session.partner_id)
             };

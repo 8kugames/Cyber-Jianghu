@@ -1309,41 +1309,11 @@ impl super::Agent {
 
         // 死亡时触发传记生成（fire-and-forget，不阻塞重生调度）
         if let Some(ref api_state) = self.http_api_state {
-            let state = api_state.clone();
-            let bio_agent_id = dead_agent_id;
-            tokio::spawn(async move {
-                info!("[biography] 死亡触发传记生成: agent={}", bio_agent_id);
-                const MAX_RETRIES: u32 = 3;
-                const RETRY_DELAY_SECS: u64 = 30;
-                for attempt in 0..MAX_RETRIES {
-                    match crate::infra::api::handlers::generate_biography_for_agent(
-                        &state,
-                        bio_agent_id,
-                    )
-                    .await
-                    {
-                        Ok(bio) => {
-                            info!("[biography] 死亡传记生成成功: {}字", bio.chars().count());
-                            return;
-                        }
-                        Err(e) => {
-                            warn!(
-                                "[biography] 死亡传记生成失败 (attempt {}/{}): {}",
-                                attempt + 1,
-                                MAX_RETRIES,
-                                e
-                            );
-                            if attempt + 1 < MAX_RETRIES {
-                                tokio::time::sleep(std::time::Duration::from_secs(
-                                    RETRY_DELAY_SECS,
-                                ))
-                                .await;
-                            }
-                        }
-                    }
-                }
-                warn!("[biography] 死亡传记生成最终失败: agent={}", bio_agent_id);
-            });
+            crate::infra::api::handlers::spawn_biography_generation_with_retry(
+                api_state,
+                dead_agent_id,
+                "死亡",
+            );
         }
 
         // 调度自动重生

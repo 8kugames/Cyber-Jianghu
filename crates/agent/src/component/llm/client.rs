@@ -315,6 +315,49 @@ pub struct CompleteJsonResult<T> {
     pub reasoning_content: Option<String>,
 }
 
+/// 共享的「send_chat_exchange + JSON 解析 + 截断翻倍重试」实现。
+///
+/// `complete_json_with_config_and_retry_extracted` 与
+/// `complete_json_with_system_and_retry_extracted` 仅 messages 构造不同，
+/// 重试循环在此唯一维护。
+async fn send_exchange_json_with_retry<T: DeserializeOwned + Send, C: LlmClient + ?Sized>(
+    client: &C,
+    messages: Vec<super::openai_types::ChatMessage>,
+    mut config: super::openai_types::ChatExchangeConfig,
+    max_retries: usize,
+) -> Result<CompleteJsonResult<T>> {
+    let baseline = client.retry_max_tokens_baseline();
+    let ceiling = client.retry_max_tokens_ceiling();
+    for attempt in 0..=max_retries {
+        let response = client
+            .send_chat_exchange(messages.clone(), None, config.clone())
+            .await?;
+        let content = response.content.unwrap_or_default();
+        match parse_json_response::<T>(&content) {
+            Ok(value) => {
+                return Ok(CompleteJsonResult {
+                    value,
+                    reasoning_content: response.reasoning_content,
+                });
+            }
+            Err(e) => {
+                if !is_truncation_error(&e) || attempt == max_retries {
+                    return Err(e);
+                }
+                let new_max = (config.max_tokens.unwrap_or(baseline) * 2).min(ceiling);
+                tracing::warn!(
+                    "[LLM retry] 截断检测 attempt={}, max_tokens {} -> {}",
+                    attempt + 1,
+                    config.max_tokens.unwrap_or(baseline),
+                    new_max
+                );
+                config.max_tokens = Some(new_max);
+            }
+        }
+    }
+    unreachable!()
+}
+
 /// LlmClient 扩展 Trait
 ///
 /// 提供 complete_json 等辅助方法
@@ -370,40 +413,11 @@ pub trait LlmClientExt: LlmClient {
     async fn complete_json_with_config_and_retry_extracted<T: DeserializeOwned + Send>(
         &self,
         prompt: &str,
-        mut config: super::openai_types::ChatExchangeConfig,
+        config: super::openai_types::ChatExchangeConfig,
         max_retries: usize,
     ) -> Result<CompleteJsonResult<T>> {
         let messages = vec![super::openai_types::ChatMessage::user(prompt)];
-        let baseline = self.retry_max_tokens_baseline();
-        let ceiling = self.retry_max_tokens_ceiling();
-        for attempt in 0..=max_retries {
-            let response = self
-                .send_chat_exchange(messages.clone(), None, config.clone())
-                .await?;
-            let content = response.content.unwrap_or_default();
-            match parse_json_response::<T>(&content) {
-                Ok(value) => {
-                    return Ok(CompleteJsonResult {
-                        value,
-                        reasoning_content: response.reasoning_content,
-                    });
-                }
-                Err(e) => {
-                    if !is_truncation_error(&e) || attempt == max_retries {
-                        return Err(e);
-                    }
-                    let new_max = (config.max_tokens.unwrap_or(baseline) * 2).min(ceiling);
-                    tracing::warn!(
-                        "[LLM retry] 截断检测 attempt={}, max_tokens {} -> {}",
-                        attempt + 1,
-                        config.max_tokens.unwrap_or(baseline),
-                        new_max
-                    );
-                    config.max_tokens = Some(new_max);
-                }
-            }
-        }
-        unreachable!()
+        send_exchange_json_with_retry::<T, Self>(self, messages, config, max_retries).await
     }
 
     /// 完成一次结构化输出调用（system + user 分离，遇截断自动重试），并返回 reasoning_content
@@ -414,43 +428,14 @@ pub trait LlmClientExt: LlmClient {
         &self,
         system: &str,
         prompt: &str,
-        mut config: super::openai_types::ChatExchangeConfig,
+        config: super::openai_types::ChatExchangeConfig,
         max_retries: usize,
     ) -> Result<CompleteJsonResult<T>> {
         let messages = vec![
             super::openai_types::ChatMessage::system(system),
             super::openai_types::ChatMessage::user(prompt),
         ];
-        let baseline = self.retry_max_tokens_baseline();
-        let ceiling = self.retry_max_tokens_ceiling();
-        for attempt in 0..=max_retries {
-            let response = self
-                .send_chat_exchange(messages.clone(), None, config.clone())
-                .await?;
-            let content = response.content.unwrap_or_default();
-            match parse_json_response::<T>(&content) {
-                Ok(value) => {
-                    return Ok(CompleteJsonResult {
-                        value,
-                        reasoning_content: response.reasoning_content,
-                    });
-                }
-                Err(e) => {
-                    if !is_truncation_error(&e) || attempt == max_retries {
-                        return Err(e);
-                    }
-                    let new_max = (config.max_tokens.unwrap_or(baseline) * 2).min(ceiling);
-                    tracing::warn!(
-                        "[LLM retry] 截断检测 attempt={}, max_tokens {} -> {}",
-                        attempt + 1,
-                        config.max_tokens.unwrap_or(baseline),
-                        new_max
-                    );
-                    config.max_tokens = Some(new_max);
-                }
-            }
-        }
-        unreachable!()
+        send_exchange_json_with_retry::<T, Self>(self, messages, config, max_retries).await
     }
 
     /// 使用 tool calling 的多轮对话，返回结构化 JSON
@@ -473,6 +458,88 @@ pub trait LlmClientExt: LlmClient {
         current_prompt: &str,
     ) -> Result<T>;
 
+    /// 流式 JSON 消费共享实现：排空流 → usage 日志 → 截断委托重试 → 空检 → 解析。
+    ///
+    /// `complete_json_streaming` 与 `complete_json_streaming_with_conversation`
+    /// 仅取流入口与 `tag` 不同，消费逻辑在此唯一维护。
+    async fn drain_stream_parse_json<D: DeserializeOwned + Send>(
+        &self,
+        stream: super::streaming::LlmStream,
+        retry_prompt: &str,
+        tag: &str,
+    ) -> Result<D> {
+        use futures_util::StreamExt;
+
+        let mut acc = super::streaming::StreamAccumulator::new();
+        let mut stream = std::pin::pin!(stream);
+        let mut json_complete = false;
+
+        // 必须完全耗尽流以确保 Done chunk (含 usage) 被处理
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result?;
+            // JSON 完成后仍继续累积，确保收到 Done chunk
+            if !json_complete {
+                json_complete = acc.is_json_complete();
+            }
+            acc.push(chunk);
+        }
+
+        let stats = acc.token_stats();
+        let pt = stats.prompt_tokens;
+        let ct = stats.completion_tokens;
+        if pt > 0 || ct > 0 {
+            tracing::debug!(
+                "Streaming JSON {} token usage: prompt={}, completion={}, real={}",
+                tag,
+                pt,
+                ct,
+                stats.has_real_usage
+            );
+        }
+
+        // 截断检测：finish_reason=length 且 JSON 不完整（在 into_parts 前执行）
+        // 复用 complete_json_with_config_and_retry_extracted 机制
+        // （当 prefer_stream=true 时，send_chat_exchange 内部走流式路径）
+        if acc.is_truncated() && !json_complete {
+            tracing::warn!(
+                "[streaming] 截断检测: content_len={}, 委托重试机制(max_tokens翻倍)",
+                acc.content().len(),
+            );
+            let chat_config = super::openai_types::ChatExchangeConfig {
+                model: self.model_name(),
+                temperature: self.temperature(),
+                max_tokens: None,
+                enable_thinking: None,
+            };
+            let extracted = self
+                .complete_json_with_config_and_retry_extracted::<D>(retry_prompt, chat_config, 2)
+                .await?;
+            return Ok(extracted.value);
+        }
+
+        let (content, _, reasoning_content) = acc.into_parts();
+        let json_str = if content.trim().is_empty() && !reasoning_content.trim().is_empty() {
+            tracing::info!(
+                "[streaming] content 为空，从 reasoning_content 提取 JSON (reasoning_len={})",
+                reasoning_content.len()
+            );
+            &reasoning_content
+        } else {
+            &content
+        };
+
+        if json_str.trim().is_empty() {
+            anyhow::bail!(
+                "LLM API error: response content is empty (streaming_{}, prompt_tokens={}, completion_tokens={})",
+                tag,
+                pt,
+                ct
+            );
+        }
+
+        parse_json_response::<D>(json_str)
+    }
+
     /// 流式完成结构化输出（system + user）
     ///
     /// 内部消费 SSE 流，累积文本，JSON 闭合后早期终止。
@@ -480,7 +547,11 @@ pub trait LlmClientExt: LlmClient {
         &self,
         system: &str,
         prompt: &str,
-    ) -> Result<T>;
+    ) -> Result<T> {
+        let stream = self.complete_streaming(system, prompt).await?;
+        self.drain_stream_parse_json::<T>(stream, prompt, "json")
+            .await
+    }
 
     /// 流式对话完成结构化输出（长窗口）
     ///
@@ -492,7 +563,13 @@ pub trait LlmClientExt: LlmClient {
         summary: Option<&str>,
         turns: &[ConversationTurn],
         current_prompt: &str,
-    ) -> Result<T>;
+    ) -> Result<T> {
+        let stream = self
+            .complete_conversation_streaming(system, semi_static, summary, turns, current_prompt)
+            .await?;
+        self.drain_stream_parse_json::<T>(stream, current_prompt, "json_conv")
+            .await
+    }
 
     /// 使用对话历史 + tool calling 的结构化输出
     async fn complete_json_with_conversation_and_tools<D: DeserializeOwned + Send>(
@@ -934,161 +1011,6 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
             .await?;
         parse_json_response::<D>(&response)
     }
-
-    async fn complete_json_streaming<D: DeserializeOwned + Send>(
-        &self,
-        system: &str,
-        prompt: &str,
-    ) -> Result<D> {
-        use futures_util::StreamExt;
-
-        let stream = self.complete_streaming(system, prompt).await?;
-        let mut acc = super::streaming::StreamAccumulator::new();
-        let mut stream = std::pin::pin!(stream);
-        let mut json_complete = false;
-
-        // 必须完全耗尽流以确保 Done chunk (含 usage) 被处理
-        while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result?;
-            // JSON 完成后仍继续累积，确保收到 Done chunk
-            if !json_complete {
-                json_complete = acc.is_json_complete();
-            }
-            acc.push(chunk);
-        }
-
-        let stats = acc.token_stats();
-        let pt = stats.prompt_tokens;
-        let ct = stats.completion_tokens;
-        if pt > 0 || ct > 0 {
-            tracing::debug!(
-                "Streaming JSON token usage: prompt={}, completion={}, real={}",
-                pt,
-                ct,
-                stats.has_real_usage
-            );
-        }
-
-        // 截断检测：finish_reason=length 且 JSON 不完整（在 into_parts 前执行）
-        if acc.is_truncated() && !json_complete {
-            tracing::warn!(
-                "[streaming] 截断检测: content_len={}, 委托重试机制(max_tokens翻倍)",
-                acc.content().len(),
-            );
-            let chat_config = super::openai_types::ChatExchangeConfig {
-                model: self.model_name(),
-                temperature: self.temperature(),
-                max_tokens: None,
-                enable_thinking: None,
-            };
-            let extracted = self
-                .complete_json_with_config_and_retry_extracted::<D>(prompt, chat_config, 2)
-                .await?;
-            return Ok(extracted.value);
-        }
-
-        let (content, _, reasoning_content) = acc.into_parts();
-        let json_str = if content.trim().is_empty() && !reasoning_content.trim().is_empty() {
-            tracing::info!(
-                "[streaming] content 为空，从 reasoning_content 提取 JSON (reasoning_len={})",
-                reasoning_content.len()
-            );
-            &reasoning_content
-        } else {
-            &content
-        };
-
-        if json_str.trim().is_empty() {
-            anyhow::bail!(
-                "LLM API error: response content is empty (streaming_json, prompt_tokens={}, completion_tokens={})",
-                pt,
-                ct
-            );
-        }
-
-        parse_json_response::<D>(json_str)
-    }
-
-    async fn complete_json_streaming_with_conversation<D: DeserializeOwned + Send>(
-        &self,
-        system: &str,
-        semi_static: &str,
-        summary: Option<&str>,
-        turns: &[ConversationTurn],
-        current_prompt: &str,
-    ) -> Result<D> {
-        use futures_util::StreamExt;
-
-        let stream = self
-            .complete_conversation_streaming(system, semi_static, summary, turns, current_prompt)
-            .await?;
-        let mut acc = super::streaming::StreamAccumulator::new();
-        let mut stream = std::pin::pin!(stream);
-        let mut json_complete = false;
-
-        // 必须完全耗尽流以确保 Done chunk (含 usage) 被处理
-        while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result?;
-            // JSON 完成后仍继续累积，确保收到 Done chunk
-            if !json_complete {
-                json_complete = acc.is_json_complete();
-            }
-            acc.push(chunk);
-        }
-
-        let stats = acc.token_stats();
-        let pt = stats.prompt_tokens;
-        let ct = stats.completion_tokens;
-        if pt > 0 || ct > 0 {
-            tracing::debug!(
-                "Streaming JSON conv token usage: prompt={}, completion={}, real={}",
-                pt,
-                ct,
-                stats.has_real_usage
-            );
-        }
-
-        // 截断检测：finish_reason=length 且 JSON 不完整（在 into_parts 前执行）
-        // 复用已有的 complete_json_with_config_and_retry_extracted 机制
-        // （当 prefer_stream=true 时，send_chat_exchange 内部走流式路径）
-        if acc.is_truncated() && !json_complete {
-            tracing::warn!(
-                "[streaming] 截断检测: content_len={}, 委托重试机制(max_tokens翻倍)",
-                acc.content().len(),
-            );
-            let chat_config = super::openai_types::ChatExchangeConfig {
-                model: self.model_name(),
-                temperature: self.temperature(),
-                max_tokens: None,
-                enable_thinking: None,
-            };
-            let extracted = self
-                .complete_json_with_config_and_retry_extracted::<D>(current_prompt, chat_config, 2)
-                .await?;
-            return Ok(extracted.value);
-        }
-
-        let (content, _, reasoning_content) = acc.into_parts();
-        let json_str = if content.trim().is_empty() && !reasoning_content.trim().is_empty() {
-            tracing::info!(
-                "[streaming] content 为空，从 reasoning_content 提取 JSON (reasoning_len={})",
-                reasoning_content.len()
-            );
-            &reasoning_content
-        } else {
-            &content
-        };
-
-        if json_str.trim().is_empty() {
-            anyhow::bail!(
-                "LLM API error: response content is empty (streaming_json_conv, prompt_tokens={}, completion_tokens={})",
-                pt,
-                ct
-            );
-        }
-
-        parse_json_response::<D>(json_str)
-    }
 }
 
 // ============================================================================
@@ -1452,11 +1374,12 @@ impl FallbackLlmClient {
         self.clients[idx.min(self.clients.len() - 1)].clone()
     }
 
-    /// 执行带 fallback 的调用（返回类型由闭包决定）
+    /// 带自动 fallback 的调用核心（返回类型由闭包决定）。
     ///
     /// 策略：从 active index 开始，失败时尝试后续所有客户端。
     /// 一旦成功，sticky 到该客户端。`FallbackAndDisable` 会同步写 shared_breaker。
-    async fn call_with_fallback<F, Fut, T>(&self, f: F) -> Result<T>
+    /// `streaming=true` 时日志带 streaming 标注，并跳过 non-streaming 400 提示。
+    async fn call_with_fallback_core<F, Fut, T>(&self, f: F, streaming: bool) -> Result<T>
     where
         F: Fn(Arc<dyn LlmClient>) -> Fut,
         Fut: std::future::Future<Output = Result<T>>,
@@ -1464,6 +1387,7 @@ impl FallbackLlmClient {
         self.reenable_expired();
         let start = self.active.load(std::sync::atomic::Ordering::Relaxed);
         let mut last_err = None;
+        let mode = if streaming { "streaming " } else { "" };
 
         for offset in 0..self.clients.len() {
             let idx = (start + offset) % self.clients.len();
@@ -1481,17 +1405,18 @@ impl FallbackLlmClient {
             let client = self.clients[idx].clone();
 
             match f(client).await {
-                Ok(response) => {
+                Ok(value) => {
                     if offset > 0 {
                         tracing::warn!(
-                            "LLM fallback 成功：切换到客户端 #{} (主用 #{}）",
+                            "LLM {}fallback 成功：切换到客户端 #{} (主用 #{}）",
+                            mode,
                             idx,
                             start
                         );
                         // sticky：后续调用使用此客户端
                         self.active.store(idx, std::sync::atomic::Ordering::Relaxed);
                     }
-                    return Ok(response);
+                    return Ok(value);
                 }
                 Err(e) => {
                     let (action, reason) = classify_llm_error(&e);
@@ -1501,16 +1426,25 @@ impl FallbackLlmClient {
                             | ErrorAction::FallbackAndDisable
                             | ErrorAction::Retry
                     );
-                    tracing::warn!("LLM 客户端 #{} 调用失败 (action={:?}): {}", idx, action, e);
+                    tracing::warn!(
+                        "LLM {}客户端 #{} 调用失败 (action={:?}): {}",
+                        mode,
+                        idx,
+                        action,
+                        e
+                    );
                     if action == ErrorAction::FallbackAndDisable {
                         self.disable_model(idx, reason);
                     }
-                    let err_msg = format!("{:#}", e);
-                    if err_msg.contains("LLM API error 400") && !err_msg.contains("Prompt too long")
-                    {
-                        tracing::warn!(
-                            "提示: 模型可能不支持 non-streaming，建议在 agent.yaml 中设置 prefer_stream: true"
-                        );
+                    if !streaming {
+                        let err_msg = format!("{:#}", e);
+                        if err_msg.contains("LLM API error 400")
+                            && !err_msg.contains("Prompt too long")
+                        {
+                            tracing::warn!(
+                                "提示: 模型可能不支持 non-streaming，建议在 agent.yaml 中设置 prefer_stream: true"
+                            );
+                        }
                     }
                     if !is_fallback {
                         return Err(e);
@@ -1522,6 +1456,15 @@ impl FallbackLlmClient {
 
         // 所有客户端都失败
         Err(last_err.unwrap_or_else(|| anyhow::anyhow!("所有 LLM 客户端均失败")))
+    }
+
+    /// 执行带 fallback 的调用（返回类型由闭包决定）
+    async fn call_with_fallback<F, Fut, T>(&self, f: F) -> Result<T>
+    where
+        F: Fn(Arc<dyn LlmClient>) -> Fut,
+        Fut: std::future::Future<Output = Result<T>>,
+    {
+        self.call_with_fallback_core(f, false).await
     }
 
     /// 流式调用的 fallback 逻辑
@@ -1537,63 +1480,18 @@ impl FallbackLlmClient {
         F: Fn(Arc<dyn LlmClient>) -> Fut,
         Fut: std::future::Future<Output = Result<super::streaming::LlmStream>>,
     {
-        self.reenable_expired();
-        let start = self.active.load(std::sync::atomic::Ordering::Relaxed);
-        let mut last_err = None;
-
-        for offset in 0..self.clients.len() {
-            let idx = (start + offset) % self.clients.len();
-
-            // 跳过已被 circuit breaker 禁用的模型（短锁，不跨 await）
-            if self
-                .disabled_models
-                .lock()
-                .expect("lock poisoned")
-                .contains_key(&idx)
-            {
-                continue;
-            }
-
-            let client = self.clients[idx].clone();
-
-            match f(client.clone()).await {
-                Ok(stream) => {
-                    if offset > 0 {
-                        tracing::warn!(
-                            "LLM streaming fallback 成功：切换到客户端 #{} (主用 #{}）",
-                            idx,
-                            start
-                        );
-                        self.active.store(idx, std::sync::atomic::Ordering::Relaxed);
-                    }
-                    return Ok((stream, client.provider_name(), client.model_name()));
+        // future 在 async 块外创建（f 仅被借用，包装闭包才能多次调用）
+        self.call_with_fallback_core(
+            move |client: Arc<dyn LlmClient>| {
+                let fut = f(client.clone());
+                async move {
+                    let stream = fut.await?;
+                    Ok((stream, client.provider_name(), client.model_name()))
                 }
-                Err(e) => {
-                    let (action, reason) = classify_llm_error(&e);
-                    let is_fallback = matches!(
-                        action,
-                        ErrorAction::Fallback
-                            | ErrorAction::FallbackAndDisable
-                            | ErrorAction::Retry
-                    );
-                    tracing::warn!(
-                        "LLM streaming 客户端 #{} 失败 (action={:?}): {}",
-                        idx,
-                        action,
-                        e
-                    );
-                    if action == ErrorAction::FallbackAndDisable {
-                        self.disable_model(idx, reason);
-                    }
-                    if !is_fallback {
-                        return Err(e);
-                    }
-                    last_err = Some(e);
-                }
-            }
-        }
-
-        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("所有 LLM 客户端均失败")))
+            },
+            true,
+        )
+        .await
     }
 }
 
@@ -1786,7 +1684,7 @@ impl LlmClient for FallbackLlmClient {
 
             let system = system.to_string();
             let prompt = prompt.to_string();
-            let prompt_chars = (system.len() + prompt.len()) as u64;
+            let prompt_chars = super::streaming::plain_prompt_chars(&system, &prompt);
             let system_hash = crate::soul::actor::compute_system_hash(&system);
             let (stream, provider_str, model) = self
                 .call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
@@ -1797,14 +1695,13 @@ impl LlmClient for FallbackLlmClient {
                 .await?;
 
             let provider = LlmProvider::parse(&provider_str).unwrap_or(LlmProvider::OpenClaw);
-            let tracking_stream = super::streaming::UsageTrackingStream::new(
+            Ok(super::streaming::wrap_usage_tracking(
                 stream,
                 provider,
                 model,
                 system_hash,
                 prompt_chars,
-            );
-            Ok(tracking_stream.into_llm_stream())
+            ))
         })
     }
 
@@ -1827,19 +1724,13 @@ impl LlmClient for FallbackLlmClient {
             let turns = turns.to_vec();
             let current_prompt = current_prompt.to_string();
             let system_hash = crate::soul::actor::compute_system_hash(&system);
-            let prompt_chars = {
-                let mut total = system.len();
-                total += semi_static.len();
-                if let Some(ref s) = summary_owned {
-                    total += s.len();
-                }
-                for turn in &turns {
-                    total += turn.user.len();
-                    total += turn.assistant.len();
-                }
-                total += current_prompt.len();
-                total as u64
-            };
+            let prompt_chars = super::streaming::conversation_prompt_chars(
+                &system,
+                &semi_static,
+                summary_owned.as_deref(),
+                &turns,
+                &current_prompt,
+            );
             let (stream, provider_str, model) = self
                 .call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
                     let system = system.clone();
@@ -1862,14 +1753,13 @@ impl LlmClient for FallbackLlmClient {
                 .await?;
 
             let provider = LlmProvider::parse(&provider_str).unwrap_or(LlmProvider::OpenClaw);
-            let tracking_stream = super::streaming::UsageTrackingStream::new(
+            Ok(super::streaming::wrap_usage_tracking(
                 stream,
                 provider,
                 model,
                 system_hash,
                 prompt_chars,
-            );
-            Ok(tracking_stream.into_llm_stream())
+            ))
         })
     }
 }

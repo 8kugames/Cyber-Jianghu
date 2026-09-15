@@ -576,7 +576,7 @@ pub(crate) async fn rebirth_character_handler(
     // Retired，generate_biography_for_agent 对终态角色强制重新生成，
     // 产出“盖棺定论”传记并回传 server（对齐死亡路径语义）
     if retired_now {
-        crate::infra::api::handlers::spawn_retire_biography_generation(&state, agent_id).await;
+        crate::infra::api::handlers::spawn_retire_biography_generation(&state, agent_id);
     }
 
     // 4. 清理内存状态

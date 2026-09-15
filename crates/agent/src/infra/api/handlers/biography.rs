@@ -480,26 +480,36 @@ pub(crate) async fn generate_biography_for_agent(
     Ok(bio)
 }
 
-/// 归隐触发传记生成（fire-and-forget，带重试）
+/// 终态触发传记生成（fire-and-forget，3 次重试、30s 间隔）
 ///
-/// 与死亡路径（lifecycle handle_death）语义对齐：终态角色需要“盖棺定论”传记。
-/// 必须在本地 character.yaml 状态翻转为 Retired 之后调用，
+/// 死亡（lifecycle handle_death）与归隐共用：终态角色需要“盖棺定论”传记。
+/// 归隐路径必须在本地 character.yaml 状态翻转为 Retired 之后调用，
 /// 保证 generate_biography_for_agent 读到终态并强制重新生成。
-pub(crate) async fn spawn_retire_biography_generation(state: &HttpApiState, agent_id: Uuid) {
+pub(crate) fn spawn_biography_generation_with_retry(
+    state: &HttpApiState,
+    agent_id: Uuid,
+    trigger: &str,
+) {
     let state = state.clone();
+    let trigger = trigger.to_string();
     tokio::spawn(async move {
         const MAX_RETRIES: u32 = 3;
         const RETRY_DELAY_SECS: u64 = 30;
-        info!("[biography] 归隐触发传记生成: agent={}", agent_id);
+        info!("[biography] {}触发传记生成: agent={}", trigger, agent_id);
         for attempt in 0..MAX_RETRIES {
             match generate_biography_for_agent(&state, agent_id).await {
                 Ok(bio) => {
-                    info!("[biography] 归隐传记生成成功: {}字", bio.chars().count());
+                    info!(
+                        "[biography] {}传记生成成功: {}字",
+                        trigger,
+                        bio.chars().count()
+                    );
                     return;
                 }
                 Err(e) => {
                     warn!(
-                        "[biography] 归隐传记生成失败 (attempt {}/{}): {}",
+                        "[biography] {}传记生成失败 (attempt {}/{}): {}",
+                        trigger,
                         attempt + 1,
                         MAX_RETRIES,
                         e
@@ -510,6 +520,14 @@ pub(crate) async fn spawn_retire_biography_generation(state: &HttpApiState, agen
                 }
             }
         }
-        warn!("[biography] 归隐传记生成最终失败: agent={}", agent_id);
+        warn!(
+            "[biography] {}传记生成最终失败: agent={}",
+            trigger, agent_id
+        );
     });
+}
+
+/// 归隐触发传记生成
+pub(crate) fn spawn_retire_biography_generation(state: &HttpApiState, agent_id: Uuid) {
+    spawn_biography_generation_with_retry(state, agent_id, "归隐");
 }

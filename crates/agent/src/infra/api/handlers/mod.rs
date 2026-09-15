@@ -24,6 +24,7 @@ mod memory;
 mod multi_character;
 mod relationship;
 mod soul_cycle;
+mod sse_util;
 mod state_stream;
 mod tick_notify;
 mod update;

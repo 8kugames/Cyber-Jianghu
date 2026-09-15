@@ -16,8 +16,7 @@ use super::HttpApiState;
 use super::basic::ErrorResponse;
 use super::cognitive_context::{CognitiveContext, CognitiveContextBuilder};
 use super::dto;
-use axum::http::Response;
-use bytes::Bytes;
+use super::sse_util::{HEARTBEAT_INTERVAL_SECS, sse_frame, sse_response};
 use http_body::Frame;
 use http_body_util::StreamBody;
 
@@ -580,17 +579,20 @@ pub(crate) async fn death_events_handler(State(state): State<HttpApiState>) -> i
     let mut tick_rx = state.tick_update_tx.subscribe();
 
     let stream = async_stream::stream! {
-        let data = Bytes::from_static(b"event: connected\ndata: {\"status\":\"connected\"}\n\n");
+        let data = sse_frame("connected", r#"{"status":"connected"}"#);
         yield Ok::<_, std::convert::Infallible>(Frame::data(data));
 
         loop {
             tokio::select! {
-                death_result = tokio::time::timeout(Duration::from_secs(30), death_rx.recv()) => {
+                death_result = tokio::time::timeout(
+                    Duration::from_secs(HEARTBEAT_INTERVAL_SECS),
+                    death_rx.recv()
+                ) => {
                     match death_result {
                         Ok(Ok(msg)) => {
                             if matches!(msg, ServerMessage::AgentDied { .. })
                                 && let Ok(json) = serde_json::to_string(&msg) {
-                                let data = Bytes::from(format!("event: agent_died\ndata: {}\n\n", json));
+                                let data = sse_frame("agent_died", &json);
                                 yield Ok::<_, std::convert::Infallible>(Frame::data(data));
                             }
                         }
@@ -602,7 +604,7 @@ pub(crate) async fn death_events_handler(State(state): State<HttpApiState>) -> i
                             break;
                         }
                         Err(_) => {
-                            let data = Bytes::from(b"event: heartbeat\ndata: {}\n\n".to_vec());
+                            let data = sse_frame("heartbeat", "{}");
                             yield Ok::<_, std::convert::Infallible>(Frame::data(data));
                         }
                     }
@@ -611,7 +613,7 @@ pub(crate) async fn death_events_handler(State(state): State<HttpApiState>) -> i
                     match tick_result {
                         Ok(tick_id) => {
                             let json = serde_json::json!({"tick_id": tick_id}).to_string();
-                            let data = Bytes::from(format!("event: tick_update\ndata: {}\n\n", json));
+                            let data = sse_frame("tick_update", &json);
                             yield Ok::<_, std::convert::Infallible>(Frame::data(data));
                         }
                         // 消费端落后：丢弃的是旧帧，通道仍活，继续跟流（不可断连——
@@ -629,16 +631,7 @@ pub(crate) async fn death_events_handler(State(state): State<HttpApiState>) -> i
         }
     };
 
-    let body = StreamBody::new(stream);
-
-    Response::builder()
-        .status(StatusCode::OK)
-        .header("Content-Type", "text/event-stream; charset=utf-8")
-        .header("Cache-Control", "no-cache")
-        .header("Connection", "keep-alive")
-        .header("X-Accel-Buffering", "no")
-        .body(body)
-        .expect("valid HTTP response")
+    sse_response(StreamBody::new(stream))
 }
 
 // ============================================================================

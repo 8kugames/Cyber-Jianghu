@@ -80,6 +80,46 @@ impl UsageTrackingStream {
     }
 }
 
+/// plain（system + prompt）输入字符量
+pub(crate) fn plain_prompt_chars(system: &str, prompt: &str) -> u64 {
+    (system.len() + prompt.len()) as u64
+}
+
+/// conversation 输入字符量（system + semi_static + summary + 各轮 user/assistant + 当前 prompt）
+///
+/// plain/conversation 两口径在 DirectLlmClient 与 FallbackLlmClient 的流式
+/// 路径共用，禁止各自内联累加（防止 token 统计口径漂移）。
+pub(crate) fn conversation_prompt_chars(
+    system: &str,
+    semi_static: &str,
+    summary: Option<&str>,
+    turns: &[super::client::ConversationTurn],
+    current_prompt: &str,
+) -> u64 {
+    let mut total = system.len();
+    total += semi_static.len();
+    if let Some(s) = summary {
+        total += s.len();
+    }
+    for turn in turns {
+        total += turn.user.len();
+        total += turn.assistant.len();
+    }
+    total += current_prompt.len();
+    total as u64
+}
+
+/// 将流包装为 UsageTrackingStream（system_hash 与 prompt_chars 由调用方按统一口径先行计算）
+pub(crate) fn wrap_usage_tracking(
+    inner: LlmStream,
+    provider: super::direct_client::LlmProvider,
+    model: String,
+    system_hash: [u8; 32],
+    prompt_chars: u64,
+) -> LlmStream {
+    UsageTrackingStream::new(inner, provider, model, system_hash, prompt_chars).into_llm_stream()
+}
+
 impl Stream for UsageTrackingStream {
     type Item = Result<StreamChunk>;
 

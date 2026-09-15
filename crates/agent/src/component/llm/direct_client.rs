@@ -780,13 +780,8 @@ impl DirectLlmClient {
                 cache_hit,
             );
         } else {
-            // API 未返回 usage，按字符长度估算（中文 ~1.5 char/token，英文 ~4 char/token，取中间值 3）
-            let prompt_chars: usize = request
-                .messages
-                .iter()
-                .filter_map(|m| m.content.as_ref().map(|c| c.len()))
-                .sum();
-            let est_pt = (prompt_chars as u64 / 3).max(1);
+            // API 未返回 usage，按字符长度估算
+            let est_pt = estimate_prompt_tokens(request);
             let est_ct = response_data
                 .choices
                 .first()
@@ -988,12 +983,7 @@ impl DirectLlmClient {
             // 当服务端未返回 usage（如 MiniMax），DoneEstimation 只估算了 completion，
             // pt=0 但 ct>0；需要根据请求内容补算 prompt。
             let final_pt = if pt == 0 && !has_real {
-                let prompt_chars: usize = request
-                    .messages
-                    .iter()
-                    .filter_map(|m| m.content.as_ref().map(|c| c.len()))
-                    .sum();
-                (prompt_chars as u64 / 3).max(1)
+                estimate_prompt_tokens(request)
             } else {
                 pt
             };
@@ -1022,12 +1012,7 @@ impl DirectLlmClient {
             );
         } else if !has_real {
             // pt==0 且 ct==0 且无 usage（空响应降级），按请求内容全量估算
-            let prompt_chars: usize = request
-                .messages
-                .iter()
-                .filter_map(|m| m.content.as_ref().map(|c| c.len()))
-                .sum();
-            let est_pt = (prompt_chars as u64 / 3).max(1);
+            let est_pt = estimate_prompt_tokens(request);
             let est_ct = (content.len() as u64 / 3).max(1);
             record_token_usage(
                 &self.config.provider,
@@ -1211,14 +1196,11 @@ impl DirectLlmClient {
         self.send_streaming_request(&request).await
     }
 
-    /// 调用 OpenAI 兼容 API
-    ///
-    /// OpenClaw Gateway、OpenAI Compatible、Ollama 都使用 OpenAI 兼容接口
-    async fn call_openai_compatible_api(&self, prompt: &str) -> Result<String> {
-        let model = self.config.get_model_with_default();
-        let request = OpenAIRequest {
-            model,
-            messages: vec![ChatMessage::user(prompt)],
+    /// 构造无工具、非流式的 OpenAI 兼容请求（消息列表由调用方决定）
+    fn plain_request(&self, messages: Vec<ChatMessage>) -> OpenAIRequest {
+        OpenAIRequest {
+            model: self.config.get_model_with_default(),
+            messages,
             temperature: Some(self.config.temperature),
             max_tokens: Some(self.config.max_tokens),
             tools: None,
@@ -1226,28 +1208,39 @@ impl DirectLlmClient {
             enable_thinking: self.config.enable_thinking,
             stream: None,
             stream_options: None,
-        };
+        }
+    }
 
+    /// 发送请求并提取 first choice 文本（空白/缺失统一报错）
+    async fn send_and_extract(&self, messages: Vec<ChatMessage>, label: &str) -> Result<String> {
+        let request = self.plain_request(messages);
         let response_data = self.send_request(&request).await?;
 
-        if let Some(choice) = response_data.choices.first() {
-            let content = choice
-                .message
-                .content
-                .clone()
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-            if content.is_empty() {
-                anyhow::bail!(
-                    "LLM API error: response content is empty (model may have returned null/whitespace)"
-                );
-            }
-            debug!("LLM response length: {} chars", content.len());
-            Ok(content)
-        } else {
-            anyhow::bail!("LLM returned empty response")
+        let Some(choice) = response_data.choices.first() else {
+            anyhow::bail!("LLM returned empty response");
+        };
+        let content = choice
+            .message
+            .content
+            .clone()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if content.is_empty() {
+            anyhow::bail!(
+                "LLM API error: response content is empty (model may have returned null/whitespace)"
+            );
         }
+        debug!("LLM {} response: {} chars", label, content.len());
+        Ok(content)
+    }
+
+    /// 调用 OpenAI 兼容 API
+    ///
+    /// OpenClaw Gateway、OpenAI Compatible、Ollama 都使用 OpenAI 兼容接口
+    async fn call_openai_compatible_api(&self, prompt: &str) -> Result<String> {
+        self.send_and_extract(vec![ChatMessage::user(prompt)], "completion")
+            .await
     }
 
     /// 调用 OpenAI 兼容 API（system + user 分离）
@@ -1259,41 +1252,12 @@ impl DirectLlmClient {
         system: &str,
         prompt: &str,
     ) -> Result<String> {
-        let model = self.config.get_model_with_default();
-        let request = OpenAIRequest {
-            model,
-            messages: vec![ChatMessage::system(system), ChatMessage::user(prompt)],
-            temperature: Some(self.config.temperature),
-            max_tokens: Some(self.config.max_tokens),
-            tools: None,
-            tool_choice: None,
-            enable_thinking: self.config.enable_thinking,
-            stream: None,
-            stream_options: None,
-        };
-
         debug!("Calling OpenAI-compatible API (system+user)");
-
-        let response_data = self.send_request(&request).await?;
-
-        if let Some(choice) = response_data.choices.first() {
-            let content = choice
-                .message
-                .content
-                .clone()
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-            if content.is_empty() {
-                anyhow::bail!(
-                    "LLM API error: response content is empty (model may have returned null/whitespace)"
-                );
-            }
-            debug!("LLM response length: {} chars", content.len());
-            Ok(content)
-        } else {
-            anyhow::bail!("LLM returned empty response")
-        }
+        self.send_and_extract(
+            vec![ChatMessage::system(system), ChatMessage::user(prompt)],
+            "system+user",
+        )
+        .await
     }
 
     /// 使用对话历史完成调用（长窗口）
@@ -1316,48 +1280,29 @@ impl DirectLlmClient {
             self.config.prompt.strip_reasoning_content,
         );
 
-        let model = self.config.get_model_with_default();
-        let request = OpenAIRequest {
-            model,
-            messages,
-            temperature: Some(self.config.temperature),
-            max_tokens: Some(self.config.max_tokens),
-            tools: None,
-            tool_choice: None,
-            enable_thinking: self.config.enable_thinking,
-            stream: None,
-            stream_options: None,
-        };
-
         debug!(
             "LLM conversation call: {} history turns, prompt_len={}",
             turns.len(),
             current_prompt.len(),
         );
 
-        let response_data = self.send_request(&request).await?;
-
-        if let Some(choice) = response_data.choices.first() {
-            let content = choice
-                .message
-                .content
-                .clone()
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-            if content.is_empty() {
-                anyhow::bail!("LLM API error: response content is empty");
-            }
-            debug!("LLM conversation response: {} chars", content.len());
-            Ok(content)
-        } else {
-            anyhow::bail!("LLM returned empty response")
-        }
+        self.send_and_extract(messages, "conversation").await
     }
+}
+
+/// 按请求字符长度估算 prompt tokens（中文 ~1.5 char/token，英文 ~4，取中间值 3）
+fn estimate_prompt_tokens(request: &OpenAIRequest) -> u64 {
+    let prompt_chars: usize = request
+        .messages
+        .iter()
+        .filter_map(|m| m.content.as_ref().map(|c| c.len()))
+        .sum();
+    (prompt_chars as u64 / 3).max(1)
 }
 
 #[allow(private_interfaces)]
 #[async_trait]
+
 impl LlmClient for DirectLlmClient {
     async fn complete(&self, prompt: &str) -> Result<String> {
         if is_llm_disabled() {
@@ -1587,17 +1532,16 @@ impl LlmClient for DirectLlmClient {
             if is_llm_disabled() {
                 anyhow::bail!("LLM 调用已被停止");
             }
-            let prompt_chars = (system.len() + prompt.len()) as u64;
+            let prompt_chars = super::streaming::plain_prompt_chars(system, prompt);
             let system_hash = crate::soul::actor::compute_system_hash(system);
             let stream = self.complete_streaming(system, prompt).await?;
-            let tracking = super::streaming::UsageTrackingStream::new(
+            Ok(super::streaming::wrap_usage_tracking(
                 stream,
                 self.config.provider,
                 self.config.get_model_with_default(),
                 system_hash,
                 prompt_chars,
-            );
-            Ok(tracking.into_llm_stream())
+            ))
         })
     }
 
@@ -1615,19 +1559,13 @@ impl LlmClient for DirectLlmClient {
             if is_llm_disabled() {
                 anyhow::bail!("LLM 调用已被停止");
             }
-            let prompt_chars = {
-                let mut total = system.len();
-                total += semi_static.len();
-                if let Some(s) = summary {
-                    total += s.len();
-                }
-                for turn in turns {
-                    total += turn.user.len();
-                    total += turn.assistant.len();
-                }
-                total += current_prompt.len();
-                total as u64
-            };
+            let prompt_chars = super::streaming::conversation_prompt_chars(
+                system,
+                semi_static,
+                summary,
+                turns,
+                current_prompt,
+            );
             let stream = self
                 .complete_conversation_streaming(
                     system,
@@ -1638,14 +1576,13 @@ impl LlmClient for DirectLlmClient {
                 )
                 .await?;
             let system_hash = crate::soul::actor::compute_system_hash(system);
-            let tracking = super::streaming::UsageTrackingStream::new(
+            Ok(super::streaming::wrap_usage_tracking(
                 stream,
                 self.config.provider,
                 self.config.get_model_with_default(),
                 system_hash,
                 prompt_chars,
-            );
-            Ok(tracking.into_llm_stream())
+            ))
         })
     }
 }
