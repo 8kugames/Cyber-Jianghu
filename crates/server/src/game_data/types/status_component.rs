@@ -193,9 +193,7 @@ impl StatusComponent {
 
             let initial_val = attr_def.default_value.map(|v| v as f32).unwrap_or(0.0) as i32;
             collection.add(Attribute {
-                value: AttributeValue::Static {
-                    value: initial_val as u8,
-                },
+                value: AttributeValue::Static { value: initial_val },
                 metadata,
             });
         }
@@ -322,5 +320,59 @@ impl StatusComponent {
                     .map(|cond| cond.check_int(attr.value.get()))
             })
             .unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game_data::types::attributes::{
+        Attribute, AttributeCollection, AttributeMetadata, AttributeType, AttributeValue,
+    };
+
+    fn reputation_attr(min: f32) -> Attribute {
+        Attribute {
+            value: AttributeValue::Static { value: 0 },
+            metadata: AttributeMetadata {
+                name: "reputation".to_string(),
+                display_name: "声望".to_string(),
+                description: String::new(),
+                attr_type: AttributeType::Status,
+                min_value: Some(min),
+                max_value_formula: Some("100".to_string()),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn component_with(attr: Attribute) -> StatusComponent {
+        let mut collection = AttributeCollection::new_collection();
+        collection.add(attr);
+        StatusComponent {
+            collection,
+            max_modifiers: Default::default(),
+        }
+    }
+
+    /// 回归锁定：负值范围状态属性（声望 min=-100）经 apply_change 必须能落到负值。
+    /// 修复前 AttributeValue::Static 为 u8 且 set() 硬钳 0..255，-100 被钉死在 0。
+    #[test]
+    fn apply_change_respects_negative_min_value() {
+        let mut status = component_with(reputation_attr(-100.0));
+        let new_val = status
+            .apply_change("reputation", -150, &Default::default())
+            .expect("apply_change must succeed");
+        assert_eq!(new_val, -100);
+        assert_eq!(status.collection.get_value("reputation"), Some(-100));
+    }
+
+    /// 正向下界保护：无负值配置的属性（如 hp）仍以 0 为下限。
+    #[test]
+    fn apply_change_keeps_zero_floor_without_negative_min() {
+        let mut status = component_with(reputation_attr(0.0));
+        let new_val = status
+            .apply_change("reputation", -50, &Default::default())
+            .expect("apply_change must succeed");
+        assert_eq!(new_val, 0);
     }
 }

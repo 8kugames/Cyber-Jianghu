@@ -60,7 +60,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for AgentState {
                     }
                     // 如果组件是空的（回退模式），则手动创建 Status 属性
                     else if game_data.is_none() {
-                        let attr_value = val.clamp(0, 255) as u8;
+                        let attr_value = val.clamp(0, 255);
                         let metadata = AttributeMetadata {
                             name: key.clone(),
                             display_name: key.clone(),

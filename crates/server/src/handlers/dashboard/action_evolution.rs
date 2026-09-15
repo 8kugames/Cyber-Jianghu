@@ -254,7 +254,7 @@ pub async fn admin_action_on_group(
     if new_status == "rejected" {
         sqlx::query(
             "UPDATE action_evolution_proposal_groups
-             SET status = $1, final_decision = $2, updated_at = NOW()
+             SET status = $1, final_decision = $2, stage = 'done', updated_at = NOW()
              WHERE id = $3",
         )
         .bind(new_status)
@@ -420,7 +420,7 @@ pub async fn admin_action_on_group(
     // Step 5: 全部副作用成功，才更新 group status
     sqlx::query(
         "UPDATE action_evolution_proposal_groups
-         SET status = $1, final_decision = $2, updated_at = NOW()
+         SET status = $1, final_decision = $2, stage = 'done', updated_at = NOW()
          WHERE id = $3",
     )
     .bind(new_status)

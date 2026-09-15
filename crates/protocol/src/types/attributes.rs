@@ -27,8 +27,8 @@ pub struct Attribute {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AttributeValue {
-    /// 静态值（如魅力、银两）
-    Static { value: u8 },
+    /// 静态/状态值（可携带负值范围，如声望 -100..100；先天属性为 0..255）
+    Static { value: i32 },
 
     /// 每日随机值（如福缘）
     DailyRandom { value: u8, range: (u8, u8) },
@@ -175,7 +175,7 @@ impl Attribute {
                         let mut rng = rand::rng();
                         rng.random_range(min..=max)
                     })
-                    .unwrap_or(10);
+                    .unwrap_or(10) as i32;
                 AttributeValue::Static { value }
             }
             AttributeType::DailyRandom => {
@@ -186,7 +186,7 @@ impl Attribute {
                 AttributeValue::DailyRandom { value, range }
             }
             AttributeType::Status => {
-                let value = config.default_value.unwrap_or(0.0_f32) as u8;
+                let value = config.default_value.unwrap_or(0.0_f32) as i32;
                 AttributeValue::Static { value }
             }
             AttributeType::Derived => {
@@ -253,12 +253,15 @@ impl AttributeValue {
     }
 
     /// 设置值
+    ///
+    /// Static/状态值可能带负值范围（如声望 min=-100），边界钳制由
+    /// `StatusComponent::apply_change` 按 metadata 统一执行，此处原样存储；
+    /// u8 变体（先天属性）维持 0..255 硬边界。
     pub fn set(&mut self, value: i32) {
-        let v_u8 = value.clamp(0, 255) as u8;
         match self {
-            AttributeValue::Static { value: v } => *v = v_u8,
-            AttributeValue::DailyRandom { value: v, .. } => *v = v_u8,
-            AttributeValue::Growable { current: v, .. } => *v = v_u8,
+            AttributeValue::Static { value: v } => *v = value,
+            AttributeValue::DailyRandom { value: v, .. } => *v = value.clamp(0, 255) as u8,
+            AttributeValue::Growable { current: v, .. } => *v = value.clamp(0, 255) as u8,
             AttributeValue::Delta { .. } => {
                 // Delta 表示增量而非绝对值，set 操作无意义
             }

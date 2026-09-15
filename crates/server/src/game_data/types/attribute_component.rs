@@ -204,7 +204,7 @@ impl AttributeComponent {
                             rng.random_range(min..=max)
                         })
                         .unwrap_or(10);
-                    AttributeValue::Static { value: val }
+                    AttributeValue::Static { value: val as i32 }
                 }
                 AttributeType::DailyRandom => {
                     // 每日随机属性（福缘）：每游戏日随机刷新

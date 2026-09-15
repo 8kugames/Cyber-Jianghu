@@ -340,10 +340,12 @@ impl ProposalStore {
 
     async fn get_group_proposal_ids(&self, group_id: Uuid) -> Result<Vec<Uuid>> {
         sqlx::query_scalar::<_, Uuid>(
+            // DESC：引擎按 proposal_ids.first() 取样代表提案，
+            // 取最新提交（重开场景 = 触发重开的新证据），而非上一轮已审过的最旧提案
             "SELECT proposal_id \
              FROM action_evolution_group_proposals \
              WHERE proposal_group_id = $1 \
-             ORDER BY created_at ASC, proposal_id ASC",
+             ORDER BY created_at DESC, proposal_id DESC",
         )
         .bind(group_id)
         .fetch_all(&self.pool)
