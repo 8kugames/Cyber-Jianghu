@@ -3,11 +3,12 @@
 #
 # 用法:
 #   ./restart.sh                 # 重启所有 agent（保留现有角色）
-#   ./restart.sh --register      # 重启 + 归隐旧角色 + 注册全新角色 + 验证
 #   ./restart.sh --build         # 重启前离线重建镜像（本地基镜像通道，无需外网）
+#   ./restart.sh --register      # 重启 + 归隐旧角色 + 注册全新角色 + 验证
 #   ./restart.sh --no-register   # 重启 + 跳过注册
 #   ./restart.sh agent-1         # 只操作指定 agent
 #   ./restart.sh --build --register agent-1   # 组合使用
+#   ./restart.sh --build --no-register agent-2   # 组合使用
 #
 # 依赖: docker, curl, python3
 # 设计约定:
@@ -269,7 +270,8 @@ process_agent() {
   local aname=$1 port=$2 token=$3
   local outfile="$TMPDIR/${aname}.result"
 
-  if [ "$FORCE_REGISTER" = "no" ]; then
+  # 默认（无标志）= 保留现有角色，与头注释用法一致；仅显式 --register 才归隐+注册
+  if [ "$FORCE_REGISTER" != "yes" ]; then
     echo "SKIP|$aname|跳过注册" > "$outfile"
     emit "$aname" "${GRAY}SKIP${NC}" "跳过注册"
     return
