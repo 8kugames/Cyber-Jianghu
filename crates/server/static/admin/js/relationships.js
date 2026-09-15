@@ -56,7 +56,9 @@ async function loadRelationships() {
             delete rel.source_agent_id;
             return { source_agent_id: item.source_agent_id, relationship: rel };
         });
-        // 反查表：target→source→行，用于展示反向认知（独立数据，仅对比参照）
+        // 反查表：relReverseMap[target][source] = 边 source→target 的行。
+        // 注意：查找边 S→T 的反向边（T→S）应取 relReverseMap[S][T]，
+        // 即第一键 = 行的 source、第二键 = 行的 target；键序颠倒会把行自身当作反向边。
         relReverseMap = {};
         relRows.forEach(function (r) {
             var targetId = r.relationship.target_agent_id;
@@ -94,8 +96,8 @@ function relStatsHtml() {
     var mutualEdges = 0;
     relRows.forEach(function (r) {
         holders[r.source_agent_id] = true;
-        var rev = relReverseMap[r.relationship.target_agent_id];
-        if (rev && rev[r.source_agent_id]) mutualEdges += 1;
+        var rev = relReverseMap[r.source_agent_id];
+        if (rev && rev[r.relationship.target_agent_id]) mutualEdges += 1;
     });
     var mutualPairs = mutualEdges / 2;
     var oneWay = relRows.length - mutualEdges;
@@ -147,8 +149,9 @@ function relRowHtml(item, idx) {
     var rel = item.relationship;
     var sourceName = relDisplayName(item.source_agent_id);
     var targetName = relDisplayName(rel.target_agent_id, rel.target_name);
-    var rev = relReverseMap[rel.target_agent_id];
-    var reverseRel = rev ? rev[item.source_agent_id] : null;
+    // 反向边 T→S = relReverseMap[S][T]（第一键 = 行的 source，第二键 = 行的 target）
+    var rev = relReverseMap[item.source_agent_id];
+    var reverseRel = rev ? rev[rel.target_agent_id] : null;
 
     var eventsCount = (rel.key_events || []).length;
     var expanded = relExpandedIdx === idx;
