@@ -71,7 +71,7 @@ collect_round() {
     local token
     token=$(docker exec "$c" curl -sf --max-time 5 \
       http://127.0.0.1:23340/api/v1/setup/status 2>/dev/null | \
-      python3 -c "import json,sys; print(json.load(sys.stdin).get('auth_token',''))" 2>/dev/null)
+      jq -r '.auth_token // empty' 2>/dev/null)
     if [ -z "$token" ]; then
       echo "$c: NO_TOKEN" >> "$round_log"
       continue
@@ -94,12 +94,13 @@ collect_round() {
     local c="${entry##*:}"
     local cdir="$LOG_BASE/agents/$c"
     local name hp hunger is_alive age
-    name=$(cat "$cdir/character.json" 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); print(d.get('name','?'))" 2>/dev/null)
-    is_alive=$(cat "$cdir/character.json" 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); print(d.get('status','?'))" 2>/dev/null)
-    hp=$(cat "$cdir/state.json" 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); a=d.get('self_state',{}).get('attributes',{}) or {}; print(a.get('hp','?'))" 2>/dev/null)
-    hunger=$(cat "$cdir/state.json" 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); a=d.get('self_state',{}).get('attributes',{}) or {}; print(a.get('hunger','?'))" 2>/dev/null)
-    location=$(cat "$cdir/state.json" 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); print(d.get('location',{}).get('node_id','?'))" 2>/dev/null)
-    age=$(cat "$cdir/character.json" 2>/dev/null | python3 -c "import sys,json; d=json.loads(sys.stdin.read() or '{}'); print(d.get('age','?'))" 2>/dev/null)
+    # 空文件时 jq exit 0 + 空输出，[ -s ] 前置守卫保证缺失/空文件回退到 '?'（与旧 python 一致）
+    name=$([ -s "$cdir/character.json" ] && jq -r '.name // "?"' "$cdir/character.json" 2>/dev/null || echo '?')
+    is_alive=$([ -s "$cdir/character.json" ] && jq -r '.status // "?"' "$cdir/character.json" 2>/dev/null || echo '?')
+    hp=$([ -s "$cdir/state.json" ] && jq -r '.self_state.attributes.hp // "?"' "$cdir/state.json" 2>/dev/null || echo '?')
+    hunger=$([ -s "$cdir/state.json" ] && jq -r '.self_state.attributes.hunger // "?"' "$cdir/state.json" 2>/dev/null || echo '?')
+    location=$([ -s "$cdir/state.json" ] && jq -r '.location.node_id // "?"' "$cdir/state.json" 2>/dev/null || echo '?')
+    age=$([ -s "$cdir/character.json" ] && jq -r '.age // "?"' "$cdir/character.json" 2>/dev/null || echo '?')
     echo "  $c name=$name age=$age hp=$hp hunger=$hunger loc=$location alive=$is_alive" >> "$round_log"
   done
 
@@ -110,17 +111,10 @@ collect_round() {
     local c="${entry##*:}"
     local token_file=".test-agents/${svc}/data/logs/token_cost_count.tmp"
     if [ -f "$token_file" ]; then
-      cat "$token_file" | python3 -c "
-import sys, json
-try:
-  d = json.loads(sys.stdin.read())
-  # agent token_cost_count.tmp 结构: {\"summary\": {\"by_provider_model\": {\"<provider>/<model>\": {...}}}, \"detail\": {...}}
-  summ = d.get('summary', {}).get('by_provider_model', {})
-  for model_key, v in summ.items():
-    if isinstance(v, dict):
-      print(f'  {sys.argv[1]}.{model_key}: prompt={v.get(\"total_prompt_tokens\",0)} comp={v.get(\"total_completion_tokens\",0)} calls={v.get(\"total_calls\",0)} fail={v.get(\"total_failures\",0)}')
-except Exception as e: print(f'  ERR: {e}', file=sys.stderr)
-" "$c" >> "$round_log" 2>/dev/null
+      # agent token_cost_count.tmp 结构: {"summary": {"by_provider_model": {"<provider>/<model>": {...}}}, "detail": {...}}
+      jq -r --arg c "$c" '.summary.by_provider_model | to_entries[] |
+        "  \($c).\(.key): prompt=\(.value.total_prompt_tokens // 0) comp=\(.value.total_completion_tokens // 0) calls=\(.value.total_calls // 0) fail=\(.value.total_failures // 0)"' \
+        "$token_file" >> "$round_log" 2>/dev/null
     fi
   done
 
@@ -158,35 +152,29 @@ except Exception as e: print(f'  ERR: {e}', file=sys.stderr)
     local acts_file="$LOG_BASE/agents/$c/actions.log"
     docker logs --since "${INTERVAL_SECS}s" "$c" 2>&1 \
       | grep -oE "决策: \S+" | sed 's/决策: //' > "$acts_file" 2>/dev/null
-    python3 - "$c" "$acts_file" "$round_log" <<'PYEOF' 2>/dev/null
-import json, math, sys
-from collections import Counter
-agent, acts_file, round_log = sys.argv[1], sys.argv[2], sys.argv[3]
-try:
-    acts = [l.strip() for l in open(acts_file, encoding='utf-8') if l.strip()]
-except Exception:
-    acts = []
-counts = Counter(acts)
-total = sum(counts.values())
-if total == 0 or len(counts) <= 1:
-    h = ratio = 0.0
-    hmax = 1.0 if total else 0.0
-    if total:
-        h = 0.0
-        hmax = 1.0
-else:
-    h = -sum((v/total) * math.log2(v/total) for v in counts.values())
-    hmax = math.log2(len(counts))
-    ratio = h / hmax if hmax > 0 else 0.0
-band = '健康' if ratio > 0.6 else ('收缩' if ratio >= 0.3 else '坍缩疑似')
-if total == 0:
-    band = '无决策'
-top = counts.most_common(1)[0] if counts else ('-', 0)
-dist = ','.join(f'{a}:{n}' for a, n in counts.most_common())
-line = f'  {agent} total={total} H={h:.2f}/{hmax:.2f} r={ratio:.2f} [{band}] top={top[0]}({top[1]}) | {dist}'
-with open(round_log, 'a', encoding='utf-8') as f:
-    f.write(line + '\n')
-PYEOF
+    # 行为分布熵：k=1 或 total=0 时 hmax 与旧 python 版一致（1.0 / 0.0）
+    if [ -s "$acts_file" ]; then
+      jq -rRs --arg agent "$c" '
+        split("\n") | map(select(length > 0)) as $acts
+        | ($acts | group_by(.) | map({a: .[0], n: length}) | sort_by(-.n)) as $dist
+        | ($dist | map(.n) | add // 0) as $total
+        | (if $total == 0 then
+            {h: 0, hmax: 0, r: 0, band: "无决策", top_a: "-", top_n: 0}
+          elif ($dist | length) <= 1 then
+            {h: 0, hmax: 1, r: 0, band: "坍缩疑似", top_a: $dist[0].a, top_n: $dist[0].n}
+          else
+            ($dist | map(.n as $n | ($n / $total) as $p | - ($p * ($p | log2))) | add) as $h
+            | (($dist | length) | log2) as $hmax
+            | ($h / $hmax) as $r
+            | {h: $h, hmax: $hmax, r: $r,
+               band: (if $r > 0.6 then "健康" elif $r >= 0.3 then "收缩" else "坍缩疑似" end),
+               top_a: $dist[0].a, top_n: $dist[0].n}
+          end) as $s
+        | "  \($agent) total=\($total) H=\($s.h * 100 | round / 100)/\($s.hmax * 100 | round / 100) r=\($s.r * 100 | round / 100) [\($s.band)] top=\($s.top_a)(\($s.top_n)) | \($dist | map("\(.a):\(.n)") | join(","))"
+      ' "$acts_file" >> "$round_log" 2>/dev/null || echo "  $c total=0 H=0/0 r=0 [无决策] top=-(0) | " >> "$round_log"
+    else
+      echo "  $c total=0 H=0/0 r=0 [无决策] top=-(0) | " >> "$round_log"
+    fi
     # 累计 CSV（Phase 4 时间序列用）
     if [ -s "$acts_file" ]; then
       ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)

@@ -10,7 +10,7 @@
 #   ./restart.sh --build --register agent-1   # 组合使用
 #   ./restart.sh --build --no-register agent-2   # 组合使用
 #
-# 依赖: docker, curl, python3
+# 依赖: docker, curl, jq
 # 设计约定:
 #   - 确定性操作全部在本脚本内完成；联调测试 SKILL 只负责调用本脚本、分析输出、异常处置
 #   - token 源 = agent 的 GET /api/v1/setup/status（内存权威值）。
@@ -23,6 +23,7 @@
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
+command -v jq >/dev/null 2>&1 || { echo "FATAL: 需要 jq（macOS: brew install jq）" >&2; exit 1; }
 
 # ── 配置 ──────────────────────────────────────────────────────────────────────
 AGENTS=(
@@ -133,7 +134,7 @@ current_token() {
   if [ -n "$cid" ]; then
     docker exec "$cid" curl -sf --max-time 5 \
       http://localhost:23340/api/v1/setup/status 2>/dev/null | \
-      python3 -c "import json,sys; print(json.load(sys.stdin).get('auth_token',''))" 2>/dev/null
+      jq -r '.auth_token // empty' 2>/dev/null
   fi
 }
 
@@ -171,7 +172,7 @@ server_retire() {
     fresh=$(curl -sf --max-time 15 -X POST "$SERVER_HTTP/api/v1/device/verify" \
       -H 'Content-Type: application/json' \
       -d "{\"device_id\": \"$did\"}" 2>/dev/null | \
-      python3 -c "import json,sys; print(json.load(sys.stdin).get('auth_token',''))" 2>/dev/null || true)
+      jq -r '.auth_token // empty' 2>/dev/null || true)
     [ -z "$fresh" ] && { sleep "$SERVER_RETIRE_SLEEP"; continue; }
 
     result=$(curl -sf --max-time 30 -X POST "$SERVER_HTTP/api/v1/agent/retire" \
@@ -209,7 +210,7 @@ do_generate_register() {
       -o "$gen_file" \
       --max-time "$GEN_MAX_TIME" 2>/dev/null && \
        [ -s "$gen_file" ] && \
-       python3 -c "import json; d=json.load(open('${gen_file}')); assert d.get('name')" 2>/dev/null; then
+       jq -e '(.name // "") != ""' "$gen_file" >/dev/null 2>&1; then
       gen_ok=true
       break
     fi
@@ -223,7 +224,7 @@ do_generate_register() {
   fi
 
   local gen_name
-  gen_name=$(python3 -c "import json; print(json.load(open('${gen_file}')).get('name','?'))" 2>/dev/null || true)
+  gen_name=$(jq -r '.name // "?"' "$gen_file" 2>/dev/null || true)
   emit "$aname" "${GREEN}GEN${NC}" "生成角色: ${gen_name}"
 
   # 注册前现读 token（generate 耗时期间 token 可能再次轮换）
@@ -249,7 +250,7 @@ do_generate_register() {
   local verify
   verify=$(curl -sf --max-time 15 -H "Authorization: Bearer ${token}" \
     "http://localhost:${port}/api/v1/character" 2>/dev/null | \
-    python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('name',''), d.get('agent_id',''), d.get('status',''))" 2>/dev/null || true)
+    jq -r '[.name // "", .agent_id // "", .status // ""] | join(" ")' 2>/dev/null || true)
 
   if echo "$verify" | grep -q "alive"; then
     local vname vaid

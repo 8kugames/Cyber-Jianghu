@@ -40,7 +40,7 @@ for entry in "${AGENTS[@]}"; do
     else
       token=$(docker exec "$c" curl -sf --max-time 5 \
         "http://127.0.0.1:23340/api/v1/setup/status" 2>/dev/null | \
-        python3 -c "import json,sys; print(json.load(sys.stdin).get('auth_token',''))" 2>/dev/null)
+        jq -r '.auth_token // empty' 2>/dev/null)
     fi
     docker exec "$c" curl -s --max-time 30 -H "Authorization: Bearer $token" \
       http://127.0.0.1:23340/api/v1/character > "$ROUND_DIR/$svc.char" 2>/dev/null
@@ -57,80 +57,57 @@ done
 wait
 
 # ── 健康状态表 ────────────────────────────────────────────────────────────────
-python3 - "$ROUND_DIR" "${AGENTS[@]}" <<'PYEOF'
-import json, os, sys
-base, agents = sys.argv[1], sys.argv[2:]
-print("| Agent | 容器 | 角色 | Hunger | HP | Sanity | 状态 | 位置 | Tick | 容器状态 |")
-print("| ----- | ---- | ---- | ------ | -- | ------ | ---- | ---- | ---- | -------- |")
-for entry in agents:
-    svc, c = entry.split(":", 1)
-    name = hunger = hp = sanity = loc = tick = "-"
-    status = "NO_DATA"
-    docker = "?"
-    try:
-        docker = open(f"{base}/{svc}.docker").read().strip()
-    except Exception:
-        pass
-    try:
-        d = json.load(open(f"{base}/{svc}.char"))
-        name = d.get("name", "-")
-        status = d.get("status", "-")
-        a = d.get("attributes", {})
-        hunger = a.get("hunger", {}).get("current", "-")
-        hp = a.get("hp", {}).get("current", "-")
-        sanity = a.get("sanity", {}).get("current", "-")
-        loc = d.get("location", "-")
-        tick = d.get("tick_id", "-")
-    except Exception:
-        pass
-    print(f"| {svc} | {c} | {name} | {hunger} | {hp} | {sanity} | {status} | {loc} | {tick} | {docker} |")
-PYEOF
+echo "| Agent | 容器 | 角色 | Hunger | HP | Sanity | 状态 | 位置 | Tick | 容器状态 |"
+echo "| ----- | ---- | ---- | ------ | -- | ------ | ---- | ---- | ---- | -------- |"
+for entry in "${AGENTS[@]}"; do
+  svc="${entry%%:*}"
+  c="${entry##*:}"
+  docker_status="$(tr -d '\n' < "$ROUND_DIR/$svc.docker" 2>/dev/null)"
+  [ -z "$docker_status" ] && docker_status="?"
+  # 注意：jq 对空文件返回 exit 0 + 空输出，必须用 ${row:-} 兜底而非 if ! 检测
+  row="$(jq -r --arg svc "$svc" --arg c "$c" --arg dk "$docker_status" '
+      "| \($svc) | \($c) | \(.name // "-") | \(.attributes.hunger.current // "-") | \(.attributes.hp.current // "-") | \(.attributes.sanity.current // "-") | \(.status // "-") | \(.location // "-") | \(.tick_id // "-") | \($dk) |"' \
+      "$ROUND_DIR/$svc.char" 2>/dev/null)"
+  echo "${row:-| $svc | $c | - | - | - | - | NO_DATA | - | - | $docker_status |}"
+done
 
 # ── token 统计（累计值；看增量需对比上一轮）──────────────────────────────────
 echo "--- token (累计值) ---"
 for f in .test-agents/agent-*/data/logs/token_cost_count.tmp; do
   [ -f "$f" ] || continue
   svc=$(echo "$f" | cut -d/ -f2)
-  python3 -c "
-import json
-try:
-    d = json.load(open('$f'))
-    for model, m in d.get('summary', {}).get('by_provider_model', {}).items():
-        print('%s | %s | calls=%s prompt=%s completion=%s failures=%s' % (
-            '$svc', model, m.get('total_calls', '?'), m.get('total_prompt_tokens', '?'),
-            m.get('total_completion_tokens', '?'), m.get('total_failures', '?')))
-except Exception as e:
-    print('$svc | parse_error: %s' % e)
-" 2>/dev/null
+  out="$(jq -r --arg svc "$svc" '.summary.by_provider_model | to_entries[] |
+    "\($svc) | \(.key) | calls=\(.value.total_calls // "?") prompt=\(.value.total_prompt_tokens // "?") completion=\(.value.total_completion_tokens // "?") failures=\(.value.total_failures // "?")"' \
+    "$f" 2>/dev/null)"
+  echo "${out:-$svc | parse_error}"
 done | sort
 
 # ── 行为分布（决策动作 + 香农熵，行为坏缩早期信号）─────────────────────────
 echo "--- action distribution (last ${INTERVAL_MIN}m) ---"
-python3 - "$ROUND_DIR" "${AGENTS[@]}" <<'PYEOF'
-import json, math, os, sys
-from collections import Counter
-base, agents = sys.argv[1], sys.argv[2:]
-print("| Agent | 总决策 | 熵 H/Hmax | r | 判读 | 分布 |")
-print("| ----- | ------ | --------- | - | ---- | ---- |")
-for entry in agents:
-    svc, c = entry.split(":", 1)
-    acts_file = os.path.join(base, svc + ".actions")
-    try:
-        acts = [l.strip() for l in open(acts_file, encoding='utf-8') if l.strip()]
-    except Exception:
-        acts = []
-    counts = Counter(acts)
-    total = sum(counts.values())
-    if total == 0:
-        print(f"| {svc} | 0 | - | - | 无决策 | - |")
-        continue
-    h = -sum((v/total) * math.log2(v/total) for v in counts.values())
-    hmax = math.log2(len(counts)) if len(counts) > 1 else 1.0
-    ratio = h / hmax if hmax > 0 else 0.0
-    band = '健康' if ratio > 0.6 else ('收缩' if ratio >= 0.3 else '坍缩疑似')
-    dist = ','.join(f'{a}:{n}' for a, n in counts.most_common())
-    print(f"| {svc} | {total} | {h:.2f}/{hmax:.2f} | {ratio:.2f} | {band} | {dist} |")
-PYEOF
+echo "| Agent | 总决策 | 熵 H/Hmax | r | 判读 | 分布 |"
+echo "| ----- | ------ | --------- | - | ---- | ---- |"
+for entry in "${AGENTS[@]}"; do
+  svc="${entry%%:*}"
+  if [ ! -s "$ROUND_DIR/$svc.actions" ]; then
+    echo "| $svc | 0 | - | - | 无决策 | - |"
+    continue
+  fi
+  # 香农熵 H = -sum(p*log2(p))；r = H/Hmax（k=1 时 Hmax 取 1.0，与旧 python 版一致）
+  jq -rRs --arg svc "$svc" '
+    split("\n") | map(select(length > 0)) as $acts
+    | ($acts | group_by(.) | map({a: .[0], n: length}) | sort_by(-.n)) as $dist
+    | ($dist | map(.n) | add // 0) as $total
+    | if $total == 0 then
+        "| \($svc) | 0 | - | - | 无决策 | - |"
+      else
+        ($dist | map(.n as $n | ($n / $total) as $p | - ($p * ($p | log2))) | add) as $h
+        | (if ($dist | length) > 1 then (($dist | length) | log2) else 1.0 end) as $hmax
+        | ($h / $hmax) as $r
+        | (if $r > 0.6 then "健康" elif $r >= 0.3 then "收缩" else "坍缩疑似" end) as $band
+        | "| \($svc) | \($total) | \($h * 100 | round / 100)/\($hmax * 100 | round / 100) | \($r * 100 | round / 100) | \($band) | \($dist | map("\(.a):\(.n)") | join(",")) |"
+      end
+  ' "$ROUND_DIR/$svc.actions" 2>/dev/null || echo "| $svc | 0 | - | - | 无决策 | - |"
+done
 # 保存每 agent 动作计数（Phase 4 跨轮次聚合用）
 for entry in "${AGENTS[@]}"; do
   svc=$(echo "$entry" | cut -d: -f1)
