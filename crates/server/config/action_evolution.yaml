@@ -14,7 +14,7 @@ data:
     fallback_confidence: 0.5
     rules:
       - match:
-          effect_refs_prefix: ["combat", "martial"]
+          effect_refs_prefix: ["combat"]
         topics: ["order"]
       - match:
           effect_refs_prefix: ["social", "dialogue"]

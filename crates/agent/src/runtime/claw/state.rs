@@ -456,5 +456,12 @@ pub fn ws_intent_to_intent(intent: WsIntent, agent_id: Uuid, tick_id: i64) -> In
         intent_obj = intent_obj.with_thought(thought_log);
     }
 
+    // 原子意图队列：claw 上游现在可携带后续意图（server 端按序原子执行）
+    intent_obj.subsequent_intents = intent
+        .subsequent_intents
+        .into_iter()
+        .map(|sub| ws_intent_to_intent(sub, agent_id, tick_id))
+        .collect();
+
     intent_obj
 }

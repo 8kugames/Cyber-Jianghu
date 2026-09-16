@@ -225,6 +225,19 @@ pub struct PersonaSummary {
 // 上行消息（外部调度器 → Agent）
 // ============================================================================
 
+/// 上游原子意图（UpstreamMessage::Intent 的队列元素）
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UpstreamIntent {
+    /// 动作类型
+    pub action_type: String,
+    /// 动作数据
+    #[serde(default)]
+    pub action_data: Option<Value>,
+    /// 思考日志（可选）
+    #[serde(default)]
+    pub thought_log: Option<String>,
+}
+
 /// 上行消息类型
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -241,6 +254,9 @@ pub enum UpstreamMessage {
         /// 思考日志（可选）
         #[serde(default)]
         thought_log: Option<String>,
+        /// 原子意图队列（可选；multi-Intent 支持，缺省为空保证旧上游兼容）
+        #[serde(default)]
+        subsequent_intents: Vec<UpstreamIntent>,
     },
 
     /// 审核结果（ReflectorSoul 审查返回）
@@ -293,6 +309,8 @@ pub struct WsIntent {
     pub action_data: Option<Value>,
     /// 思考日志
     pub thought_log: Option<String>,
+    /// 原子意图队列（multi-Intent 支持）
+    pub subsequent_intents: Vec<WsIntent>,
 }
 
 impl From<UpstreamMessage> for Option<WsIntent> {
@@ -303,11 +321,22 @@ impl From<UpstreamMessage> for Option<WsIntent> {
                 action_type,
                 action_data,
                 thought_log,
+                subsequent_intents,
             } => Some(WsIntent {
                 tick_id,
                 action_type,
                 action_data,
                 thought_log,
+                subsequent_intents: subsequent_intents
+                    .into_iter()
+                    .map(|ui| WsIntent {
+                        tick_id,
+                        action_type: ui.action_type,
+                        action_data: ui.action_data,
+                        thought_log: ui.thought_log,
+                        subsequent_intents: Vec::new(),
+                    })
+                    .collect(),
             }),
             // ReviewResult 不是 Intent，返回 None
             UpstreamMessage::ReviewResult { .. } => None,

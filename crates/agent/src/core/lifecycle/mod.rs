@@ -368,6 +368,16 @@ impl super::Agent {
             } else {
                 info!("已从 Registered 消息注入 narrative_config");
             }
+            // FocusSummary 属性显示名数据驱动化（delta_engine 热更新不触达，重启后以
+            // 新 Registered 为准）
+            if let Some(engine) = self.delta_engine.as_mut() {
+                engine.set_attribute_display_names(
+                    nc.attributes
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.display_name.clone()))
+                        .collect(),
+                );
+            }
         }
 
         // 启动时主动拉取 prompt_templates 并写盘

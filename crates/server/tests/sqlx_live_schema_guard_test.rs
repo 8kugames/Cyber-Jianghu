@@ -355,3 +355,113 @@ async fn location_traffic_dynamic_select_decodes_counts() {
         .expect("cleanup agent states");
     cleanup(&pool, &[agent_id]).await;
 }
+
+// ============================================================================
+// 治理管道 reopen 断链守卫（2026-09-14 审计 M2/M3 修复的回归锁定）
+//
+// M2：admin 关单必须置 stage='done'——upsert_proposal_group 的 reopen CASE
+//     仅认 stage='done'，否则同类新提议追加进已关闭 group 永不重审。
+// M3：get_group_proposal_ids 必须 DESC——引擎按 proposal_ids.first() 取样
+//     代表提案，ASC 会重审上一轮已审过的最旧提案而非触发重开的新证据。
+// ============================================================================
+#[tokio::test]
+#[ignore = "需要真实 PostgreSQL（DATABASE_URL）；见文件头说明"]
+async fn governance_closed_group_reopens_and_samples_latest() {
+    if let Ok(url) = std::env::var("DATABASE_URL") {
+        let pool = test_pool(&url).await;
+        let agent_id = seed_agent(&pool, "governance-guard-agent").await;
+        let group_id = uuid::Uuid::new_v4();
+        let pid_old = uuid::Uuid::new_v4();
+        let pid_new = uuid::Uuid::new_v4();
+
+        // 夹具：已关闭的 group（status=rejected, stage=done）+ 新旧两条提案
+        sqlx::query(
+            "INSERT INTO action_evolution_proposal_groups \
+             (id, similarity_key, primary_soul, status, stage, proposal_ids) \
+             VALUES ($1, $2, 'fuxi', 'rejected', 'done', $3::jsonb)",
+        )
+        .bind(group_id)
+        .bind(format!("guard-{}", uuid::Uuid::new_v4()))
+        .bind(serde_json::json!([pid_old]).to_string())
+        .execute(&pool)
+        .await
+        .expect("insert closed group");
+
+        for (pid, tick) in [(pid_old, 100), (pid_new, 200)] {
+            sqlx::query(
+                "INSERT INTO action_evolution_proposals \
+                 (id, agent_id, tick_id, proposed_action_type, rationale) \
+                 VALUES ($1, $2, $3, '测试动作', '守卫夹具：治理 reopen 断链')",
+            )
+            .bind(pid)
+            .bind(agent_id)
+            .bind(tick)
+            .execute(&pool)
+            .await
+            .expect("insert proposal");
+            sqlx::query(
+                "INSERT INTO action_evolution_group_proposals \
+                 (proposal_group_id, proposal_id) VALUES ($1, $2)",
+            )
+            .bind(group_id)
+            .bind(pid)
+            .execute(&pool)
+            .await
+            .expect("insert link");
+        }
+        // 制造 created_at 差异：pid_new 更晚入库（同秒插入时 DESC 稳定序靠次键）
+        sqlx::query(
+            "UPDATE action_evolution_proposals SET created_at = NOW() - interval '2 hours' \
+             WHERE id = $1",
+        )
+        .bind(pid_old)
+        .execute(&pool)
+        .await
+        .expect("backdate old proposal");
+
+        // M3 守卫：proposal_store::get_group_proposal_ids 的 DESC 序（SQL 与实现同文），
+        // 引擎按 proposal_ids.first() 取样——首元素必须是最新提案
+        let ids = sqlx::query_scalar::<_, uuid::Uuid>(
+            "SELECT proposal_id \
+             FROM action_evolution_group_proposals \
+             WHERE proposal_group_id = $1 \
+             ORDER BY created_at DESC, proposal_id DESC",
+        )
+        .bind(group_id)
+        .fetch_all(&pool)
+        .await
+        .expect("query ids desc");
+        assert_eq!(
+            ids.first(),
+            Some(&pid_new),
+            "M3：取样必须取最新提案（触发重开的新证据），而非最旧"
+        );
+
+        // M2 守卫：关单写入 stage='done' 后，upsert 的 reopen CASE 必须识别它
+        //（CASE 表达式与 proposal_store::upsert_proposal_group 同文）
+        let reopened: (String, String) = sqlx::query_as(
+            "SELECT \
+               CASE WHEN stage = 'done' THEN 'pending_review' ELSE status END, \
+               CASE WHEN stage = 'done' THEN 'awaiting_fuxi_initial' ELSE stage END \
+             FROM action_evolution_proposal_groups WHERE id = $1",
+        )
+        .bind(group_id)
+        .fetch_one(&pool)
+        .await
+        .expect("reopen case eval");
+        assert_eq!(
+            reopened,
+            ("pending_review".into(), "awaiting_fuxi_initial".into()),
+            "M2：stage='done' 必须被 reopen CASE 识别（管道重启）"
+        );
+
+        // 清理（links/groups 级联；proposals 随 agents 级联）
+        sqlx::query("DELETE FROM action_evolution_proposal_groups WHERE id = $1")
+            .bind(group_id)
+            .execute(&pool)
+            .await
+            .expect("cleanup groups");
+        cleanup(&pool, &[agent_id]).await;
+        pool.close().await;
+    }
+}

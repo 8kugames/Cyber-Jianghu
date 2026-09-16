@@ -199,7 +199,7 @@ fn build_direct_client_with_max_tokens(
     let provider = LlmProvider::parse(&llm_config.provider)
         .ok_or_else(|| anyhow::anyhow!("Unknown LLM provider: {}", llm_config.provider))?;
 
-    let mut client_config = DirectLlmClientConfig::new(provider, llm_config.api_key.clone());
+    let mut client_config = DirectLlmClientConfig::new(provider, llm_config.resolved_api_key());
     client_config
         .prefer_stream
         .store(prefer_stream, Ordering::Relaxed);

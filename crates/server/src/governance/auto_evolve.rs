@@ -63,7 +63,7 @@ pub fn generate_action_config(
 
 fn infer_category(effect_refs: &[String]) -> String {
     for ref_ in effect_refs {
-        if ref_.starts_with("combat") || ref_.starts_with("martial") {
+        if ref_.starts_with("combat") {
             return "combat".to_string();
         }
         if ref_.starts_with("social") || ref_.starts_with("dialogue") {

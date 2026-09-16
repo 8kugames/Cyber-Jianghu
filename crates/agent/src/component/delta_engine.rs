@@ -48,6 +48,9 @@ pub struct StateDelta {
 pub struct DeltaConfig {
     /// 变化百分比阈值（|diff| / 100 >= threshold => Important）
     pub change_percentage_threshold: f32,
+    /// 属性 key → 中文显示名（权威来源：server 下发 narrative_config.display_name，
+    /// 由 Registered 注入点填充；未命中的 key 走静态兜底表后原样返回）
+    pub attribute_display_names: std::collections::HashMap<String, String>,
     /// 生存驱动 Critical 阈值：只有 survival_drive.urgency >= 此值时才标 Critical
     /// 默认值 5 对应 narratives.yaml 中 satiation/hydration urgency=3(轻微), 7(重度), 10(致命)
     /// 低于此值的生存属性变化标 Important 而非 Critical，减少信号噪声
@@ -59,6 +62,7 @@ impl Default for DeltaConfig {
         Self {
             change_percentage_threshold: 0.1,
             survival_critical_urgency_threshold: 5,
+            attribute_display_names: std::collections::HashMap::new(),
         }
     }
 }
@@ -71,6 +75,32 @@ pub struct DeltaEngine {
 impl DeltaEngine {
     pub fn new(config: DeltaConfig) -> Self {
         Self { config }
+    }
+
+    /// 注入属性显示名（Registered 下发 narrative_config 后调用；热更新不触达，重启生效）
+    pub fn set_attribute_display_names(&mut self, map: std::collections::HashMap<String, String>) {
+        self.config.attribute_display_names = map;
+    }
+
+    /// 属性 key 显示名：数据驱动优先，静态兜底，未知 key 原样返回
+    fn attribute_display_name<'a>(&'a self, key: &'a str) -> &'a str {
+        if let Some(name) = self.config.attribute_display_names.get(key) {
+            return name.as_str();
+        }
+        Self::static_display_name(key)
+    }
+
+    /// 静态兜底表（narrative_config 未接入时的最小可读性保障）
+    fn static_display_name(key: &str) -> &str {
+        match key {
+            "hp" => "生命值",
+            "satiation" => "饱食度",
+            "hydration" => "饱饮度",
+            "stamina" => "体力",
+            "sanity" => "心智",
+            "temperature" => "体温",
+            other => other,
+        }
     }
 
     /// 计算 prev → curr 的变化量
@@ -130,7 +160,7 @@ impl DeltaEngine {
                 category: ChangeCategory::Survival,
                 urgency,
                 field: format!("attributes.{}", key),
-                description: format!("初始状态 {}: {}", attribute_display_name(key), val),
+                description: format!("初始状态 {}: {}", self.attribute_display_name(key), val),
                 data: serde_json::json!({ key: val }),
                 tool_hint: None,
             });
@@ -235,7 +265,7 @@ impl DeltaEngine {
                 field: format!("attributes.{}", key),
                 description: format!(
                     "{}: {} -> {}",
-                    attribute_display_name(key),
+                    self.attribute_display_name(key),
                     prev_val,
                     curr_val
                 ),
@@ -399,20 +429,3 @@ impl DeltaEngine {
 #[cfg(test)]
 #[path = "delta_engine_tests.rs"]
 mod tests;
-
-/// 属性 key 的中文显示名（FocusSummary/prompt 兜底）。
-///
-/// 数据驱动补全前先用静态兜底：server 下发的 narrative_config.display_name
-/// 是权威来源（hp→生命值等），但 FocusSummary 构建路径尚未接入——见审计
-/// 「体感裸属性名」。未知 key 原样返回。
-fn attribute_display_name(key: &str) -> &str {
-    match key {
-        "hp" => "生命值",
-        "satiation" => "饱食度",
-        "hydration" => "饱饮度",
-        "stamina" => "体力",
-        "sanity" => "心智",
-        "temperature" => "体温",
-        other => other,
-    }
-}

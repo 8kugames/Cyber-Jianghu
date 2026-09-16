@@ -204,6 +204,7 @@ fn test_deserialize_intent_message() {
             action_type,
             action_data,
             thought_log,
+            ..
         } => {
             assert_eq!(tick_id, 105);
             assert_eq!(action_type, "移动");
@@ -225,6 +226,7 @@ fn test_deserialize_intent_with_thought() {
             action_type,
             action_data,
             thought_log,
+            ..
         } => {
             assert_eq!(tick_id, 105);
             assert_eq!(action_type, "说话");
@@ -453,4 +455,35 @@ fn test_from_server_message_world_state_skipped() {
 
     let result = DownstreamMessage::from_server_message(server_msg, 100);
     assert!(result.is_none());
+}
+
+#[test]
+fn test_deserialize_intent_without_subsequent_is_backward_compatible() {
+    // 旧上游不发送 subsequent_intents 字段 → serde default 空 Vec（wire 兼容）
+    let json = r#"{"type":"intent","tick_id":1,"action_type":"休整"}"#;
+    let msg: UpstreamMessage = serde_json::from_str(json).unwrap();
+    match msg {
+        UpstreamMessage::Intent {
+            subsequent_intents, ..
+        } => assert!(subsequent_intents.is_empty()),
+        _ => panic!("Expected Intent message"),
+    }
+}
+
+#[test]
+fn test_deserialize_intent_with_subsequent_queue() {
+    let json = r#"{"type":"intent","tick_id":1,"action_type":"移动","action_data":{"target":"市场"},"subsequent_intents":[{"type":"intent","action_type":"说话","action_data":{"content":"到了"}}]}"#;
+    let msg: UpstreamMessage = serde_json::from_str(json).unwrap();
+    match msg {
+        UpstreamMessage::Intent {
+            action_type,
+            subsequent_intents,
+            ..
+        } => {
+            assert_eq!(action_type, "移动");
+            assert_eq!(subsequent_intents.len(), 1);
+            assert_eq!(subsequent_intents[0].action_type, "说话");
+        }
+        _ => panic!("Expected Intent message"),
+    }
 }

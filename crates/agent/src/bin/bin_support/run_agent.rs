@@ -506,6 +506,9 @@ pub(crate) async fn run_agent(port: u16, mode: String, server: Option<String>) -
                 .token_optimization
                 .delta
                 .survival_critical_urgency_threshold,
+            // Registered 下发 narrative_config 后由 lifecycle 注入实际显示名；
+            // 此处空表使静态兜底先生效
+            attribute_display_names: Default::default(),
         };
         let attention_config = config.token_optimization.attention.clone();
         builder = builder

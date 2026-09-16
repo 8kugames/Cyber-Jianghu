@@ -210,6 +210,43 @@ pub(crate) fn env_or<T: std::str::FromStr>(key: &str, fallback: T) -> T {
         .unwrap_or(fallback)
 }
 
+impl LlmConfig {
+    /// 解析 api_key 中的环境变量引用（如 "${DEEPSEEK_API_KEY}"）。
+    ///
+    /// 支持 `${VAR}` 形式（整值或内嵌）；变量未设置时按空串处理并告警，
+    /// 避免 yaml 落盘明文密钥。原值不含 `${` 时原样返回。
+    pub fn resolved_api_key(&self) -> Option<String> {
+        let raw = self.api_key.as_ref()?;
+        if !raw.contains("${") {
+            return Some(raw.clone());
+        }
+        let mut out = String::with_capacity(raw.len());
+        let mut rest = raw.as_str();
+        while let Some(start) = rest.find("${") {
+            out.push_str(&rest[..start]);
+            let after = &rest[start + 2..];
+            match after.find('}') {
+                Some(end) => {
+                    let var = &after[..end];
+                    match std::env::var(var) {
+                        Ok(v) => out.push_str(&v),
+                        Err(_) => {
+                            tracing::warn!("api_key 引用的环境变量 {} 未设置，按空串处理", var);
+                        }
+                    }
+                    rest = &after[end + 1..];
+                }
+                None => {
+                    out.push_str(&rest[start..]);
+                    rest = "";
+                }
+            }
+        }
+        out.push_str(rest);
+        if out.is_empty() { None } else { Some(out) }
+    }
+}
+
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
@@ -277,5 +314,40 @@ impl Drop for LlmConfig {
         if let Some(ref mut key) = self.api_key {
             key.zeroize();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolved_api_key_passthrough_plain_value() {
+        let mut cfg = LlmConfig::default();
+        cfg.api_key = Some("sk-plain-key".to_string());
+        assert_eq!(cfg.resolved_api_key().as_deref(), Some("sk-plain-key"));
+    }
+
+    #[test]
+    fn test_resolved_api_key_expands_env_var() {
+        unsafe { std::env::set_var("CJ_TEST_LLM_KEY", "sk-from-env") };
+        let mut cfg = LlmConfig::default();
+        cfg.api_key = Some("${CJ_TEST_LLM_KEY}".to_string());
+        assert_eq!(cfg.resolved_api_key().as_deref(), Some("sk-from-env"));
+        unsafe { std::env::remove_var("CJ_TEST_LLM_KEY") };
+    }
+
+    #[test]
+    fn test_resolved_api_key_unset_var_becomes_none() {
+        unsafe { std::env::remove_var("CJ_TEST_LLM_KEY_MISSING") };
+        let mut cfg = LlmConfig::default();
+        cfg.api_key = Some("${CJ_TEST_LLM_KEY_MISSING}".to_string());
+        assert_eq!(cfg.resolved_api_key(), None);
+    }
+
+    #[test]
+    fn test_resolved_api_key_none_stays_none() {
+        let cfg = LlmConfig::default();
+        assert_eq!(cfg.resolved_api_key(), None);
     }
 }

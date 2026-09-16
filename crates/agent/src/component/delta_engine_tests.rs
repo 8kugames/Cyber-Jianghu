@@ -10,6 +10,7 @@ fn test_config() -> DeltaConfig {
     DeltaConfig {
         change_percentage_threshold: 0.1,
         survival_critical_urgency_threshold: 5,
+        attribute_display_names: Default::default(),
     }
 }
 
