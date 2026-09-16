@@ -245,7 +245,7 @@ impl AttributeValue {
     /// 获取当前值
     pub fn get(&self) -> i32 {
         match self {
-            AttributeValue::Static { value } => *value as i32,
+            AttributeValue::Static { value } => *value,
             AttributeValue::DailyRandom { value, .. } => *value as i32,
             AttributeValue::Growable { current, .. } => *current as i32,
             AttributeValue::Delta { value } => *value,
