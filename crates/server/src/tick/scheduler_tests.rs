@@ -1,6 +1,7 @@
 //! scheduler 模块单测（自 scheduler.rs 外移，内容未改）
 
 use super::*;
+use chrono::FixedOffset;
 use chrono::{Datelike, NaiveDate, TimeZone, Timelike};
 use std::io::Write;
 
