@@ -513,6 +513,32 @@ pub struct TimeData {
     pub seasons: Vec<SeasonData>,
 }
 
+impl TimeData {
+    /// 季节乘数合法性校验（fail-fast，配置加载期拒绝而非运行时静默）。
+    ///
+    /// 采集产量与属性衰减/恢复均直接乘以这些系数：负值会让衰减反向变增量
+    /// （属性不降反升）、NaN 会污染整条数值链。故要求全部有限且非负。
+    pub fn validate(&self) -> Result<(), String> {
+        for season in &self.seasons {
+            if !season.resource_growth_rate.is_finite() || season.resource_growth_rate < 0.0 {
+                return Err(format!(
+                    "季节 {} 的 resource_growth_rate 必须为非负有限数，当前为 {}",
+                    season.id, season.resource_growth_rate
+                ));
+            }
+            for (attr, modifier) in &season.attribute_modifiers {
+                if !modifier.is_finite() || *modifier < 0.0 {
+                    return Err(format!(
+                        "季节 {} 的 attribute_modifiers[{}] 必须为非负有限数，当前为 {}",
+                        season.id, attr, modifier
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// 季节数据
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SeasonData {

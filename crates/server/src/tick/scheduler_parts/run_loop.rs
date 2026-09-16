@@ -105,25 +105,39 @@ impl TickScheduler {
                 error!("Tick {} 广播失败: {}", self.current_tick_id, e);
             }
 
-            // 2.5 游戏日边界推送：每个游戏日结束时向所有在线 Agent 推送动作统计
-            // 使用 tick_counter（ordinal counter）而非 current_tick_id（墙钟秒），
-            // 解除 modulo 对齐对墙钟余数的偶发依赖。
+            // 2.5 游戏日边界推送：日历日号（由 current_tick_id 推导）递增即结算。
+            // 此前用 tick_counter（进程 ordinal）取模触发，与日历网格不同源：
+            // 重启后计数器归零而 tick_id 相位任意，结算窗口偏离真实游戏日边界，
+            // reward 记账跨日污染。现改为日号变化检测——相位严格对齐，
+            // 重启安全（首个 tick 只记录基线，日中启动不补结算），
+            // 单调日号保证同一天不会重复结算。
             let ticks_per_game_day = crate::game_data::registry::TimeRegistry::get_config()
                 .map(|c| c.ticks_per_hour as u64 * c.hours_per_day as u64)
                 .unwrap_or(12);
-            if self.tick_counter > 0 && self.tick_counter.is_multiple_of(ticks_per_game_day) {
-                let real_seconds_per_tick = {
-                    let gd = self.game_data_cache.get();
-                    gd.game_rules.data.agent_state.tick.real_seconds_per_tick as i64
-                };
-                let ticks_per_day_real_secs = ticks_per_game_day as i64 * real_seconds_per_tick;
-                let game_day = self.current_tick_id / ticks_per_day_real_secs;
+            let real_seconds_per_tick = {
+                let gd = self.game_data_cache.get();
+                gd.game_rules.data.agent_state.tick.real_seconds_per_tick as i64
+            };
+            let ticks_per_day_real_secs = ticks_per_game_day as i64 * real_seconds_per_tick;
+            let today = self.current_tick_id / ticks_per_day_real_secs;
+            let should_settle = match self.last_settled_game_day {
+                None => {
+                    self.last_settled_game_day = Some(today);
+                    false
+                }
+                Some(last) if today > last => {
+                    self.last_settled_game_day = Some(today);
+                    true
+                }
+                Some(_) => false,
+            };
+            if should_settle {
+                let game_day = today;
                 let day_start_tick = self.current_tick_id - ticks_per_day_real_secs + 1;
                 tracing::info!(
-                    "[reward] 边界条件触发: tick_counter={}, current_tick_id={}, ticks_per_game_day={}, game_day={}",
-                    self.tick_counter,
+                    "[reward] 日历日边界触发: current_tick_id={}, ticks_per_day_real_secs={}, game_day={}",
                     self.current_tick_id,
-                    ticks_per_game_day,
+                    ticks_per_day_real_secs,
                     game_day
                 );
                 // 生存 Reward 每日结算（旁路，失败只 error 不阻断 tick）

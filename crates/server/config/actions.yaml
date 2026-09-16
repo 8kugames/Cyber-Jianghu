@@ -286,6 +286,17 @@ data:
       - requirement_type: attribute
         attribute: stamina
         min: 0
+      # 休整有真实生理代价：耗 4 点生存资源（≈6-7 tick 自然衰减量），
+      # 堵死「零成本永动机回血」（hp 无被动恢复，休整是其唯一回复渠道）。
+      # 调参入口：min 为门槛（资不抵付禁止休整），cost 为实际扣减。
+      - requirement_type: attribute
+        attribute: satiation
+        min: 2
+        cost: 2
+      - requirement_type: attribute
+        attribute: hydration
+        min: 2
+        cost: 2
     effects:
       - effect_type: attribute_change
         attribute: stamina

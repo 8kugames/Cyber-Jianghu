@@ -79,6 +79,8 @@ pub struct TickScheduler {
 
     /// 上次加载的 actions.yaml 修改时间
     last_actions_mtime: Option<std::time::SystemTime>,
+    /// 已结算的日历日号基线（None = 尚未初始化，首个 tick 只记录不结算）
+    last_settled_game_day: Option<i64>,
 
     /// 上次加载的 skills/ 目录修改时间
     last_skills_mtime: Option<std::time::SystemTime>,
@@ -164,6 +166,7 @@ impl TickScheduler {
             agent_state_cache,
             accepting_tick_id,
             last_actions_mtime: None,
+            last_settled_game_day: None,
             last_skills_mtime: None,
             last_narrative_config_mtime: None,
             last_game_rules_mtime: None,
