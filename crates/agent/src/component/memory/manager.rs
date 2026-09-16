@@ -188,10 +188,9 @@ impl MemoryManager {
         }
 
         // 3. 高重要性事件：叙事合成写入情景记忆
-        let significant: Vec<WorldEvent> = scored
+        let significant: Vec<(f32, WorldEvent)> = scored
             .into_iter()
             .filter(|(importance, _)| *importance >= self.config.episodic_threshold)
-            .map(|(_, e)| e)
             .collect();
 
         if significant.len() >= self.config.narrative_min_events {
@@ -199,7 +198,14 @@ impl MemoryManager {
                 let summary = engine.get_summary_context();
                 let outcome = engine.get_outcome_context_public();
                 engine
-                    .synthesize_memory_narrative(&significant, &summary, &outcome)
+                    .synthesize_memory_narrative(
+                        &significant
+                            .iter()
+                            .map(|(_, e)| e.clone())
+                            .collect::<Vec<_>>(),
+                        &summary,
+                        &outcome,
+                    )
                     .await
             } else {
                 // cognitive_engine 不可用时：显式警告 + 统一降级文本
@@ -211,9 +217,16 @@ impl MemoryManager {
                 FALLBACK_NARRATIVE.to_string()
             };
 
+            // 合成条目继承源事件重要性（取最低源分、下限 0.5），不再恒 1.0——
+            // 恒 1.0 使 importance 排序退化、与固化记忆（1.0）平权霸占 top-K。
+            let synthesized_importance = significant
+                .iter()
+                .map(|(s, _)| *s)
+                .fold(f32::MAX, f32::min)
+                .max(0.5);
             let mut entry =
-                MemoryEntry::new(self.config.agent_id, significant[0].tick_id, narrative)
-                    .with_importance(1.0)
+                MemoryEntry::new(self.config.agent_id, significant[0].1.tick_id, narrative)
+                    .with_importance(synthesized_importance)
                     .with_event_type("synthesized_memory".to_string());
 
             let episodic_id = self.episodic.add(&mut entry).await?;
@@ -225,7 +238,7 @@ impl MemoryManager {
                     Err(e) => {
                         tracing::warn!(
                             "SemanticMemory::add() failed for tick {}: {}, embedding not stored",
-                            significant[0].tick_id,
+                            significant[0].1.tick_id,
                             e
                         );
                     }

@@ -130,7 +130,7 @@ impl DeltaEngine {
                 category: ChangeCategory::Survival,
                 urgency,
                 field: format!("attributes.{}", key),
-                description: format!("初始状态 {}: {}", key, val),
+                description: format!("初始状态 {}: {}", attribute_display_name(key), val),
                 data: serde_json::json!({ key: val }),
                 tool_hint: None,
             });
@@ -233,7 +233,12 @@ impl DeltaEngine {
                 category: ChangeCategory::Survival,
                 urgency,
                 field: format!("attributes.{}", key),
-                description: format!("{}: {} -> {}", key, prev_val, curr_val),
+                description: format!(
+                    "{}: {} -> {}",
+                    attribute_display_name(key),
+                    prev_val,
+                    curr_val
+                ),
                 data: serde_json::json!({ "key": key, "prev": prev_val, "curr": curr_val }),
                 tool_hint: Some("query_world(section=state)".to_string()),
             });
@@ -394,3 +399,20 @@ impl DeltaEngine {
 #[cfg(test)]
 #[path = "delta_engine_tests.rs"]
 mod tests;
+
+/// 属性 key 的中文显示名（FocusSummary/prompt 兜底）。
+///
+/// 数据驱动补全前先用静态兜底：server 下发的 narrative_config.display_name
+/// 是权威来源（hp→生命值等），但 FocusSummary 构建路径尚未接入——见审计
+/// 「体感裸属性名」。未知 key 原样返回。
+fn attribute_display_name(key: &str) -> &str {
+    match key {
+        "hp" => "生命值",
+        "satiation" => "饱食度",
+        "hydration" => "饱饮度",
+        "stamina" => "体力",
+        "sanity" => "心智",
+        "temperature" => "体温",
+        other => other,
+    }
+}

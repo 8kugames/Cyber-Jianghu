@@ -81,7 +81,19 @@ pub fn cognitive_decision_with_chain(
             let mut last_chain: Option<CognitiveChain> = None;
             let mut failed_attempts: usize = 0;
 
+            // 墙钟预算：flaky LLM 下 max_retries 次重试 × 120s 请求超时可空转数十分钟
+            // （2026-09-15 柳青崖事故）。超预算即跳出循环走休整降级，
+            // chaos 恢复机制在后续 tick 兜底。
+            const RETRY_BUDGET_SECS: u64 = 300;
+            let budget_started = std::time::Instant::now();
             for attempt in 0..=max_retries {
+                if budget_started.elapsed() > std::time::Duration::from_secs(RETRY_BUDGET_SECS) {
+                    warn!(
+                        "[cognitive] 重试预算耗尽（{}s），中止本轮决策走休整降级",
+                        RETRY_BUDGET_SECS
+                    );
+                    break;
+                }
                 let _ = attempt; // 内层认知校验重试序号（不影响 trace 的 soul_cycle_attempt）
                 match engine
                     .think_direct(
@@ -123,17 +135,18 @@ pub fn cognitive_decision_with_chain(
                             ),
                             _ => final_intent.action_type.to_string(),
                         };
-                        engine.push_conversation_turn(
-                            world_state.tick_id,
-                            ws_summary,
-                            assistant_summary,
-                            engine.take_last_reasoning_content(),
-                        );
-
                         // CognitiveValidator: 验证认知链质量
+                        // （先验证后写历史：被驳回的轮次不入对话史，
+                        //   否则脏轮次会永久驻留并在后续 prompt 中回放）
                         let validator = CognitiveValidator::new(chain.persona.clone());
                         let validation = validator.validate(&chain);
                         if validation.is_valid {
+                            engine.push_conversation_turn(
+                                world_state.tick_id,
+                                ws_summary,
+                                assistant_summary,
+                                engine.take_last_reasoning_content(),
+                            );
                             return (final_intent, Some(chain));
                         }
 
