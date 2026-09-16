@@ -9,6 +9,7 @@
 // - 地点分布
 // ============================================================================
 
+use super::{calculate_game_days, get_season};
 use anyhow::{Context, Result};
 use sqlx::Row;
 use std::collections::HashMap;
@@ -136,25 +137,6 @@ async fn collect_emergence_events(
 /// 计算游戏日范围
 ///
 /// 换算真源 = TimeRegistry::try_game_day（配置缺失时显式失败，不接受退化值——
-/// chronicle 周期分区入 DB，错日会破坏 period 唯一性）
-fn calculate_game_days(period_start: i64, period_end: i64) -> Result<(i32, i32)> {
-    let start_day =
-        crate::game_data::registry::time_registry::TimeRegistry::try_game_day(period_start)
-            .context("时间配置不可用，无法计算周期游戏日")?;
-    let end_day = crate::game_data::registry::time_registry::TimeRegistry::try_game_day(period_end)
-        .context("时间配置不可用，无法计算周期游戏日")?;
-    Ok((start_day as i32, end_day as i32))
-}
-
-/// 获取季节
-async fn get_season(_db_pool: &crate::db::DbPool, tick_id: i64) -> Result<String> {
-    let season = crate::game_data::registry::TimeRegistry::get_current_season(tick_id)
-        .map(|s| s.name.clone())
-        .unwrap_or_else(|| "未知".to_string());
-
-    Ok(season)
-}
-
 /// 采集 Agent 数据
 async fn collect_agents(
     db_pool: &crate::db::DbPool,

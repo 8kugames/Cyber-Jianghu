@@ -29,7 +29,9 @@ pub use outcome::{
 };
 pub use registry::{AgentLifetime, GlobalMemoryRegistry, GlobalMemoryReport};
 pub use scorer::ImportanceScorer;
-pub use store::{ClientMemory, MemoryStore};
+mod client_memory;
+pub use client_memory::ClientMemory;
+pub use store::MemoryStore;
 pub use tools::{
     MemorySearchResult, MemoryToolDefinition, MemoryToolResult, RECALL_ARCHIVED_TOOL,
     RecallArchivedParams, SEARCH_MEMORY_TOOL, SearchMemoryParams,

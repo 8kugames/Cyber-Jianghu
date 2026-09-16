@@ -39,6 +39,7 @@ mod dto;
 pub(crate) mod handlers;
 pub mod service;
 pub mod soul_cycle_recorder;
+mod soul_cycle_types;
 pub mod thinking_log;
 pub mod trace;
 #[cfg(test)]

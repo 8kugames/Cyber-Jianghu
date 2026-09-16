@@ -17,6 +17,7 @@
 // 5. 进度可通过 /api/dashboard/chronicles/pending 追踪
 // ============================================================================
 
+use anyhow::Context;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -421,6 +422,25 @@ pub async fn generate_and_store(
 /// 游戏日（整数）转中文日期字符串。
 ///
 /// 配置驱动：从 `TimeRegistry` 读取 `CalendarConfig`（time.yaml），
+/// chronicle 周期分区入 DB，错日会破坏 period 唯一性）
+pub(crate) fn calculate_game_days(period_start: i64, period_end: i64) -> Result<(i32, i32)> {
+    let start_day =
+        crate::game_data::registry::time_registry::TimeRegistry::try_game_day(period_start)
+            .context("时间配置不可用，无法计算周期游戏日")?;
+    let end_day = crate::game_data::registry::time_registry::TimeRegistry::try_game_day(period_end)
+        .context("时间配置不可用，无法计算周期游戏日")?;
+    Ok((start_day as i32, end_day as i32))
+}
+
+/// 获取季节
+pub(crate) async fn get_season(_db_pool: &crate::db::DbPool, tick_id: i64) -> Result<String> {
+    let season = crate::game_data::registry::TimeRegistry::get_current_season(tick_id)
+        .map(|s| s.name.clone())
+        .unwrap_or_else(|| "未知".to_string());
+
+    Ok(season)
+}
+
 /// 无配置时 fallback "第N日"。storage / generator 共用此函数，避免格式化逻辑重复。
 pub(crate) fn format_game_day(game_day: i64) -> String {
     crate::game_data::registry::TimeRegistry::get_calendar_config()
