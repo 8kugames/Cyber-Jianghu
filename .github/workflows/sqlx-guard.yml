@@ -18,6 +18,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # 宏展开必须走 .sqlx 离线缓存（与 pr-check.yml/ci.yml 同口径）：DATABASE_URL
+  # 指向的 postgres service 在守卫测试运行前是空库，sqlx 宏一旦在线展开，
+  # 整个 server lib 会在编译期报 relation does not exist。SQLX_OFFLINE 只影响
+  # 编译期宏展开；守卫测试运行期仍通过 DATABASE_URL 连活库跑迁移与夹具。
+  SQLX_OFFLINE: "true"
 
 jobs:
   guard:
