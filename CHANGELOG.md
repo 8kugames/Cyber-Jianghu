@@ -4,6 +4,30 @@
 
 ## [Unreleased]
 
+### Features
+
+- **资源点存量/枯竭模型**（server+protocol+agent）：可采集资源持久化于 `resource_nodes` 表（migration 026），采集在 Saga 事务内扣减（`stock >= quantity` 守卫，枯竭返回「已被采光」并可整体回滚）；每日再生受四季 `resource_growth_rate` 加成（冬季枯竭春季复苏，上限 `max_stock` 截断），由 scheduler 日历日递增触发点驱动（与 reward 日结算同钩子，无相位错位）；locations.yaml 以 `gatherable_stocks`（max_stock/init_ratio/regen_per_game_day）声明，未配置 = 不限；WorldState 广播 `GatherableItem.stock`（缺省 = 未启用），agent 可采集列表渲染「野果（余 N）」驱动换地/换时策略；`PROTOCOL_VERSION` 3.2.0 → 3.3.0（additive minor）。设计文档 docs/features/resource_depletion.md。
+- **claw 协议面多意图**（agent）：`UpstreamMessage::Intent` 加 optional `subsequent_intents`（serde default 旧上游兼容），贯通 `WsIntent` → `Intent.subsequent_intents`，外部调度器可携带原子意图队列（server 端按序原子执行）；配套 Openclaw 仓发送侧待跟进。
+- **api_key 支持环境变量引用**（agent）：`llm.yaml` 的 api_key 接受 `${VAR}` 形式（运行时展开，变量缺失告警置空），yaml 不再需要落盘明文密钥（`resolved_api_key`）。
+- **注意力丢弃可观测**（agent）：FocusSummary 超 `max_focus_items` 的非关键候选以 debug 日志记录丢弃数与 field 清单——lean prompt 盲区量化入口，不改变过滤行为。
+
+### Bug Fixes
+
+- **声望负值不可达**（server+protocol）：`AttributeValue::Static` 由 u8 改 i32，钳制统一由 `StatusComponent::apply_change` 按配置 `min_value` 执行——此前声望（min=-100）经正确计算后被 `set()` 硬钳回 0，负面声望机制（身败名裂）不可达；WorldState wire 不受影响（self_state.attributes 本为 i32 映射）。
+- **治理提案重开断链**（server）：admin 关单补 `stage='done'`（reopen CASE 仅认 done，否则同类新提议追加进已关闭 group 永不重审）；提案取样改 DESC（引擎按 first() 取样，重开场景审触发重开的新证据而非上一轮最旧提案）。
+- **每日结算相位错位**（server）：触发从 tick_counter（进程 ordinal）取模改为日历日号递增检测——重启后计数器归零而 tick_id 相位任意导致结算窗口偏离真实游戏日边界（reward 记账跨日污染）；现重启安全（日中启动只记基线）、单调日号防重复。
+- **休整零成本永动机回血**（server）：休整动作加 satiation/hydration `min 2 cost 2`（hp 无被动恢复，休整为其唯一渠道，此前 +2/tick 约 25 游戏时白嫖回满）；数值调参入口在 actions.yaml。
+- **季节乘数无保底**（server）：`TimeData::validate` 加载期拒绝负值/NaN 的 `resource_growth_rate` 与 `attribute_modifiers`（负 modifier 会使衰减反向变增量）。
+- **认知重试无墙钟预算**（agent）：重试循环加 300s 预算，超时跳出走休整降级（此前 12 次 × 120s 请求超时可空转数十分钟）。
+- **记忆重要性退化**（agent）：叙事合成条目继承源事件分数（最低源分、下限 0.5）替代恒 1.0——恒 1.0 使 importance 排序退化、与固化记忆平权霸占 top-K。
+- **对话脏历史**（agent）：对话历史写入移到 CognitiveValidator 验证之后，被驳回轮次不再入库永久驻留并在后续 prompt 回放。
+- **prompt 裸属性名**（agent）：FocusSummary 属性描述改用中文显示名（narrative_config.display_name 数据驱动注入 + 静态兜底），不再向 LLM 暴露 satiation 等英文 key。
+- **martial 技能触发死引用**（server）：三技能 trigger_categories 与演化 effect_refs 的 "martial" 改 "combat"（动作体系无 martial 类别，该键计数恒 0；combat 类攻击计数现真实驱动技能习得）。
+
+### Refactor
+
+- **超限文件清零与去冗战役**（全仓）：>800 行文件 32 → 0（llm client/direct_client、websocket handler、actor engine、transport websocket、realtime、agent_ops、scheduler、main.rs 1555→19、CLI bin 1649→302 等 16 个文件模块化拆分，外部路径经再导出保持不变）；复制粘贴收敛唯一事实源（ConfigUpdate 构造器、TickStatus/展示名上移 protocol、LLM 重试/流式消费/fallback 单源化、SSE 工具、AgentClient 宏化转发）；10 文件单测外移（`#[path]`，测试代码零改动）；每批 fmt/clippy/全量测试三重门禁，全量 1187→1195 全绿。
+
 ## [0.1.350] - 2026-09-15
 
 ### Features

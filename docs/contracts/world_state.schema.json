@@ -41,7 +41,20 @@
           "description": "节点类型,如 shrine/inn/street"
         },
         "adjacent_nodes": { "type": "array" },
-        "gatherable_items": { "type": "array" },
+        "gatherable_items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "item_id": { "type": "string", "description": "物品 uuid(v5 派生),采集意图照抄此 uuid" },
+              "name": { "type": "string", "description": "人魂可见的显示名称" },
+              "item_type": { "type": "string" },
+              "stock": { "type": "integer", "description": "当前存量;缺省=未启用存量模型,无限采集。protocol 3.3.0 新增。" }
+            },
+            "required": ["item_id", "name", "item_type"]
+          },
+          "description": "可采集资源(带存量)。存量持久于 server resource_nodes 表,日再生受四季加成;采集在 Saga 事务内扣减,枯竭返回失败。"
+        },
         "parent_chain": {
           "type": "array",
           "items": { "type": "string" },

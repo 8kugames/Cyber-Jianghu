@@ -100,10 +100,11 @@ docker compose exec db psql -U cyberjianghu -d cyberjianghu
 # the entrypoint logic), so the `postgres` service no longer needs a mounted
 # migration volume in production. Files are applied in filename order.
 # Key tables: agents, agent_states, experiences, action_evolution_proposals,
-#   action_evolution_proposal_groups, soul_review_votes
+#   action_evolution_proposal_groups, soul_review_votes, resource_nodes (gatherable stock)
 # Key migrations:
 #   022_agent_relationships.sql     - relationship graph table (agent_relationships)
 #   023_chronicle_period_unique.sql - chronicle period uniqueness constraint
+#   026_resource_nodes.sql          - resource node stock table (gatherable depletion model)
 ```
 
 ### CI/CD Requirements
