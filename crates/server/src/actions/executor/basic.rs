@@ -204,6 +204,23 @@ impl BasicActionExecutor {
                     );
                 }
 
+                // 每日采集配额预检（存量模型阶段 1）：配额不足快速失败，
+                // 真实扣减在 mutator 物品入包成功后执行（Saga 回滚不白扣）
+                if !crate::game_data::resource_quota::precheck(
+                    current_location,
+                    &item_id,
+                    data.quantity as i64,
+                ) {
+                    return ActionExecutionResult::failure(
+                        format!(
+                            "此地的{}今日已采尽，明日再来吧",
+                            crate::display::display_item_name(&item_id)
+                        ),
+                        intent.action_type.to_string(),
+                        Some(intent.intent_id),
+                    );
+                }
+
                 let mut quantity = data.quantity;
                 if let Some(season) =
                     crate::game_data::registry::TimeRegistry::get_current_season(intent.tick_id)

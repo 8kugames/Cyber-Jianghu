@@ -83,6 +83,10 @@ pub struct LocationNode {
     /// 格式：["item_id1", "item_id2"]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gatherable_items: Vec<String>,
+    /// 可采集物品每日配额（键 = item_id，值 = 每日总采集量；缺省 = 不限）
+    /// 存量模型阶段 1（内存态，日历日重置），见 docs/features/resource_depletion.md
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub gatherable_daily_quotas: HashMap<String, u32>,
 
     /// 隐式 parent-child 连接的 travel_cost 覆盖
     /// None 时使用全局 default_implicit_travel_cost
@@ -373,6 +377,7 @@ mod tests {
             gatherable_items: vec![],
             implicit_travel_cost: None,
             time_variants: variants,
+            gatherable_daily_quotas: Default::default(),
         }
     }
 
@@ -451,5 +456,24 @@ mod tests {
     fn graph_visibility_missing_node_is_false() {
         let g = LocationGraph::new();
         assert!(!g.is_visible_at("ghost", 1), "不存在即不可见");
+    }
+
+    #[test]
+    fn test_gatherable_daily_quotas_deserialization() {
+        // 显式配额
+        let json = r#"{
+            "node_id": "n1", "name": "绿洲", "type": "map",
+            "gatherable_items": ["小麦", "泉水"],
+            "gatherable_daily_quotas": {"小麦": 20, "泉水": 50}
+        }"#;
+        let node: LocationNode = serde_json::from_str(json).unwrap();
+        assert_eq!(node.gatherable_daily_quotas.get("小麦"), Some(&20));
+        assert_eq!(node.gatherable_daily_quotas.get("泉水"), Some(&50));
+
+        // 缺省 = 不限（向后兼容：旧配置无该字段）
+        let json_old =
+            r#"{"node_id": "n2", "name": "老节点", "type": "map", "gatherable_items": ["馒头"]}"#;
+        let node_old: LocationNode = serde_json::from_str(json_old).unwrap();
+        assert!(node_old.gatherable_daily_quotas.is_empty());
     }
 }

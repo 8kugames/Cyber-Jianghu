@@ -22,6 +22,7 @@ mod loader;
 pub mod loaders;
 pub mod location_registry;
 pub mod registry;
+pub mod resource_quota;
 pub mod types;
 
 #[cfg(test)]

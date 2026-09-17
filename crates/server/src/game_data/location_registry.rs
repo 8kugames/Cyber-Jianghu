@@ -32,6 +32,7 @@ impl LocationRegistry {
                 description: node.description.clone(),
                 environmental_damage: node.environmental_damage,
                 gatherable_items: node.gatherable_items.clone(),
+                gatherable_daily_quotas: node.gatherable_daily_quotas.clone(),
                 implicit_travel_cost: node.implicit_travel_cost,
                 time_variants: node.time_variants.clone(),
             };
@@ -237,6 +238,7 @@ data:
                         gatherable_items: vec![],
                         implicit_travel_cost: None,
                         time_variants: vec![],
+                        gatherable_daily_quotas: Default::default(),
                     },
                     LocationNodeData {
                         node_id: "kitchen".to_string(),
@@ -248,6 +250,7 @@ data:
                         gatherable_items: vec![],
                         implicit_travel_cost: None,
                         time_variants: vec![],
+                        gatherable_daily_quotas: Default::default(),
                     },
                 ],
                 edges: vec![LocationEdgeData {
@@ -289,6 +292,7 @@ data:
                         gatherable_items: vec![],
                         implicit_travel_cost: None,
                         time_variants: vec![],
+                        gatherable_daily_quotas: Default::default(),
                     },
                     LocationNodeData {
                         node_id: "ruins".to_string(),
@@ -300,6 +304,7 @@ data:
                         gatherable_items: vec![],
                         implicit_travel_cost: None,
                         time_variants: vec![hidden_later],
+                        gatherable_daily_quotas: Default::default(),
                     },
                 ],
                 edges: vec![
@@ -361,6 +366,7 @@ data:
                         gatherable_items: vec![],
                         implicit_travel_cost: None,
                         time_variants: vec![],
+                        gatherable_daily_quotas: Default::default(),
                     },
                     LocationNodeData {
                         node_id: "village".to_string(),
@@ -372,6 +378,7 @@ data:
                         gatherable_items: vec![],
                         implicit_travel_cost: Some(7),
                         time_variants: vec![],
+                        gatherable_daily_quotas: Default::default(),
                     },
                 ],
                 edges: vec![],
@@ -399,6 +406,7 @@ mod ancestor_names_tests {
 
     fn node(id: &str, name: &str, parent: Option<&str>) -> LocationNode {
         LocationNode {
+            gatherable_daily_quotas: Default::default(),
             node_id: id.to_string(),
             name: name.to_string(),
             node_type: LocationNodeType::SubScene,

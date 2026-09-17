@@ -291,12 +291,52 @@ pub async fn apply_state_change(
                     }
                 }
                 "resource" => {
+                    // 每日配额扣减（存量模型阶段 1）：入包前原子扣，失败即配额耗尽；
+                    // add_item 失败时回补配额（与 ground 分支的回滚模式一致）
+                    let quota_node = agent_states
+                        .iter()
+                        .find(|s| s.agent_id == *agent_id)
+                        .map(|s| s.node_id.clone());
+                    let quota_consumed = quota_node
+                        .as_deref()
+                        .map(|node| {
+                            crate::game_data::resource_quota::consume(
+                                node,
+                                item_id,
+                                i64::from(*quantity),
+                            )
+                        })
+                        .unwrap_or(true);
+                    if !quota_consumed {
+                        let event = WorldEvent {
+                            event_type: WorldEventType::ActionResult,
+                            tick_id,
+                            description: format!(
+                                "采集失败，此地的{}今日已采尽",
+                                crate::display::display_item_name(item_id)
+                            ),
+                            metadata: serde_json::json!({
+                                "action": "acquire_failed",
+                                "item_id": item_id,
+                                "reason": "daily_quota_exhausted",
+                            }),
+                        };
+                        events.push((*agent_id, event));
+                        return false;
+                    }
                     if let Err(e) = crate::inventory::InventoryManager::add_item(
                         tx, *agent_id, item_id, *quantity,
                     )
                     .await
                     {
                         warn!("采集物品失败: {}", e);
+                        if let Some(node) = quota_node.as_deref() {
+                            crate::game_data::resource_quota::refund(
+                                node,
+                                item_id,
+                                i64::from(*quantity),
+                            );
+                        }
                         false
                     } else {
                         let event = WorldEvent {

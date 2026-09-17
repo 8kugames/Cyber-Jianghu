@@ -132,6 +132,8 @@ impl TickScheduler {
                 Some(_) => false,
             };
             if should_settle {
+                // 资源点每日采集配额同步重置（存量模型阶段 1，与日结算同一日历触发点）
+                crate::game_data::resource_quota::reset_daily();
                 let game_day = today;
                 let day_start_tick = self.current_tick_id - ticks_per_day_real_secs + 1;
                 tracing::info!(
