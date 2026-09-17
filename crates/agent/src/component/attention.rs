@@ -62,12 +62,28 @@ impl AttentionController {
 
         if remaining_slots > 0 && !candidates.is_empty() {
             // 非关键候选按 Delta Engine 产出顺序填充剩余槽位
-            for (i, change) in candidates.into_iter().take(remaining_slots).enumerate() {
+            for (i, change) in candidates.iter().take(remaining_slots).enumerate() {
                 selected.push(FocusItem {
-                    change,
+                    change: change.clone(),
                     rank: selected.len() + i,
                 });
             }
+        }
+
+        // H3 盲区可观测：超出槽位的候选被 lean prompt 完全裁剪，LLM 不可见。
+        // debug 级记录丢弃清单，供联调聚合统计丢弃率（不改变过滤行为）。
+        let dropped = candidates.len().saturating_sub(remaining_slots);
+        if dropped > 0 {
+            let dropped_fields: Vec<&str> = candidates
+                .iter()
+                .skip(remaining_slots)
+                .map(|c| c.field.as_str())
+                .collect();
+            tracing::debug!(
+                "[attention] 焦点槽位已满，丢弃 {} 项非关键变更（LLM 本 tick 不可见）: {:?}",
+                dropped,
+                dropped_fields
+            );
         }
 
         let narrative = self.generate_narrative(&selected);

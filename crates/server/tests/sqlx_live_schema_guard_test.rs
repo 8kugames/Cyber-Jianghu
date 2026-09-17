@@ -475,6 +475,11 @@ async fn resource_stock_consume_guard_and_regen() {
     if let Ok(url) = std::env::var("DATABASE_URL") {
         let pool = test_pool(&url).await;
         let node = format!("guard-node-{}", uuid::Uuid::new_v4());
+        // 一次性库全量清场：日再生是全表 UPDATE，残留行会干扰 rows_affected 断言
+        sqlx::query("DELETE FROM resource_nodes")
+            .execute(&pool)
+            .await
+            .expect("clear resource_nodes");
 
         sqlx::query(
             "INSERT INTO resource_nodes (node_id, item_id, stock, max_stock, regen_per_game_day) \
@@ -525,7 +530,7 @@ async fn resource_stock_consume_guard_and_regen() {
         .await
         .expect("regen")
         .rows_affected();
-        assert_eq!(n, 1);
+        assert!(n >= 1, "本夹具行必须被回补（其他残留行回补不碍守卫语义）");
 
         let (stock, max_stock): (i64, i64) = sqlx::query_as(
             "SELECT stock, max_stock FROM resource_nodes WHERE node_id = $1 AND item_id = '草药'",
@@ -534,7 +539,10 @@ async fn resource_stock_consume_guard_and_regen() {
         .fetch_one(&pool)
         .await
         .expect("read back");
-        assert_eq!(stock, 8, "1 + 4*1.5(向上取整 6) 应被 max_stock=10 截断");
+        assert_eq!(
+            stock, 7,
+            "1 + CEIL(4*1.5)=6 → 7（未触及 max_stock=10 截断）"
+        );
         assert_eq!(max_stock, 10);
 
         sqlx::query("DELETE FROM resource_nodes WHERE node_id = $1")
