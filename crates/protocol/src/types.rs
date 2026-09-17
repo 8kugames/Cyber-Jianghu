@@ -177,7 +177,7 @@ mod tests {
             description: None,
             implicit_travel_cost: None,
             time_variants: vec![],
-            gatherable_daily_quotas: Default::default(),
+            gatherable_stocks: Default::default(),
         };
 
         let json = serde_json::to_string(&node).unwrap();
@@ -201,7 +201,7 @@ mod tests {
             description: None,
             implicit_travel_cost: None,
             time_variants: vec![],
-            gatherable_daily_quotas: Default::default(),
+            gatherable_stocks: Default::default(),
         });
 
         graph.add_node(LocationNode {
@@ -214,7 +214,7 @@ mod tests {
             description: None,
             implicit_travel_cost: None,
             time_variants: vec![],
-            gatherable_daily_quotas: Default::default(),
+            gatherable_stocks: Default::default(),
         });
 
         graph.add_node(LocationNode {
@@ -227,7 +227,7 @@ mod tests {
             description: None,
             implicit_travel_cost: None,
             time_variants: vec![],
-            gatherable_daily_quotas: Default::default(),
+            gatherable_stocks: Default::default(),
         });
 
         graph.add_edge(LocationEdge {

@@ -83,10 +83,12 @@ pub struct LocationNode {
     /// 格式：["item_id1", "item_id2"]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gatherable_items: Vec<String>,
-    /// 可采集物品每日配额（键 = item_id，值 = 每日总采集量；缺省 = 不限）
-    /// 存量模型阶段 1（内存态，日历日重置），见 docs/features/resource_depletion.md
+    /// 可采集资源存量配置（键 = item_id）。存量持久于 DB resource_nodes 表
+    /// （阶段 2），此处为声明性配置：max_stock 上限 / init_ratio 初始比例 /
+    /// regen_per_game_day 日再生量。未配置 = 不限（无限采集）。
+    /// 见 docs/features/resource_depletion.md
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub gatherable_daily_quotas: HashMap<String, u32>,
+    pub gatherable_stocks: HashMap<String, GatherableStockConfig>,
 
     /// 隐式 parent-child 连接的 travel_cost 覆盖
     /// None 时使用全局 default_implicit_travel_cost
@@ -305,6 +307,23 @@ pub struct AdjacentNode {
     pub travel_cost: u32,
 }
 
+/// 可采集资源存量配置（gatherable_stocks 的值类型）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatherableStockConfig {
+    /// 存量上限
+    pub max_stock: u32,
+    /// 初始比例（0.0-1.0，启动 upsert 时按 max_stock * init_ratio 初始化）
+    #[serde(default = "default_init_ratio")]
+    pub init_ratio: f32,
+    /// 每游戏日再生量（受四季 resource_growth_rate 加成，上限 max_stock）
+    #[serde(default)]
+    pub regen_per_game_day: u32,
+}
+
+fn default_init_ratio() -> f32 {
+    1.0
+}
+
 /// 可采集资源信息（用于 WorldState）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GatherableItem {
@@ -316,6 +335,9 @@ pub struct GatherableItem {
     /// 物品类型（consumable/weapon/material 等）
     #[serde(default)]
     pub item_type: String,
+    /// 当前存量（None = 未启用存量模型，无限采集）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stock: Option<u32>,
 }
 
 /// 节点信息（简化版，用于 WorldState）
@@ -377,7 +399,7 @@ mod tests {
             gatherable_items: vec![],
             implicit_travel_cost: None,
             time_variants: variants,
-            gatherable_daily_quotas: Default::default(),
+            gatherable_stocks: Default::default(),
         }
     }
 
@@ -459,21 +481,29 @@ mod tests {
     }
 
     #[test]
-    fn test_gatherable_daily_quotas_deserialization() {
-        // 显式配额
+    fn test_gatherable_stocks_deserialization() {
         let json = r#"{
             "node_id": "n1", "name": "绿洲", "type": "map",
             "gatherable_items": ["小麦", "泉水"],
-            "gatherable_daily_quotas": {"小麦": 20, "泉水": 50}
+            "gatherable_stocks": {
+                "小麦": {"max_stock": 20, "init_ratio": 1.0, "regen_per_game_day": 5},
+                "泉水": {"max_stock": 50}
+            }
         }"#;
         let node: LocationNode = serde_json::from_str(json).unwrap();
-        assert_eq!(node.gatherable_daily_quotas.get("小麦"), Some(&20));
-        assert_eq!(node.gatherable_daily_quotas.get("泉水"), Some(&50));
+        let wheat = node.gatherable_stocks.get("小麦").unwrap();
+        assert_eq!(wheat.max_stock, 20);
+        assert_eq!(wheat.regen_per_game_day, 5);
+        // init_ratio 缺省 1.0
+        assert!((wheat.init_ratio - 1.0).abs() < f32::EPSILON);
+        let spring = node.gatherable_stocks.get("泉水").unwrap();
+        assert_eq!(spring.max_stock, 50);
+        assert_eq!(spring.regen_per_game_day, 0);
 
         // 缺省 = 不限（向后兼容：旧配置无该字段）
         let json_old =
             r#"{"node_id": "n2", "name": "老节点", "type": "map", "gatherable_items": ["馒头"]}"#;
         let node_old: LocationNode = serde_json::from_str(json_old).unwrap();
-        assert!(node_old.gatherable_daily_quotas.is_empty());
+        assert!(node_old.gatherable_stocks.is_empty());
     }
 }

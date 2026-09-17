@@ -465,3 +465,83 @@ async fn governance_closed_group_reopens_and_samples_latest() {
         pool.close().await;
     }
 }
+
+// ============================================================================
+// 资源存量守卫（阶段 2：采集 Saga 扣减的 stock >= quantity 守卫与日再生回补）
+// ============================================================================
+#[tokio::test]
+#[ignore = "需要真实 PostgreSQL（DATABASE_URL）；见文件头说明"]
+async fn resource_stock_consume_guard_and_regen() {
+    if let Ok(url) = std::env::var("DATABASE_URL") {
+        let pool = test_pool(&url).await;
+        let node = format!("guard-node-{}", uuid::Uuid::new_v4());
+
+        sqlx::query(
+            "INSERT INTO resource_nodes (node_id, item_id, stock, max_stock, regen_per_game_day) \
+             VALUES ($1, '草药', 3, 10, 4)",
+        )
+        .bind(&node)
+        .execute(&pool)
+        .await
+        .expect("insert resource node");
+
+        // 扣 2：成功
+        let n = sqlx::query(
+            "UPDATE resource_nodes SET stock = stock - $3, updated_at = NOW() \
+             WHERE node_id = $1 AND item_id = $2 AND stock >= $3",
+        )
+        .bind(&node)
+        .bind("草药")
+        .bind(2)
+        .execute(&pool)
+        .await
+        .expect("consume 2")
+        .rows_affected();
+        assert_eq!(n, 1);
+
+        // 扣 2：守卫拦截（余 1 不足）
+        let n = sqlx::query(
+            "UPDATE resource_nodes SET stock = stock - $3 \
+             WHERE node_id = $1 AND item_id = $2 AND stock >= $3",
+        )
+        .bind(&node)
+        .bind("草药")
+        .bind(2)
+        .execute(&pool)
+        .await
+        .expect("consume 2 again")
+        .rows_affected();
+        assert_eq!(n, 0, "stock >= quantity 守卫必须拦截超扣");
+
+        // 日再生：+4 受加成后回补，上限 max_stock=10（LEAST 截断）
+        let n = sqlx::query(
+            "UPDATE resource_nodes \
+             SET stock = LEAST(stock + CEIL(regen_per_game_day * $1)::bigint, max_stock), \
+                 updated_at = NOW() \
+             WHERE regen_per_game_day > 0 AND stock < max_stock",
+        )
+        .bind(1.5f64)
+        .execute(&pool)
+        .await
+        .expect("regen")
+        .rows_affected();
+        assert_eq!(n, 1);
+
+        let (stock, max_stock): (i64, i64) = sqlx::query_as(
+            "SELECT stock, max_stock FROM resource_nodes WHERE node_id = $1 AND item_id = '草药'",
+        )
+        .bind(&node)
+        .fetch_one(&pool)
+        .await
+        .expect("read back");
+        assert_eq!(stock, 8, "1 + 4*1.5(向上取整 6) 应被 max_stock=10 截断");
+        assert_eq!(max_stock, 10);
+
+        sqlx::query("DELETE FROM resource_nodes WHERE node_id = $1")
+            .bind(&node)
+            .execute(&pool)
+            .await
+            .expect("cleanup");
+        pool.close().await;
+    }
+}

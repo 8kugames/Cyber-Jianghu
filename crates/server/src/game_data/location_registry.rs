@@ -32,7 +32,7 @@ impl LocationRegistry {
                 description: node.description.clone(),
                 environmental_damage: node.environmental_damage,
                 gatherable_items: node.gatherable_items.clone(),
-                gatherable_daily_quotas: node.gatherable_daily_quotas.clone(),
+                gatherable_stocks: node.gatherable_stocks.clone(),
                 implicit_travel_cost: node.implicit_travel_cost,
                 time_variants: node.time_variants.clone(),
             };
@@ -53,6 +53,11 @@ impl LocationRegistry {
     }
 
     /// 检查节点是否存在
+    /// 全部节点迭代（资源存量初始化等配置遍历用）
+    pub fn graph_nodes(&self) -> impl Iterator<Item = &LocationNode> {
+        self.graph.nodes.values()
+    }
+
     pub fn node_exists(&self, node_id: &str) -> bool {
         self.graph.nodes.contains_key(node_id)
     }
@@ -238,7 +243,7 @@ data:
                         gatherable_items: vec![],
                         implicit_travel_cost: None,
                         time_variants: vec![],
-                        gatherable_daily_quotas: Default::default(),
+                        gatherable_stocks: Default::default(),
                     },
                     LocationNodeData {
                         node_id: "kitchen".to_string(),
@@ -250,7 +255,7 @@ data:
                         gatherable_items: vec![],
                         implicit_travel_cost: None,
                         time_variants: vec![],
-                        gatherable_daily_quotas: Default::default(),
+                        gatherable_stocks: Default::default(),
                     },
                 ],
                 edges: vec![LocationEdgeData {
@@ -292,7 +297,7 @@ data:
                         gatherable_items: vec![],
                         implicit_travel_cost: None,
                         time_variants: vec![],
-                        gatherable_daily_quotas: Default::default(),
+                        gatherable_stocks: Default::default(),
                     },
                     LocationNodeData {
                         node_id: "ruins".to_string(),
@@ -304,7 +309,7 @@ data:
                         gatherable_items: vec![],
                         implicit_travel_cost: None,
                         time_variants: vec![hidden_later],
-                        gatherable_daily_quotas: Default::default(),
+                        gatherable_stocks: Default::default(),
                     },
                 ],
                 edges: vec![
@@ -366,7 +371,7 @@ data:
                         gatherable_items: vec![],
                         implicit_travel_cost: None,
                         time_variants: vec![],
-                        gatherable_daily_quotas: Default::default(),
+                        gatherable_stocks: Default::default(),
                     },
                     LocationNodeData {
                         node_id: "village".to_string(),
@@ -378,7 +383,7 @@ data:
                         gatherable_items: vec![],
                         implicit_travel_cost: Some(7),
                         time_variants: vec![],
-                        gatherable_daily_quotas: Default::default(),
+                        gatherable_stocks: Default::default(),
                     },
                 ],
                 edges: vec![],
@@ -406,7 +411,7 @@ mod ancestor_names_tests {
 
     fn node(id: &str, name: &str, parent: Option<&str>) -> LocationNode {
         LocationNode {
-            gatherable_daily_quotas: Default::default(),
+            gatherable_stocks: Default::default(),
             node_id: id.to_string(),
             name: name.to_string(),
             node_type: LocationNodeType::SubScene,

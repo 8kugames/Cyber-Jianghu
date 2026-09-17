@@ -133,7 +133,21 @@ impl TickScheduler {
             };
             if should_settle {
                 // 资源点每日采集配额同步重置（存量模型阶段 1，与日结算同一日历触发点）
-                crate::game_data::resource_quota::reset_daily();
+                // 资源存量日再生（阶段 2，与日结算同一日历触发点）；
+                // 受四季 resource_growth_rate 加成（冬季枯竭春季复苏）。
+                // 旁路：失败只 error 不阻断 tick。
+                let season_growth_rate =
+                    crate::game_data::registry::TimeRegistry::get_current_season(
+                        self.current_tick_id,
+                    )
+                    .map(|s| s.resource_growth_rate)
+                    .unwrap_or(1.0);
+                if let Err(e) =
+                    crate::game_data::resource_stock::regen_daily(&self.db_pool, season_growth_rate)
+                        .await
+                {
+                    error!("[resource_stock] 日再生失败: {}", e);
+                }
                 let game_day = today;
                 let day_start_tick = self.current_tick_id - ticks_per_day_real_secs + 1;
                 tracing::info!(

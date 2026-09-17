@@ -481,7 +481,11 @@ impl super::CognitiveEngine {
             for item in &world_state.location.gatherable_items {
                 let item_ref =
                     crate::soul::item_source::display_item_ref(&item.name, &item.item_id);
-                ws_parts.push(format!("- {}", item_ref));
+                // 存量模型：可感知余量（None = 未启用存量模型），驱动换地/换时策略
+                match item.stock {
+                    Some(stock) => ws_parts.push(format!("- {}（余 {}）", item_ref, stock)),
+                    None => ws_parts.push(format!("- {}", item_ref)),
+                }
             }
         }
 

@@ -118,6 +118,11 @@ pub(crate) async fn run() -> Result<()> {
     game_data::init_registry(game_data_cache.clone());
     info!("统一配置注册表初始化完成");
 
+    // 资源存量：upsert yaml 声明（不重置已有）+ 全量加载内存缓存（阶段 2）
+    if let Err(e) = game_data::resource_stock::init_from_db(&db_pool).await {
+        warn!("资源存量初始化失败（采集配额不限）: {}", e);
+    }
+
     // 配置完整性校验（warning 模式，不阻断启动）
     match cyber_jianghu_server::config_validator::load_rules() {
         Ok(rules) => {

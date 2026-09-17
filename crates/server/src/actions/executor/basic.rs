@@ -204,16 +204,16 @@ impl BasicActionExecutor {
                     );
                 }
 
-                // 每日采集配额预检（存量模型阶段 1）：配额不足快速失败，
-                // 真实扣减在 mutator 物品入包成功后执行（Saga 回滚不白扣）
-                if !crate::game_data::resource_quota::precheck(
+                // 存量模型预检（阶段 2）：stock 不足快速失败；
+                // 权威扣减在 mutator Saga 事务内执行（回滚自动恢复）
+                if !crate::game_data::resource_stock::precheck(
                     current_location,
                     &item_id,
                     data.quantity as i64,
                 ) {
                     return ActionExecutionResult::failure(
                         format!(
-                            "此地的{}今日已采尽，明日再来吧",
+                            "此地的{}已被采光，需要等待再生或另寻他处",
                             crate::display::display_item_name(&item_id)
                         ),
                         intent.action_type.to_string(),

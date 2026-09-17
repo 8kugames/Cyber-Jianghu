@@ -327,6 +327,7 @@ async fn test_layer0_allows_item_gatherable() {
         item_id: cyber_jianghu_protocol::item_uuid("草药").to_string(),
         name: "草药".to_string(),
         item_type: "material".to_string(),
+        stock: None,
     }];
     let agent_id = world_state.agent_id.unwrap_or_default();
 

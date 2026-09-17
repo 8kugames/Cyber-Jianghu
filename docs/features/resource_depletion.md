@@ -1,4 +1,11 @@
-# 资源点存量/枯竭模型——设计方案（未实现，待拍板）
+# 资源点存量/枯竭模型
+
+> **实施状态（2026-09-17）**：阶段 2 已实施（含阶段 1 内存配额被 stock 机制替代）——
+> migration 026 `resource_nodes` 表、`game_data/resource_stock.rs`（DB 权威 + 内存缓存，
+> 采集 Saga 事务内扣减、日再生受四季加成）、GatherableItem 广播 `stock` 字段
+> （PROTOCOL_VERSION 3.3.0 minor bump）、agent 感知「（余 N）」渲染、locations.yaml
+> 生产配额改写为 gatherable_stocks。守卫测试见 sqlx_live_schema_guard_test（活库跑）。
+> 阶段 1 的 gatherable_daily_quotas 内存机制已由本阶段替代移除。
 
 2026-09-14 审计遗留「资源点无枯竭/存量模型」。本文固化调查结论与两阶段设计，
 供拍板后实施。当前现实：**采集无限**——take(source_type=resource) 校验

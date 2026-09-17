@@ -192,6 +192,11 @@ pub(super) fn build_world_state_for_agent(
                                     item_id: crate::items::item_uuid(id).to_string(),
                                     name: entry.name.clone(),
                                     item_type: entry.item_type.clone(),
+                                    stock: crate::game_data::resource_stock::stock_of(
+                                        current_node_id,
+                                        id,
+                                    )
+                                    .map(|s| s.max(0) as u32),
                                 }
                             })
                         })
@@ -312,6 +317,8 @@ pub fn build_reactive_world_state(
                             item_id: crate::items::item_uuid(id).to_string(),
                             name: entry.name.clone(),
                             item_type: entry.item_type.clone(),
+                            stock: crate::game_data::resource_stock::stock_of(current_node_id, id)
+                                .map(|s| s.max(0) as u32),
                         }
                     })
                 })
@@ -479,6 +486,8 @@ pub fn build_initial_world_state(
                             item_id: crate::items::item_uuid(id).to_string(),
                             name: entry.name.clone(),
                             item_type: entry.item_type.clone(),
+                            stock: crate::game_data::resource_stock::stock_of(current_node_id, id)
+                                .map(|s| s.max(0) as u32),
                         }
                     })
                 })

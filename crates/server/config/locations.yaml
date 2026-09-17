@@ -53,8 +53,8 @@ data:
       parent_id: "龙门客栈"
       gatherable_items:
         - "水" # 井水
-      gatherable_daily_quotas:
-        水: 50
+      gatherable_stocks:
+        水: { max_stock: 50, init_ratio: 1.0, regen_per_game_day: 50 }
       description: "客栈后院，有一口古井"
 
     - node_id: "龙门厨房"
@@ -64,9 +64,9 @@ data:
       gatherable_items:
         - "水" # 缸中清水
         - "面粉" # 厨房储藏
-      gatherable_daily_quotas:
-        水: 50
-        面粉: 20
+      gatherable_stocks:
+        水: { max_stock: 50, init_ratio: 1.0, regen_per_game_day: 50 }
+        面粉: { max_stock: 20, init_ratio: 1.0, regen_per_game_day: 20 }
       description: "客栈的厨房，飘着饭香"
 
     # --------------------------------------------------------------------------
@@ -81,9 +81,9 @@ data:
       gatherable_items:
         - "李广杏"
         - "木材"
-      gatherable_daily_quotas:
-        李广杏: 10
-        木材: 10
+      gatherable_stocks:
+        李广杏: { max_stock: 10, init_ratio: 1.0, regen_per_game_day: 10 }
+        木材: { max_stock: 10, init_ratio: 1.0, regen_per_game_day: 10 }
       description: "干燥炎热的沙漠，烈日灼烧皮肤，每刻损耗生命。不宜久留。"
 
     # --------------------------------------------------------------------------
@@ -97,9 +97,9 @@ data:
       gatherable_items:
         - "小麦"
         - "泉水"
-      gatherable_daily_quotas:
-        小麦: 20
-        泉水: 50
+      gatherable_stocks:
+        小麦: { max_stock: 20, init_ratio: 1.0, regen_per_game_day: 20 }
+        泉水: { max_stock: 50, init_ratio: 1.0, regen_per_game_day: 50 }
       description: "绿洲小镇，以泉水甘美闻名"
 
   # ============================================================================
