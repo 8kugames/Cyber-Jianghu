@@ -174,8 +174,11 @@ impl TickScheduler {
                 }
             }
 
-            // 3. 群像传记：每 period_ticks 真实秒 (默认 7 游戏日) 生成一次
-            // 转换为 tick 计数：period_ticks 是墙钟秒，除以 real_seconds_per_tick 得 tick 周期
+            // 3. 群像传记 + 周期聚合：周期号（由 current_tick_id 对 game epoch 对齐推导）
+            // 递增即生成，窗口严格对齐真实 7 日边界。此前用 tick_counter（进程 ordinal）
+            // 取模触发、窗口从当前 tick 回推——重启/滑步后触发时刻与聚合窗口双双偏离
+            // 真实周期边界（与日结算相位错位同款，已一并修复）。跳过多个周期（停机/
+            // 大步滑）仅生成刚结束的周期并告警，不做历史回补。
             let period_ticks = crate::chronicle::ChronicleConfig::default().period_ticks;
             let real_seconds_per_tick = {
                 let gd = self.game_data_cache.get();
@@ -187,23 +190,40 @@ impl TickScheduler {
                 period_ticks,
                 real_seconds_per_tick
             );
-            let chronicle_period_ticks = (period_ticks / real_seconds_per_tick) as u64;
-            if self.tick_counter > 0 && self.tick_counter.is_multiple_of(chronicle_period_ticks) {
-                let period_start = self.current_tick_id - period_ticks + 1;
+            let this_period_ordinal = self.current_tick_id / period_ticks;
+            let should_generate = match self.last_chronicle_period {
+                None => {
+                    self.last_chronicle_period = Some(this_period_ordinal);
+                    false
+                }
+                Some(last) if this_period_ordinal > last => {
+                    if this_period_ordinal - last > 1 {
+                        warn!(
+                            "[chronicle] {} 个周期未生成（停机/滑步），仅生成刚结束的周期",
+                            this_period_ordinal - last
+                        );
+                    }
+                    self.last_chronicle_period = Some(this_period_ordinal);
+                    true
+                }
+                Some(_) => false,
+            };
+            if should_generate {
+                // 刚结束周期的精确边界（对 epoch 对齐，1-based 起点）
+                let period_end = this_period_ordinal * period_ticks;
+                let period_start = period_end - period_ticks + 1;
                 let db_pool = self.db_pool.clone();
-                let tick_id = self.current_tick_id;
                 // 生存 Reward 周期聚合（旁路，失败只 error 不阻断 tick）
-                let pp_start = period_start;
                 if let Err(e) =
-                    crate::reward::settle_periodic(&self.db_pool, pp_start, tick_id).await
+                    crate::reward::settle_periodic(&self.db_pool, period_start, period_end).await
                 {
                     error!(
                         "[reward] 周期聚合失败 (period={}~{}): {}",
-                        pp_start, tick_id, e
+                        period_start, period_end, e
                     );
                 }
                 tokio::spawn(async move {
-                    match crate::chronicle::generate_and_store(period_start, tick_id, &db_pool)
+                    match crate::chronicle::generate_and_store(period_start, period_end, &db_pool)
                         .await
                     {
                         Ok(chronicle) => {
