@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.1.366] - 2026-09-18
+
 ### Features
 
 - **资源点存量/枯竭模型**（server+protocol+agent）：可采集资源持久化于 `resource_nodes` 表（migration 026），采集在 Saga 事务内扣减（`stock >= quantity` 守卫，枯竭返回「已被采光」并可整体回滚）；每日再生受四季 `resource_growth_rate` 加成（冬季枯竭春季复苏，上限 `max_stock` 截断），由 scheduler 日历日递增触发点驱动（与 reward 日结算同钩子，无相位错位）；locations.yaml 以 `gatherable_stocks`（max_stock/init_ratio/regen_per_game_day）声明，未配置 = 不限；WorldState 广播 `GatherableItem.stock`（缺省 = 未启用），agent 可采集列表渲染「野果（余 N）」驱动换地/换时策略；`PROTOCOL_VERSION` 3.2.0 → 3.3.0（additive minor）。设计文档 docs/features/resource_depletion.md。
