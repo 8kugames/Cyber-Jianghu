@@ -158,11 +158,13 @@ pub enum SoulStage {
 
 static TRACE_BUFFER: OnceLock<Mutex<Vec<LlmTrace>>> = OnceLock::new();
 static TRACE_CONFIG: OnceLock<Option<TraceConfig>> = OnceLock::new();
-/// 回传 sender：在 agent websocket 连接成功后通过 set_upload_sender 注入
-/// （不在 init_trace_recorder 时传入——那时连接尚未建立）
-static UPLOAD_SENDER: OnceLock<
+/// 回传 sender：在 agent websocket 每次连接成功后通过 set_upload_sender 注入。
+/// 必须可替换：server 重启会关闭旧连接的 sender（channel closed），
+/// agent 自动重连后需重新注入；OnceLock 的单次语义会让新 sender 静默丢失
+/// （实证：server 重启后回传持续失败直至 agent 进程重启）。
+static UPLOAD_SENDER: std::sync::RwLock<
     Option<tokio::sync::mpsc::Sender<cyber_jianghu_protocol::ClientMessage>>,
-> = OnceLock::new();
+> = std::sync::RwLock::new(None);
 
 fn trace_buffer() -> &'static Mutex<Vec<LlmTrace>> {
     TRACE_BUFFER.get_or_init(|| Mutex::new(Vec::new()))
@@ -207,7 +209,9 @@ pub fn init_trace_recorder(config_dir: &Path) {
 /// 代理1校准：init_trace_recorder 在 main 顶端调用（连接前），此时无 sender。
 /// 真实路径是 agent 连接成功后通过 intent_sender() 获取 sender，再调此函数注入。
 pub fn set_upload_sender(sender: tokio::sync::mpsc::Sender<cyber_jianghu_protocol::ClientMessage>) {
-    let _ = UPLOAD_SENDER.set(Some(sender));
+    *UPLOAD_SENDER
+        .write()
+        .expect("upload sender rwlock poisoned") = Some(sender);
     tracing::info!("[trace] 回传 sender 已注入，trace 将回传 server");
 }
 
@@ -246,10 +250,14 @@ async fn flush_loop(cfg: TraceConfig) {
             tracing::error!("[trace] 本地落盘失败: {}", e);
         }
 
-        // 2. 回传 server（若 upload.enabled 且 sender 已注入）
-        if cfg.upload.enabled
-            && let Some(sender) = UPLOAD_SENDER.get().and_then(|s| s.as_ref())
-        {
+        // 2. 回传 server（若 upload.enabled 且 sender 已注入）。
+        // sender 先克隆再使用：锁不能跨 await 持有，且重连后 sender 会被替换。
+        let upload_sender = if cfg.upload.enabled {
+            UPLOAD_SENDER.read().ok().and_then(|guard| guard.clone())
+        } else {
+            None
+        };
+        if let Some(sender) = upload_sender {
             let entries: Vec<cyber_jianghu_protocol::TraceEntry> = batch
                 .iter()
                 .map(|t| cyber_jianghu_protocol::TraceEntry {
