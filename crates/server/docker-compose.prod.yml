@@ -76,6 +76,8 @@ services:
       # 游戏客户端只读鉴权 token（可选，未配置时回退 ADMIN_READ_TOKEN）
       - CLIENT_READ_TOKEN=${CLIENT_READ_TOKEN:-}
       - ENVIRONMENT=production
+      # 训练导出总开关（yaml 默认 false，生产环境显式开启；env 优先级高于 config/training_export.yaml）
+      - TRAINING_EXPORT_ENABLED=true
     ports:
       - "${SERVER_PORT:-23333}:23333"
     volumes:

@@ -34,14 +34,15 @@ pub async fn fetch_soul_cycle_metadata(
     let tick_ids: Vec<i64> = keys.iter().map(|(_, tick_id)| *tick_id).collect();
 
     let mut tx = pool.begin().await.context("开始训练导出查询事务失败")?;
-    // 参数化绑定, 与下方 SELECT 的 $1/$2 风格一致 (避免 SQL 格式化字符串).
-    // statement_timeout_secs 是 u64, 且 config validate 强校验 > 0, 不可注入.
-    let timeout_value = format!("{}s", statement_timeout_secs);
-    sqlx::query("SET LOCAL statement_timeout = $1")
-        .bind(&timeout_value)
-        .execute(&mut *tx)
-        .await
-        .context("SET LOCAL statement_timeout 失败")?;
+    // SET 是 PostgreSQL 工具语句，不接受绑定参数（$1 在 SET 中直接语法报错）。
+    // statement_timeout_secs 是 u64, 且 config validate 强校验 > 0, 字面量拼接无注入面.
+    sqlx::query(&format!(
+        "SET LOCAL statement_timeout = '{}s'",
+        statement_timeout_secs
+    ))
+    .execute(&mut *tx)
+    .await
+    .context("SET LOCAL statement_timeout 失败")?;
 
     let rows = sqlx::query_as::<_, SoulCycleRow>(
         r#"
@@ -414,6 +415,72 @@ fn trace_scan_cutoff(config: &TrainingExportConfig, request: &ExportRunRequest) 
     )
 }
 
+/// agent 本地落盘（LlmTrace）与 server 回传落盘（protocol TraceEntry）的
+/// wall_clock 序列化格式不同：前者 RFC3339 字符串，后者 Unix 毫秒 i64。
+/// 扫描须同时兼容两种历史格式；线协议类型不动，runner 侧宽松解码后转换。
+#[derive(serde::Deserialize)]
+struct TraceLine {
+    trace_id: String,
+    agent_id: Uuid,
+    character_name: String,
+    tick_id: i64,
+    soul_stage: String,
+    attempt: i32,
+    provider: String,
+    model: String,
+    #[serde(default)]
+    persona_name: String,
+    #[serde(default)]
+    persona_description: String,
+    user_prompt: String,
+    response: String,
+    prompt_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
+    ok: bool,
+    wall_clock: Option<FlexibleWallClock>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum FlexibleWallClock {
+    EpochMs(i64),
+    Rfc3339(String),
+}
+
+impl FlexibleWallClock {
+    fn to_epoch_ms(self) -> Option<i64> {
+        match self {
+            Self::EpochMs(ms) => Some(ms),
+            Self::Rfc3339(text) => chrono::DateTime::parse_from_rfc3339(&text)
+                .ok()
+                .map(|dt| dt.timestamp_millis()),
+        }
+    }
+}
+
+impl From<TraceLine> for TraceEntry {
+    fn from(line: TraceLine) -> Self {
+        TraceEntry {
+            trace_id: line.trace_id,
+            agent_id: line.agent_id,
+            character_name: line.character_name,
+            tick_id: line.tick_id,
+            soul_stage: line.soul_stage,
+            attempt: line.attempt,
+            provider: line.provider,
+            model: line.model,
+            persona_name: line.persona_name,
+            persona_description: line.persona_description,
+            user_prompt: line.user_prompt,
+            response: line.response,
+            prompt_tokens: line.prompt_tokens,
+            completion_tokens: line.completion_tokens,
+            ok: line.ok,
+            wall_clock: line.wall_clock.and_then(|w| w.to_epoch_ms()),
+        }
+    }
+}
+
 async fn scan_trace_files(
     traces_dir: &Path,
     max_traces: usize,
@@ -545,13 +612,13 @@ async fn stream_parse_trace_lines(
             reached_limit = true;
             break;
         }
-        match serde_json::from_str::<TraceEntry>(&line) {
-            Ok(entry)
+        match serde_json::from_str::<TraceLine>(&line) {
+            Ok(line_entry)
                 if agent_id_filter
-                    .is_none_or(|filter_agent_id| entry.agent_id == filter_agent_id) =>
+                    .is_none_or(|filter_agent_id| line_entry.agent_id == filter_agent_id) =>
             {
-                keys.insert((entry.agent_id, entry.tick_id));
-                entries.push(entry);
+                keys.insert((line_entry.agent_id, line_entry.tick_id));
+                entries.push(line_entry.into());
                 dates.push(date.to_string());
             }
             Ok(_) => {}
