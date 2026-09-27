@@ -40,11 +40,16 @@ impl NarrativeGenerator {
         let prompt = self.build_prompt(memory, agent_persona);
 
         // 调用 LLM（带超时和重试）
-        let response =
-            tokio::time::timeout(Duration::from_secs(30), self.llm_client.complete(&prompt))
-                .await
-                .map_err(|_| anyhow::anyhow!("LLM 调用超时"))?
-                .map_err(|e| anyhow::anyhow!("LLM 调用失败: {}", e))?;
+        let response = tokio::time::timeout(
+            Duration::from_secs(30),
+            crate::component::llm::scenario::with_scenario(
+                crate::component::llm::scenario::RELATIONSHIP_NARRATIVE,
+                self.llm_client.complete(&prompt),
+            ),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("LLM 调用超时"))?
+        .map_err(|e| anyhow::anyhow!("LLM 调用失败: {}", e))?;
 
         // 提取并验证描述（20字以内）
         let description = self.extract_description(&response)?;

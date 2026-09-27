@@ -130,6 +130,7 @@ impl Stream for UsageTrackingStream {
             Poll::Ready(Some(result)) => {
                 // 只在第一个 Done/DoneEstimation 时记录
                 if !self.recorded {
+                    let scenario = super::scenario::current().0;
                     if let Ok(StreamChunk::Done {
                         prompt_tokens,
                         completion_tokens,
@@ -144,11 +145,13 @@ impl Stream for UsageTrackingStream {
                             *completion_tokens,
                             *cache_hit_tokens,
                             self.system_hash,
+                            scenario,
                         );
                         tracing::debug!(
-                            "UsageTrackingStream recorded: provider={}, model={}, prompt={}, completion={}",
+                            "UsageTrackingStream recorded: provider={}, model={}, scenario={}, prompt={}, completion={}",
                             self.provider.as_str(),
                             self.model,
+                            scenario,
                             prompt_tokens,
                             completion_tokens
                         );
@@ -163,11 +166,13 @@ impl Stream for UsageTrackingStream {
                             est_ct,
                             0,
                             self.system_hash,
+                            scenario,
                         );
                         tracing::debug!(
-                            "UsageTrackingStream recorded (est): provider={}, model={}, prompt_est={}, completion_est={}",
+                            "UsageTrackingStream recorded (est): provider={}, model={}, scenario={}, prompt_est={}, completion_est={}",
                             self.provider.as_str(),
                             self.model,
+                            scenario,
                             est_pt,
                             est_ct
                         );

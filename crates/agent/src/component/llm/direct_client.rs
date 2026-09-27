@@ -20,7 +20,7 @@ mod http;
 mod openclaw;
 mod provider;
 
-pub use config::{DirectLlmClientConfig, PromptConfig};
+pub use config::{DirectLlmClientConfig, PromptConfig, ScenarioOverride};
 pub use openclaw::OpenClawConfig;
 pub use provider::LlmProvider;
 
@@ -102,6 +102,35 @@ impl DirectLlmClient {
     /// 测试需要断言 LlmConfig 字段是否被端到端传到这里。
     pub fn config(&self) -> &DirectLlmClientConfig {
         &self.config
+    }
+
+    /// 场景级模型解析：当前 task-local 场景命中 override 且配置了 model 时
+    /// 返回覆盖模型，否则原样返回请求模型。
+    /// 记账（http.rs 按 request.model 记）与路由天然一致。
+    fn resolve_scenario_model(&self, requested: &str) -> String {
+        let scenario = super::scenario::current();
+        match self.config.scenario_overrides.get(scenario.0) {
+            Some(o) if o.model.as_deref().is_some_and(|m| !m.is_empty()) => {
+                debug!(
+                    "[llm] scenario 路由: {} -> model {} (was {})",
+                    scenario.0,
+                    o.model.as_deref().unwrap_or_default(),
+                    requested
+                );
+                o.model.clone().unwrap_or_else(|| requested.to_string())
+            }
+            _ => requested.to_string(),
+        }
+    }
+
+    /// 场景级输出上限解析：override 配置了 max_tokens 时覆盖，
+    /// 否则保留调用方/全局值。
+    fn resolve_scenario_max_tokens(&self, requested: Option<u32>) -> Option<u32> {
+        let scenario = super::scenario::current();
+        match self.config.scenario_overrides.get(scenario.0) {
+            Some(o) => o.max_tokens.or(requested),
+            None => requested,
+        }
     }
 
     /// 创建新的 Direct LLM 客户端
@@ -260,12 +289,11 @@ impl DirectLlmClient {
         system: &str,
         prompt: &str,
     ) -> Result<super::streaming::LlmStream> {
-        let model = self.config.get_model_with_default();
         let request = OpenAIRequest {
-            model,
+            model: self.resolve_scenario_model(&self.config.get_model_with_default()),
             messages: vec![ChatMessage::system(system), ChatMessage::user(prompt)],
             temperature: Some(self.config.temperature),
-            max_tokens: Some(self.config.max_tokens),
+            max_tokens: self.resolve_scenario_max_tokens(Some(self.config.max_tokens)),
             tools: None,
             tool_choice: None,
             enable_thinking: self.config.enable_thinking,
@@ -292,12 +320,11 @@ impl DirectLlmClient {
             current_prompt,
             self.config.prompt.strip_reasoning_content,
         );
-        let model = self.config.get_model_with_default();
         let request = OpenAIRequest {
-            model,
+            model: self.resolve_scenario_model(&self.config.get_model_with_default()),
             messages,
             temperature: Some(self.config.temperature),
-            max_tokens: Some(self.config.max_tokens),
+            max_tokens: self.resolve_scenario_max_tokens(Some(self.config.max_tokens)),
             tools: None,
             tool_choice: None,
             enable_thinking: self.config.enable_thinking,
@@ -310,10 +337,10 @@ impl DirectLlmClient {
     /// 构造无工具、非流式的 OpenAI 兼容请求（消息列表由调用方决定）
     fn plain_request(&self, messages: Vec<ChatMessage>) -> OpenAIRequest {
         OpenAIRequest {
-            model: self.config.get_model_with_default(),
+            model: self.resolve_scenario_model(&self.config.get_model_with_default()),
             messages,
             temperature: Some(self.config.temperature),
-            max_tokens: Some(self.config.max_tokens),
+            max_tokens: self.resolve_scenario_max_tokens(Some(self.config.max_tokens)),
             tools: None,
             tool_choice: None,
             enable_thinking: self.config.enable_thinking,
@@ -476,10 +503,11 @@ impl LlmClient for DirectLlmClient {
         self.check_breaker()?;
 
         let request = OpenAIRequest {
-            model: config.model,
+            model: self.resolve_scenario_model(&config.model),
             messages,
             temperature: Some(config.temperature),
-            max_tokens: config.max_tokens.or(Some(self.config.max_tokens)),
+            max_tokens: self
+                .resolve_scenario_max_tokens(config.max_tokens.or(Some(self.config.max_tokens))),
             tools: tools.map(|t| {
                 t.iter()
                     .map(|tool| {
@@ -649,7 +677,7 @@ impl LlmClient for DirectLlmClient {
             Ok(super::streaming::wrap_usage_tracking(
                 stream,
                 self.config.provider,
-                self.config.get_model_with_default(),
+                self.resolve_scenario_model(&self.config.get_model_with_default()),
                 system_hash,
                 prompt_chars,
             ))
@@ -690,7 +718,7 @@ impl LlmClient for DirectLlmClient {
             Ok(super::streaming::wrap_usage_tracking(
                 stream,
                 self.config.provider,
-                self.config.get_model_with_default(),
+                self.resolve_scenario_model(&self.config.get_model_with_default()),
                 system_hash,
                 prompt_chars,
             ))

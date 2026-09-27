@@ -176,22 +176,25 @@ impl CognitiveEngine {
             max_tokens: None,
             enable_thinking: None,
         };
-        let response: MemoryNarrativeResponse = match self
-            .llm_client
-            .complete_json_with_config_and_retry_extracted(&prompt, chat_config, 2)
+        let response: MemoryNarrativeResponse =
+            match crate::component::llm::scenario::with_scenario(
+                crate::component::llm::scenario::NARRATIVE,
+                self.llm_client
+                    .complete_json_with_config_and_retry_extracted(&prompt, chat_config, 2),
+            )
             .await
-        {
-            Ok(extracted) => {
-                if let Ok(mut rc) = self.last_reasoning_content.lock() {
-                    *rc = extracted.reasoning_content;
+            {
+                Ok(extracted) => {
+                    if let Ok(mut rc) = self.last_reasoning_content.lock() {
+                        *rc = extracted.reasoning_content;
+                    }
+                    extracted.value
                 }
-                extracted.value
-            }
-            Err(e) => {
-                tracing::warn!("记忆叙事合成 LLM 调用失败: {}，降级", e);
-                return FALLBACK_NARRATIVE.to_string();
-            }
-        };
+                Err(e) => {
+                    tracing::warn!("记忆叙事合成 LLM 调用失败: {}，降级", e);
+                    return FALLBACK_NARRATIVE.to_string();
+                }
+            };
 
         // 5. 验证输出
         let narrative = response.narrative.trim().to_string();

@@ -124,10 +124,10 @@ fn test_record_buckets_separate_hours() {
     // 手动调用 record_token_usage：但 record_token_usage 内部用 Utc::now()，不可注入时间
     // → 改用 in-memory helper：直接构造 entries 然后 snapshot
     // 这里走真实 API：连续调用 record，验证 detail 至少有 1 个 hour bucket
-    record_token_usage(&prov(), m1(), 100, 50, 30, [0u8; 32]);
-    record_token_usage(&prov(), m1(), 200, 80, 60, [0u8; 32]);
-    record_token_usage(&prov(), m2(), 50, 20, 0, [0u8; 32]);
-    record_failure(&prov(), m1());
+    record_token_usage(&prov(), m1(), 100, 50, 30, [0u8; 32], "think");
+    record_token_usage(&prov(), m1(), 200, 80, 60, [0u8; 32], "think");
+    record_token_usage(&prov(), m2(), 50, 20, 0, [0u8; 32], "reflector_l3");
+    record_failure(&prov(), m1(), "think");
 
     let snap = snapshot_all_stats();
     // 验证聚合正确：m1 应有 prompt=300, completion=130, cache_hit=90, calls=2 (含 1 failure = 3)
@@ -182,6 +182,7 @@ fn test_rebuild_summary_reduces_detail() {
             calls: 5,
             failures: 0,
             system_hash_distribution: HashMap::new(),
+            by_scenario: BTreeMap::new(),
             first_record_at: Some("2026-06-01T01:00:00+00:00".to_string()),
             last_record_at: Some("2026-06-01T01:59:00+00:00".to_string()),
         },
@@ -198,6 +199,7 @@ fn test_rebuild_summary_reduces_detail() {
             calls: 10,
             failures: 2,
             system_hash_distribution: HashMap::new(),
+            by_scenario: BTreeMap::new(),
             first_record_at: Some("2026-06-01T02:00:00+00:00".to_string()),
             last_record_at: Some("2026-06-01T02:59:00+00:00".to_string()),
         },
@@ -252,9 +254,9 @@ fn test_persist_and_reset_round_trip() {
         env::set_var("CYBER_JIANGHU_DATA_DIR", &dir);
     }
 
-    record_token_usage(&prov(), m1(), 100, 50, 30, [0u8; 32]);
-    record_token_usage(&prov(), m1(), 200, 80, 60, [0u8; 32]);
-    record_token_usage(&prov(), m2(), 50, 20, 0, [0u8; 32]);
+    record_token_usage(&prov(), m1(), 100, 50, 30, [0u8; 32], "think");
+    record_token_usage(&prov(), m1(), 200, 80, 60, [0u8; 32], "think");
+    record_token_usage(&prov(), m2(), 50, 20, 0, [0u8; 32], "reflector_l3");
 
     persist_and_reset();
 
@@ -294,7 +296,7 @@ fn test_persist_and_reset_round_trip() {
     );
 
     // 4) 二次 persist_and_reset + 旧数据合并：再 record + persist，detail 应累加
-    record_token_usage(&prov(), m1(), 100, 50, 30, [0u8; 32]);
+    record_token_usage(&prov(), m1(), 100, 50, 30, [0u8; 32], "think");
     persist_and_reset();
     let content2 = fs::read_to_string(&log_path).expect("read log 2");
     let parsed2: PersistedTokenStats = serde_json::from_str(&content2).expect("parse 2");
@@ -343,7 +345,7 @@ fn test_old_flat_format_ignored() {
 
     // 触发 persist_and_reset（in-memory 空 → 早返，不动文件）
     // 但我们需要 in-memory 有数据才会写。先 record 一条
-    record_token_usage(&prov(), m1(), 1, 1, 0, [0u8; 32]);
+    record_token_usage(&prov(), m1(), 1, 1, 0, [0u8; 32], "think");
     persist_and_reset();
 
     // 读回：应是新结构，旧数据已被覆盖
@@ -382,6 +384,7 @@ fn record_token_usage_accepts_system_hash_param() {
         50,
         10,
         system_hash,
+        "think",
     );
 }
 
@@ -410,4 +413,36 @@ fn has_prefix_drift_threshold_boundary() {
         has_prefix_drift(&bucket_with_hashes(PREFIX_DRIFT_HASH_WARN_THRESHOLD + 1)),
         "超过阈值必须告警"
     );
+}
+
+// ---- 11. by_scenario 场景归因聚合 ----
+#[test]
+fn by_scenario_aggregates_across_hours_and_snapshot() {
+    let _guard = test_lock().lock().expect("lock poisoned");
+    clear_in_memory();
+    record_token_usage(&prov(), m1(), 100, 40, 50, [0u8; 32], "think");
+    record_token_usage(&prov(), m1(), 60, 20, 30, [0u8; 32], "reflector_l3");
+    record_token_usage(&prov(), m2(), 10, 5, 0, [0u8; 32], "think");
+
+    let stats = snapshot_all_stats();
+    let m1_stats = stats
+        .iter()
+        .find(|s| s.model == "model-a")
+        .expect("model-a stats");
+    let think = m1_stats
+        .by_scenario
+        .get("think")
+        .expect("think scenario recorded");
+    assert_eq!(think.prompt_tokens, 100);
+    assert_eq!(think.completion_tokens, 40);
+    assert_eq!(think.cache_hit_tokens, 50);
+    assert_eq!(think.calls, 1);
+    let l3 = m1_stats
+        .by_scenario
+        .get("reflector_l3")
+        .expect("reflector_l3 scenario recorded");
+    assert_eq!(l3.prompt_tokens, 60);
+    // 总量口径不因场景维度改变
+    assert_eq!(m1_stats.prompt_tokens, 160);
+    assert_eq!(m1_stats.calls, 2);
 }

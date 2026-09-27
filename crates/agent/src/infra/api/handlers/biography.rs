@@ -407,13 +407,15 @@ pub(crate) async fn generate_biography_for_agent(
         max_tokens: None,
         enable_thinking: None,
     };
-    let extracted = llm_client
-        .complete_json_with_config_and_retry_extracted::<BiographyOutput>(
+    let extracted = crate::component::llm::scenario::with_scenario(
+        crate::component::llm::scenario::BIOGRAPHY,
+        llm_client.complete_json_with_config_and_retry_extracted::<BiographyOutput>(
             &json_prompt,
             chat_config,
             2,
-        )
-        .await?;
+        ),
+    )
+    .await?;
     let bio = extracted.value.biography.trim().to_string();
 
     // 来源：LLM prompt 要求"不少于100字不超过2000字"，10 为容低下限

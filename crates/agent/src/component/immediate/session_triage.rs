@@ -279,10 +279,12 @@ impl SessionTriageEngine {
             max_tokens: None,
             enable_thinking: None,
         };
-        let extracted = llm_ref
-            .complete_json_with_system_and_retry_extracted(&system, &prompt, chat_config, 2)
-            .await
-            .map_err(|e| anyhow::anyhow!("LLM triage 调用失败: {}", e))?;
+        let extracted = crate::component::llm::scenario::with_scenario(
+            crate::component::llm::scenario::SESSION_TRIAGE,
+            llm_ref.complete_json_with_system_and_retry_extracted(&system, &prompt, chat_config, 2),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("LLM triage 调用失败: {}", e))?;
         let result: TriageLlmOutput = extracted.value;
 
         // 校验 + 转换
@@ -500,15 +502,17 @@ event_id 必须是以下值之一：{event_ids}"#,
             max_tokens: None,
             enable_thinking: None,
         };
-        let extracted = llm_ref
-            .complete_json_with_system_and_retry_extracted(
+        let extracted = crate::component::llm::scenario::with_scenario(
+            crate::component::llm::scenario::DAILY_SUMMARY,
+            llm_ref.complete_json_with_system_and_retry_extracted(
                 &prompt,
                 "请依据上述系统指令输出今日江湖日记 JSON。",
                 chat_config,
                 2,
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("LLM 日记生成失败: {}", e))?;
+            ),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("LLM 日记生成失败: {}", e))?;
         let result: serde_json::Value = extracted.value;
 
         let diary = result
@@ -673,8 +677,9 @@ event_id 必须是以下值之一：{event_ids}"#,
             max_tokens: None,
             enable_thinking: None,
         };
-        let extracted = llm_ref
-            .complete_json_with_system_and_retry_extracted(
+        let extracted = crate::component::llm::scenario::with_scenario(
+            crate::component::llm::scenario::DAILY_SUMMARY,
+            llm_ref.complete_json_with_system_and_retry_extracted(
                 &format!(
                     "你是{agent_name}，为{date_str}撰写今日纪要。",
                     agent_name = self.agent_name,
@@ -683,9 +688,10 @@ event_id 必须是以下值之一：{event_ids}"#,
                 &prompt,
                 chat_config,
                 2,
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("LLM摘要生成失败: {}", e))?;
+            ),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("LLM摘要生成失败: {}", e))?;
         let result: serde_json::Value = extracted.value;
 
         let narrative = result

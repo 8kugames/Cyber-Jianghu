@@ -165,9 +165,15 @@ pub(crate) async fn generate_character_handler(
         max_tokens: None,
         enable_thinking: Some(false),
     };
-    match llm_client
-        .complete_json_with_config_and_retry_extracted::<serde_json::Value>(&prompt, chat_config, 2)
-        .await
+    match crate::component::llm::scenario::with_scenario(
+        crate::component::llm::scenario::CHARACTER_GENERATION,
+        llm_client.complete_json_with_config_and_retry_extracted::<serde_json::Value>(
+            &prompt,
+            chat_config,
+            2,
+        ),
+    )
+    .await
     {
         Ok(extracted) => {
             if let Some(ref rc) = extracted.reasoning_content {

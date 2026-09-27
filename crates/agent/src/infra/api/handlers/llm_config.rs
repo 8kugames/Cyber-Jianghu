@@ -661,6 +661,9 @@ pub async fn get_metrics_handler(Query(q): Query<MetricsQuery>) -> Json<serde_js
 
     let mut total_prompt: u64 = 0;
     let mut total_cache_hit: u64 = 0;
+    // 场景归因聚合（跨模型求和）：回答"token 花在哪个环节"
+    let mut by_scenario: std::collections::BTreeMap<String, (u64, u64, u64, u64)> =
+        std::collections::BTreeMap::new();
 
     let models: Vec<serde_json::Value> = stats
         .iter()
@@ -677,6 +680,13 @@ pub async fn get_metrics_handler(Query(q): Query<MetricsQuery>) -> Json<serde_js
             };
             total_prompt += s.prompt_tokens;
             total_cache_hit += s.cache_hit_tokens;
+            for (sc, b) in &s.by_scenario {
+                let e = by_scenario.entry(sc.clone()).or_default();
+                e.0 += b.prompt_tokens;
+                e.1 += b.completion_tokens;
+                e.2 += b.cache_hit_tokens;
+                e.3 += b.calls;
+            }
             serde_json::json!({
                 "provider": s.provider,
                 "model": s.model,
@@ -688,9 +698,30 @@ pub async fn get_metrics_handler(Query(q): Query<MetricsQuery>) -> Json<serde_js
                 "total_tokens": s.prompt_tokens + s.completion_tokens,
                 "cache_hit_tokens": s.cache_hit_tokens,
                 "cache_hit_rate": format!("{:.1}%", cache_hit_rate * 100.0),
+                "by_scenario": s.by_scenario,
             })
         })
         .collect();
+
+    let scenarios: Vec<serde_json::Value> = by_scenario
+        .into_iter()
+        .map(|(sc, (pt, ct, ch, calls))| {
+            serde_json::json!({
+                "scenario": sc,
+                "prompt_tokens": pt,
+                "completion_tokens": ct,
+                "total_tokens": pt + ct,
+                "cache_hit_tokens": ch,
+                "calls": calls,
+            })
+        })
+        .collect();
+
+    let tool_rounds: Vec<serde_json::Value> =
+        crate::component::llm::scenario::snapshot_tool_rounds()
+            .into_iter()
+            .map(|(round, calls)| serde_json::json!({ "round": round, "calls": calls }))
+            .collect();
 
     let overall_cache_hit_rate = if total_prompt > 0 {
         total_cache_hit as f64 / total_prompt as f64
@@ -700,6 +731,9 @@ pub async fn get_metrics_handler(Query(q): Query<MetricsQuery>) -> Json<serde_js
 
     Json(serde_json::json!({
         "llm": models,
+        "scenarios": scenarios,
+        "tool_rounds": tool_rounds,
+        "forced_text_exits": crate::component::llm::scenario::snapshot_forced_text_exits(),
         "total_cache_hit_tokens": total_cache_hit,
         "total_prompt_tokens": total_prompt,
         "cache_hit_rate": format!("{:.1}%", overall_cache_hit_rate * 100.0),

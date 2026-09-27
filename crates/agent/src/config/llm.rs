@@ -122,6 +122,27 @@ pub struct LlmConfig {
     /// Cache 诊断配置 (测量用)
     #[serde(default)]
     pub cache_diagnostics: CacheDiagnosticsConfig,
+
+    /// 场景级模型路由 + 输出上限覆盖（消费层成本分层）
+    ///
+    /// key 为场景标签，合法值见 `component::llm::scenario`：
+    /// reflector_l3 / daily_summary / session_triage / narrative /
+    /// conversation_summary / relationship_eval / relationship_narrative /
+    /// biography / character_generation。
+    /// `model` 将该场景请求路由到同 provider 下的指定（更便宜）模型；
+    /// `max_tokens` 收紧该场景输出上限（completion cap）。
+    /// think / think_tool_round（主决策）不配置即保持主模型。
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub scenario_overrides: std::collections::HashMap<String, ScenarioOverrideConfig>,
+}
+
+/// 场景级覆盖配置（agent.yaml / LLM 配置 API）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScenarioOverrideConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
 }
 
 /// Cache 诊断配置 (测量用)
@@ -305,6 +326,7 @@ impl Default for LlmConfig {
                 DEFAULT_LLM_CONNECT_TIMEOUT_SECS,
             ),
             cache_diagnostics: CacheDiagnosticsConfig::default(),
+            scenario_overrides: std::collections::HashMap::new(),
         }
     }
 }

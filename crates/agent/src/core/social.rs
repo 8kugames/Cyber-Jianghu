@@ -134,13 +134,13 @@ impl super::Agent {
                         max_tokens: None,
                         enable_thinking: None,
                     };
-                    match llm_client
-                        .complete_json_with_config_and_retry_extracted::<Vec<serde_json::Value>>(
-                            &prompt,
-                            chat_config,
-                            2,
-                        )
-                        .await
+                    match crate::component::llm::scenario::with_scenario(
+                        crate::component::llm::scenario::RELATIONSHIP_EVAL,
+                        llm_client.complete_json_with_config_and_retry_extracted::<
+                            Vec<serde_json::Value>,
+                        >(&prompt, chat_config, 2),
+                    )
+                    .await
                     {
                         Ok(extracted) => extracted
                             .value

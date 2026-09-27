@@ -8,6 +8,7 @@ pub mod conversation;
 pub mod direct_client;
 mod model_adaptation;
 mod openai_types;
+pub mod scenario;
 pub mod streaming;
 pub mod token_tracking;
 pub mod tool_types;
@@ -21,7 +22,8 @@ pub use client::{
 pub use direct_client::{DirectLlmClient, DirectLlmClientConfig, LlmProvider, OpenClawConfig};
 pub(crate) use openai_types::{ChatExchangeConfig, ChatMessage};
 pub use token_tracking::{
-    ModelTokenStats, persist_and_reset, record_failure, record_token_usage, snapshot_all_stats,
+    ModelTokenStats, ScenarioStats, persist_and_reset, record_failure, record_token_usage,
+    snapshot_all_stats,
 };
 pub use tool_types::{ToolCall, ToolDefinition, ToolExecutor};
 
@@ -217,7 +219,23 @@ fn build_direct_client_with_max_tokens(
         .with_context_window_tokens(context_window_tokens)
         // 从 LlmConfig 透传 timeout，agent.yaml 改值即可生效
         .with_request_timeout_secs(llm_config.request_timeout_secs)
-        .with_connect_timeout_secs(llm_config.connect_timeout_secs);
+        .with_connect_timeout_secs(llm_config.connect_timeout_secs)
+        // 场景级模型路由（辅助任务 → 便宜模型），全部 fallback 客户端共享同一份
+        .with_scenario_overrides(
+            llm_config
+                .scenario_overrides
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        direct_client::ScenarioOverride {
+                            model: v.model.clone(),
+                            max_tokens: v.max_tokens,
+                        },
+                    )
+                })
+                .collect(),
+        );
 
     let mut client = DirectLlmClient::new(client_config)?;
     if let Some(esc) = earth_soul_config {
@@ -261,6 +279,7 @@ mod tests {
             request_timeout_secs: 90, // 自定义非默认值，断言端到端传播
             connect_timeout_secs: 15,
             cache_diagnostics: crate::config::CacheDiagnosticsConfig::default(),
+            scenario_overrides: std::collections::HashMap::new(),
         };
 
         let breaker = Arc::new(client::SharedBreaker::default());
@@ -307,5 +326,46 @@ model: test-model
             cfg.connect_timeout_secs, 30,
             "缺省值必须回退到 DEFAULT_LLM_CONNECT_TIMEOUT_SECS=30（与 Server 对齐）"
         );
+    }
+
+    /// 验证：scenario_overrides 从 LlmConfig（yaml）端到端传播到 DirectLlmClientConfig，
+    /// 供请求构建时的场景路由使用。
+    #[test]
+    fn test_scenario_overrides_propagate_to_direct_client() {
+        let yaml = r#"
+provider: ollama
+model: main-model
+scenario_overrides:
+  reflector_l3:
+    model: cheap-model
+    max_tokens: 1024
+  daily_summary:
+    model: cheap-model
+"#;
+        let cfg: LlmConfig =
+            serde_yaml::from_str(yaml).expect("must parse scenario_overrides from yaml");
+        assert_eq!(cfg.scenario_overrides.len(), 2);
+        assert_eq!(
+            cfg.scenario_overrides.get("reflector_l3").unwrap().model,
+            Some("cheap-model".to_string())
+        );
+        assert_eq!(
+            cfg.scenario_overrides
+                .get("reflector_l3")
+                .unwrap()
+                .max_tokens,
+            Some(1024)
+        );
+
+        let breaker = Arc::new(client::SharedBreaker::default());
+        let client = build_direct_client(&cfg, Some("main-model"), false, None, breaker)
+            .expect("build_direct_client must succeed");
+        let overrides = &client.config().scenario_overrides;
+        assert_eq!(
+            overrides.get("reflector_l3").unwrap().model,
+            Some("cheap-model".to_string()),
+            "scenario_overrides 必须传到 DirectLlmClientConfig"
+        );
+        assert_eq!(overrides.get("daily_summary").unwrap().max_tokens, None);
     }
 }

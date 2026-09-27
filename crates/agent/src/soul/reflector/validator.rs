@@ -548,14 +548,16 @@ impl ReflectorSoul {
             max_tokens: None,
             enable_thinking: None,
         };
-        let extracted = llm_client
-            .complete_json_with_system_and_retry_extracted(
+        let extracted = crate::component::llm::scenario::with_scenario(
+            crate::component::llm::scenario::REFLECTOR_L3,
+            llm_client.complete_json_with_system_and_retry_extracted(
                 self.reflector_prompt.system_prompt(),
                 &prompt,
                 chat_config,
                 2,
-            )
-            .await?;
+            ),
+        )
+        .await?;
         let response: LlmValidationResponse = extracted.value;
 
         thinking_log::log_llm(
@@ -685,14 +687,16 @@ impl ReflectorSoul {
             max_tokens: None,
             enable_thinking: None,
         };
-        let extracted = llm_client
-            .complete_json_with_system_and_retry_extracted(
+        let extracted = crate::component::llm::scenario::with_scenario(
+            crate::component::llm::scenario::REFLECTOR_L3,
+            llm_client.complete_json_with_system_and_retry_extracted(
                 self.reflector_prompt.system_prompt(),
                 &prompt,
                 chat_config,
                 2,
-            )
-            .await?;
+            ),
+        )
+        .await?;
         let response: LlmValidationResponse = extracted.value;
 
         Ok(response.into_validation_result())

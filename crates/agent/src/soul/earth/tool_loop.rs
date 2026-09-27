@@ -65,6 +65,9 @@ pub(crate) async fn run_tool_loop(
     let log_enabled = tool_log_cfg.is_some();
 
     for round in 0..max_rounds {
+        // 轮次计数：观测第 N 轮的调用量（评估调低 max_tool_rounds 的边际收益）
+        crate::component::llm::scenario::record_tool_round(round);
+
         // Pre-check: budget exhausted
         if let Some(ref b) = budget
             && b.is_exhausted()
@@ -84,9 +87,11 @@ pub(crate) async fn run_tool_loop(
             );
         }
 
-        let response = llm
-            .send_chat_exchange(messages.clone(), Some(tools), llm_config.clone())
-            .await?;
+        let response = crate::component::llm::scenario::with_scenario(
+            crate::component::llm::scenario::THINK_TOOL_ROUND,
+            llm.send_chat_exchange(messages.clone(), Some(tools), llm_config.clone()),
+        )
+        .await?;
 
         debug!(
             "[地魂] API 响应: tool_calls={}, content_len={}, content_preview={}",
@@ -316,13 +321,18 @@ async fn forced_text_exit(
     tool_call_log: Vec<cyber_jianghu_protocol::EarthToolCall>,
 ) -> Result<ToolLoopResult> {
     warn!("[地魂] 执行强制文本退出");
+    crate::component::llm::scenario::record_forced_text_exit();
 
     // 追加引导消息：显式要求 JSON 格式输出
     messages.push(ChatMessage::user(
         "你已充分了解周围情况。现在请严格按照系统提示中的JSON格式输出你的决策。只输出JSON对象，不要输出任何其他文本。",
     ));
 
-    let response = llm.send_chat_exchange(messages, None, llm_config).await?;
+    let response = crate::component::llm::scenario::with_scenario(
+        crate::component::llm::scenario::THINK_TOOL_ROUND,
+        llm.send_chat_exchange(messages, None, llm_config),
+    )
+    .await?;
 
     let content = response.content.unwrap_or_default();
     if content.trim().is_empty() {

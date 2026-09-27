@@ -107,7 +107,8 @@ impl DirectLlmClient {
 
             super::super::token_tracking::record_failure(
                 &self.config.provider,
-                &self.config.get_model_with_default(),
+                &request.model,
+                super::super::scenario::current().0,
             );
             anyhow::bail!("LLM API error {}: {}", status, error_body);
         }
@@ -123,7 +124,8 @@ impl DirectLlmClient {
         if raw_body.trim().is_empty() {
             super::super::token_tracking::record_failure(
                 &self.config.provider,
-                &self.config.get_model_with_default(),
+                &request.model,
+                super::super::scenario::current().0,
             );
             anyhow::bail!("LLM returned empty response body");
         }
@@ -147,7 +149,8 @@ impl DirectLlmClient {
         let response_data: OpenAIResponse = serde_json::from_str(&raw_body).map_err(|e| {
             super::super::token_tracking::record_failure(
                 &self.config.provider,
-                &self.config.get_model_with_default(),
+                &request.model,
+                super::super::scenario::current().0,
             );
             tracing::warn!(
                 "LLM response JSON parse failed: provider={}, raw_body_len={}",
@@ -157,7 +160,7 @@ impl DirectLlmClient {
             anyhow::anyhow!("Failed to parse LLM response: {}", e)
         })?;
 
-        let model = self.config.get_model_with_default();
+        let model = request.model.clone();
         if let Some(ref actual_model) = response_data.model
             && actual_model != &model
         {
@@ -167,6 +170,7 @@ impl DirectLlmClient {
             );
         }
         let system_hash = Self::extract_system_hash_from_request(request);
+        let scenario = super::super::scenario::current().0;
         if let Some(ref usage) = response_data.usage {
             let cache_hit = usage.cache_hit_tokens().unwrap_or(0);
             record_token_usage(
@@ -176,12 +180,14 @@ impl DirectLlmClient {
                 usage.completion_tokens,
                 cache_hit,
                 system_hash,
+                scenario,
             );
             self.emit_cache_diagnostics(system_hash, usage.prompt_tokens, cache_hit, &model);
             debug!(
-                "Token usage: provider={}, model={}, prompt={}, completion={}, cache_hit={}",
+                "Token usage: provider={}, model={}, scenario={}, prompt={}, completion={}, cache_hit={}",
                 self.config.provider.as_str(),
                 model,
+                scenario,
                 usage.prompt_tokens,
                 usage.completion_tokens,
                 cache_hit,
@@ -202,11 +208,13 @@ impl DirectLlmClient {
                 est_ct,
                 0,
                 system_hash,
+                scenario,
             );
             debug!(
-                "Token usage (estimated): provider={}, model={}, prompt~{}, completion~{}",
+                "Token usage (estimated): provider={}, model={}, scenario={}, prompt~{}, completion~{}",
                 self.config.provider.as_str(),
                 model,
+                scenario,
                 est_pt,
                 est_ct
             );
@@ -320,6 +328,8 @@ impl DirectLlmClient {
         let has_real = stats.has_real_usage;
         let cache_hit = stats.cache_hit_tokens.unwrap_or(0);
         let (content, tool_calls, reasoning_content) = acc.into_parts();
+        let scenario = super::super::scenario::current().0;
+        let model = request.model.clone();
 
         // 诊断：检测 content 中的 UTF-8 mojibake（Latin-1 双重编码）
         if content.contains("Ã") || content.contains("Â") {
@@ -360,17 +370,18 @@ impl DirectLlmClient {
             if pt > 0 {
                 record_token_usage(
                     &self.config.provider,
-                    &self.config.get_model_with_default(),
+                    &model,
                     pt,
                     0,
                     0,
                     system_hash,
+                    scenario,
                 );
             }
             anyhow::bail!(
                 "LLM API error: response content is empty (streaming, provider={}, model={}, prompt_tokens={}, completion_tokens={})",
                 self.config.provider.as_str(),
-                self.config.get_model_with_default(),
+                model,
                 pt,
                 ct
             );
@@ -399,22 +410,19 @@ impl DirectLlmClient {
             };
             record_token_usage(
                 &self.config.provider,
-                &self.config.get_model_with_default(),
+                &model,
                 final_pt,
                 ct,
                 cache_hit,
                 system_hash,
+                scenario,
             );
-            self.emit_cache_diagnostics(
-                system_hash,
-                final_pt,
-                cache_hit,
-                &self.config.get_model_with_default(),
-            );
+            self.emit_cache_diagnostics(system_hash, final_pt, cache_hit, &model);
             debug!(
-                "Stream token usage: provider={}, model={}, prompt={}, completion={}, cache_hit={}, real_usage={}",
+                "Stream token usage: provider={}, model={}, scenario={}, prompt={}, completion={}, cache_hit={}, real_usage={}",
                 self.config.provider.as_str(),
-                self.config.get_model_with_default(),
+                model,
+                scenario,
                 final_pt,
                 ct,
                 cache_hit,
@@ -426,16 +434,18 @@ impl DirectLlmClient {
             let est_ct = (content.len() as u64 / 3).max(1);
             record_token_usage(
                 &self.config.provider,
-                &self.config.get_model_with_default(),
+                &model,
                 est_pt,
                 est_ct,
                 0,
                 system_hash,
+                scenario,
             );
             debug!(
-                "Stream token usage (estimated fallback): provider={}, model={}, prompt~{}, completion~{}",
+                "Stream token usage (estimated fallback): provider={}, model={}, scenario={}, prompt~{}, completion~{}",
                 self.config.provider.as_str(),
-                self.config.get_model_with_default(),
+                model,
+                scenario,
                 est_pt,
                 est_ct
             );
@@ -539,7 +549,8 @@ impl DirectLlmClient {
                 .unwrap_or_default();
             super::super::token_tracking::record_failure(
                 &self.config.provider,
-                &self.config.get_model_with_default(),
+                &request.model,
+                super::super::scenario::current().0,
             );
             anyhow::bail!("LLM streaming API error {}: {}", status, error_body);
         }

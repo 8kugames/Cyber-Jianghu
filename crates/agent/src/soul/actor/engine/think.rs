@@ -101,70 +101,82 @@ impl CognitiveEngine {
             .clone();
 
         // 使用对话历史（长窗口）或单次调用
-        let response: DirectCognitiveResponse = {
-            let conv_data = self.conversation_history.as_ref().map(|history| {
-                let h = history.lock().expect("lock poisoned");
-                (
-                    h.get_turns()
-                        .iter()
-                        .map(|t| ConversationTurn {
-                            user: t.user.clone(),
-                            assistant: t.assistant.clone(),
-                            reasoning_content: t.reasoning_content.clone(),
-                        })
-                        .collect::<Vec<_>>(),
-                    h.get_system_message().to_string(),
-                    h.get_summary().map(|s| s.to_string()),
-                )
-            });
-            // lock 已释放
+        // 场景归因：主决策调用标记为 think（tool loop 内部轮次会嵌套覆盖为 think_tool_round）
+        let response: DirectCognitiveResponse = crate::component::llm::scenario::with_scenario(
+            crate::component::llm::scenario::THINK,
+            async {
+                let response: DirectCognitiveResponse = {
+                    let conv_data = self.conversation_history.as_ref().map(|history| {
+                        let h = history.lock().expect("lock poisoned");
+                        (
+                            h.get_turns()
+                                .iter()
+                                .map(|t| ConversationTurn {
+                                    user: t.user.clone(),
+                                    assistant: t.assistant.clone(),
+                                    reasoning_content: t.reasoning_content.clone(),
+                                })
+                                .collect::<Vec<_>>(),
+                            h.get_system_message().to_string(),
+                            h.get_summary().map(|s| s.to_string()),
+                        )
+                    });
+                    // lock 已释放
 
-            if use_tool_calling {
-                // 地魂 tool-calling 路径（主路径）：LLM 可调用 skill_view / search_memory 等工具
-                let memory_manager = self.memory_manager.read().expect("rwlock poisoned").clone();
-                let recipe_details = world_state.self_state.recipe_details.clone();
-                let world_state_store = self
-                    .world_state_store
-                    .read()
-                    .expect("rwlock poisoned")
-                    .clone();
-                let available_actions = self
-                    .available_actions
-                    .read()
-                    .expect("rwlock poisoned")
-                    .clone();
-                let rule_cache = self.rule_cache.read().expect("rwlock poisoned").clone();
-                let prompt_template_for_tool = self.prompt_template();
-                let executor = super::super::super::earth::EarthToolExecutor::from_context(
-                    super::super::super::earth::EarthToolContext {
-                        skill_cache: self.skill_cache.read().expect("rwlock poisoned").clone(),
-                        memory_manager,
-                        relationship_store: self
-                            .relationship_store
+                    if use_tool_calling {
+                        // 地魂 tool-calling 路径（主路径）：LLM 可调用 skill_view / search_memory 等工具
+                        let memory_manager =
+                            self.memory_manager.read().expect("rwlock poisoned").clone();
+                        let recipe_details = world_state.self_state.recipe_details.clone();
+                        let world_state_store = self
+                            .world_state_store
                             .read()
                             .expect("rwlock poisoned")
-                            .clone(),
-                        recipe_details,
-                        world_state_store,
-                        available_actions,
-                        rule_cache,
-                        prompt_template: Some(std::sync::Arc::new(prompt_template_for_tool)),
-                    },
-                );
-                let tools = executor.tool_definitions();
+                            .clone();
+                        let available_actions = self
+                            .available_actions
+                            .read()
+                            .expect("rwlock poisoned")
+                            .clone();
+                        let rule_cache = self.rule_cache.read().expect("rwlock poisoned").clone();
+                        let prompt_template_for_tool = self.prompt_template();
+                        let executor = super::super::super::earth::EarthToolExecutor::from_context(
+                            super::super::super::earth::EarthToolContext {
+                                skill_cache: self
+                                    .skill_cache
+                                    .read()
+                                    .expect("rwlock poisoned")
+                                    .clone(),
+                                memory_manager,
+                                relationship_store: self
+                                    .relationship_store
+                                    .read()
+                                    .expect("rwlock poisoned")
+                                    .clone(),
+                                recipe_details,
+                                world_state_store,
+                                available_actions,
+                                rule_cache,
+                                prompt_template: Some(std::sync::Arc::new(
+                                    prompt_template_for_tool,
+                                )),
+                            },
+                        );
+                        let tools = executor.tool_definitions();
 
-                match conv_data {
-                    Some((turns, system, summary)) => {
-                        // tool-calling 模式下限制历史轮次（配置驱动，避免模式惯性）
-                        let max_tool_turns = self.truncation("tool_calling_history_turns", 8);
-                        let turns: Vec<_> = if turns.len() > max_tool_turns {
-                            turns.into_iter().rev().take(max_tool_turns).rev().collect()
-                        } else {
-                            turns
-                        };
+                        match conv_data {
+                            Some((turns, system, summary)) => {
+                                // tool-calling 模式下限制历史轮次（配置驱动，避免模式惯性）
+                                let max_tool_turns =
+                                    self.truncation("tool_calling_history_turns", 8);
+                                let turns: Vec<_> = if turns.len() > max_tool_turns {
+                                    turns.into_iter().rev().take(max_tool_turns).rev().collect()
+                                } else {
+                                    turns
+                                };
 
-                        // Tool-calling + 对话历史（正常部署路径）
-                        self.llm_client
+                                // Tool-calling + 对话历史（正常部署路径）
+                                self.llm_client
                             .complete_json_with_conversation_and_tools::<DirectCognitiveResponse>(
                                 &system,
                                 ConversationInput {
@@ -178,44 +190,56 @@ impl CognitiveEngine {
                                 self.llm_param("max_tool_rounds", 5),
                             )
                             .await?
-                    }
-                    None => {
-                        // Tool-calling 无对话历史（降级）
-                        let persona_for_prompt = {
-                            let cache = self.prompt_cache.read().expect("rwlock poisoned");
-                            cache.get_persona_simple().to_string()
-                        };
-                        self.llm_client
-                            .complete_json_with_tools::<DirectCognitiveResponse>(
-                                &persona_for_prompt,
-                                &tick_msg,
-                                &tools,
-                                &executor,
-                                self.llm_param("max_tool_rounds", 5),
-                            )
-                            .await?
-                    }
-                }
-            } else {
-                // 非 tool-calling 路径：非流式优先（默认），仅启用时尝试 streaming
-                // 注意：streaming 不支持 tool-calling 组合
-                match conv_data {
-                    Some((turns, system, summary)) => {
-                        if self.enable_streaming {
-                            match self
-                                .llm_client
-                                .complete_json_streaming_with_conversation(
-                                    &system,
-                                    &semi_static,
-                                    summary.as_deref(),
-                                    &turns,
-                                    &tick_msg,
-                                )
-                                .await
-                            {
-                                Ok(resp) => resp,
-                                Err(e) => {
-                                    tracing::warn!("流式调用失败，降级到非流式: {}", e);
+                            }
+                            None => {
+                                // Tool-calling 无对话历史（降级）
+                                let persona_for_prompt = {
+                                    let cache = self.prompt_cache.read().expect("rwlock poisoned");
+                                    cache.get_persona_simple().to_string()
+                                };
+                                self.llm_client
+                                    .complete_json_with_tools::<DirectCognitiveResponse>(
+                                        &persona_for_prompt,
+                                        &tick_msg,
+                                        &tools,
+                                        &executor,
+                                        self.llm_param("max_tool_rounds", 5),
+                                    )
+                                    .await?
+                            }
+                        }
+                    } else {
+                        // 非 tool-calling 路径：非流式优先（默认），仅启用时尝试 streaming
+                        // 注意：streaming 不支持 tool-calling 组合
+                        match conv_data {
+                            Some((turns, system, summary)) => {
+                                if self.enable_streaming {
+                                    match self
+                                        .llm_client
+                                        .complete_json_streaming_with_conversation(
+                                            &system,
+                                            &semi_static,
+                                            summary.as_deref(),
+                                            &turns,
+                                            &tick_msg,
+                                        )
+                                        .await
+                                    {
+                                        Ok(resp) => resp,
+                                        Err(e) => {
+                                            tracing::warn!("流式调用失败，降级到非流式: {}", e);
+                                            self.llm_client
+                                                .complete_json_with_conversation(
+                                                    &system,
+                                                    &semi_static,
+                                                    summary.as_deref(),
+                                                    &turns,
+                                                    &tick_msg,
+                                                )
+                                                .await?
+                                        }
+                                    }
+                                } else {
                                     self.llm_client
                                         .complete_json_with_conversation(
                                             &system,
@@ -227,33 +251,44 @@ impl CognitiveEngine {
                                         .await?
                                 }
                             }
-                        } else {
-                            self.llm_client
-                                .complete_json_with_conversation(
-                                    &system,
-                                    &semi_static,
-                                    summary.as_deref(),
-                                    &turns,
-                                    &tick_msg,
-                                )
-                                .await?
-                        }
-                    }
-                    None => {
-                        let persona_for_prompt = {
-                            let cache = self.prompt_cache.read().expect("rwlock poisoned");
-                            cache.get_persona_simple().to_string()
-                        };
-                        let temperature = self.config.read().expect("rwlock poisoned").temperature;
-                        if self.enable_streaming {
-                            match self
-                                .llm_client
-                                .complete_json_streaming(&persona_for_prompt, &tick_msg)
-                                .await
-                            {
-                                Ok(resp) => resp,
-                                Err(e) => {
-                                    tracing::warn!("流式调用失败，降级到非流式: {}", e);
+                            None => {
+                                let persona_for_prompt = {
+                                    let cache = self.prompt_cache.read().expect("rwlock poisoned");
+                                    cache.get_persona_simple().to_string()
+                                };
+                                let temperature =
+                                    self.config.read().expect("rwlock poisoned").temperature;
+                                if self.enable_streaming {
+                                    match self
+                                        .llm_client
+                                        .complete_json_streaming(&persona_for_prompt, &tick_msg)
+                                        .await
+                                    {
+                                        Ok(resp) => resp,
+                                        Err(e) => {
+                                            tracing::warn!("流式调用失败，降级到非流式: {}", e);
+                                            let chat_config =
+                                                crate::component::llm::ChatExchangeConfig {
+                                                    model: self.llm_client.model_name(),
+                                                    temperature,
+                                                    max_tokens: None,
+                                                    enable_thinking: None,
+                                                };
+                                            let extracted = self
+                                                .llm_client
+                                                .complete_json_with_config_and_retry_extracted(
+                                                    &tick_msg,
+                                                    chat_config,
+                                                    2,
+                                                )
+                                                .await?;
+                                            if let Ok(mut rc) = self.last_reasoning_content.lock() {
+                                                *rc = extracted.reasoning_content;
+                                            }
+                                            extracted.value
+                                        }
+                                    }
+                                } else {
                                     let chat_config = crate::component::llm::ChatExchangeConfig {
                                         model: self.llm_client.model_name(),
                                         temperature,
@@ -274,30 +309,13 @@ impl CognitiveEngine {
                                     extracted.value
                                 }
                             }
-                        } else {
-                            let chat_config = crate::component::llm::ChatExchangeConfig {
-                                model: self.llm_client.model_name(),
-                                temperature,
-                                max_tokens: None,
-                                enable_thinking: None,
-                            };
-                            let extracted = self
-                                .llm_client
-                                .complete_json_with_config_and_retry_extracted(
-                                    &tick_msg,
-                                    chat_config,
-                                    2,
-                                )
-                                .await?;
-                            if let Ok(mut rc) = self.last_reasoning_content.lock() {
-                                *rc = extracted.reasoning_content;
-                            }
-                            extracted.value
                         }
                     }
-                }
-            }
-        };
+                };
+                Ok::<DirectCognitiveResponse, anyhow::Error>(response)
+            },
+        )
+        .await?;
         // 保存 reasoning_content 供 push_conversation_turn 使用
         // 仅当 LLM client 有 reasoning_content 时覆盖，避免 None 冲掉已保存值
         if let Ok(mut rc) = self.last_reasoning_content.lock()
@@ -521,10 +539,12 @@ impl CognitiveEngine {
             max_tokens: None,
             enable_thinking: None,
         };
-        let extracted = self
-            .llm_client
-            .complete_json_with_config_and_retry_extracted(&tick_msg, chat_config, 2)
-            .await?;
+        let extracted = crate::component::llm::scenario::with_scenario(
+            crate::component::llm::scenario::THINK,
+            self.llm_client
+                .complete_json_with_config_and_retry_extracted(&tick_msg, chat_config, 2),
+        )
+        .await?;
         if let Ok(mut rc) = self.last_reasoning_content.lock() {
             *rc = extracted.reasoning_content;
         }

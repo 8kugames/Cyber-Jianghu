@@ -264,7 +264,12 @@ impl super::super::Agent {
             && let Some(ref container) = self.actor_llm_container
         {
             let llm = container.read().await;
-            if let Ok(summary) = llm.complete(&prompt).await {
+            let summary = crate::component::llm::scenario::with_scenario(
+                crate::component::llm::scenario::CONVERSATION_SUMMARY,
+                llm.complete(&prompt),
+            )
+            .await;
+            if let Ok(summary) = summary {
                 engine.conversation_replace_with_summary(summary);
                 info!("对话历史 summary 压缩完成");
             } else {

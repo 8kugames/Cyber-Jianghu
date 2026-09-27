@@ -32,6 +32,28 @@ struct PerHourStats {
     bucket: HourBucketStats,
 }
 
+/// 持久化：单场景累计统计（by_scenario 维度的值类型）
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScenarioStats {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    #[serde(default)]
+    pub cache_hit_tokens: u64,
+    pub calls: u64,
+    #[serde(default)]
+    pub failures: u64,
+}
+
+impl ScenarioStats {
+    fn add_bucket(&mut self, b: &ScenarioStats) {
+        self.prompt_tokens += b.prompt_tokens;
+        self.completion_tokens += b.completion_tokens;
+        self.cache_hit_tokens += b.cache_hit_tokens;
+        self.calls += b.calls;
+        self.failures += b.failures;
+    }
+}
+
 /// 持久化：单小时单模型累计统计
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HourBucketStats {
@@ -44,6 +66,9 @@ pub struct HourBucketStats {
     pub failures: u64,
     #[serde(default)]
     pub system_hash_distribution: HashMap<[u8; 32], u64>,
+    /// 消费场景归因（think / think_tool_round / reflector_l3 / ...）
+    #[serde(default)]
+    pub by_scenario: BTreeMap<String, ScenarioStats>,
     /// 该桶内首次记录时间（ISO 8601），用于计算实际活跃时长
     #[serde(default)]
     pub first_record_at: Option<String>,
@@ -73,6 +98,9 @@ pub struct ModelSummaryStats {
     pub avg_calls_per_hour: f64,
     /// 缓存命中率（总 cache_hit / 总 prompt）
     pub avg_cache_hit_ratio: f64,
+    /// 消费场景归因（detail 全量聚合）
+    #[serde(default)]
+    pub by_scenario: BTreeMap<String, ScenarioStats>,
 }
 
 /// 持久化 summary 容器
@@ -105,6 +133,9 @@ pub struct ModelTokenStats {
     pub cache_hit_tokens: u64,
     #[serde(default)]
     pub system_hash_distribution: HashMap<[u8; 32], u64>,
+    /// 消费场景归因（跨小时聚合）
+    #[serde(default)]
+    pub by_scenario: BTreeMap<String, ScenarioStats>,
 }
 
 static TOKEN_STATS: OnceLock<
@@ -193,6 +224,7 @@ pub fn record_token_usage(
     completion_tokens: u64,
     cache_hit: u64,
     system_hash: [u8; 32],
+    scenario: &str,
 ) {
     let key = model_key(provider, model);
     let now = local_now();
@@ -210,6 +242,15 @@ pub fn record_token_usage(
             .system_hash_distribution
             .entry(system_hash)
             .or_insert(0) += 1;
+        let sc = hour_entry
+            .bucket
+            .by_scenario
+            .entry(scenario.to_string())
+            .or_default();
+        sc.prompt_tokens += prompt_tokens;
+        sc.completion_tokens += completion_tokens;
+        sc.cache_hit_tokens += cache_hit;
+        sc.calls += 1;
         if hour_entry.bucket.first_record_at.is_none() {
             hour_entry.bucket.first_record_at = Some(now_iso.clone());
         }
@@ -218,7 +259,7 @@ pub fn record_token_usage(
 }
 
 /// Record a failed LLM call for a specific provider-model, bucketed by current local hour
-pub fn record_failure(provider: &LlmProvider, model: &str) {
+pub fn record_failure(provider: &LlmProvider, model: &str, scenario: &str) {
     let key = model_key(provider, model);
     let now = local_now();
     let hk = hour_key(now);
@@ -228,6 +269,13 @@ pub fn record_failure(provider: &LlmProvider, model: &str) {
         let hour_entry = model_entry.entry(hk).or_default();
         hour_entry.bucket.calls += 1;
         hour_entry.bucket.failures += 1;
+        let sc = hour_entry
+            .bucket
+            .by_scenario
+            .entry(scenario.to_string())
+            .or_default();
+        sc.calls += 1;
+        sc.failures += 1;
         if hour_entry.bucket.first_record_at.is_none() {
             hour_entry.bucket.first_record_at = Some(now_iso.clone());
         }
@@ -261,6 +309,7 @@ pub fn snapshot_all_stats() -> Vec<ModelTokenStats> {
             let (provider, model) = split_model_key(key);
             let mut agg = HourBucketStats::default();
             let mut system_hash_distribution: HashMap<[u8; 32], u64> = HashMap::new();
+            let mut by_scenario: BTreeMap<String, ScenarioStats> = BTreeMap::new();
             for phs in hours.values() {
                 agg.prompt_tokens += phs.bucket.prompt_tokens;
                 agg.completion_tokens += phs.bucket.completion_tokens;
@@ -269,6 +318,9 @@ pub fn snapshot_all_stats() -> Vec<ModelTokenStats> {
                 agg.failures += phs.bucket.failures;
                 for (hash, count) in &phs.bucket.system_hash_distribution {
                     *system_hash_distribution.entry(*hash).or_insert(0) += count;
+                }
+                for (sc, b) in &phs.bucket.by_scenario {
+                    by_scenario.entry(sc.clone()).or_default().add_bucket(b);
                 }
             }
             let total = agg.prompt_tokens + agg.completion_tokens;
@@ -282,6 +334,7 @@ pub fn snapshot_all_stats() -> Vec<ModelTokenStats> {
                 failures: agg.failures,
                 cache_hit_tokens: agg.cache_hit_tokens,
                 system_hash_distribution,
+                by_scenario,
             }
         })
         .collect()
@@ -297,12 +350,13 @@ pub fn snapshot_all_stats() -> Vec<ModelTokenStats> {
 /// - avg_cache_hit_ratio = total_cache_hit / total_prompt（总命中率）
 /// - first/last_record_at = detail 中该 model_key 出现的最早/最晚时间戳
 fn rebuild_summary(p: &mut PersistedTokenStats) {
-    /// 每 model 的 (累计 stats, 最早时间, 最晚时间, 累计活跃小时数)
+    /// 每 model 的 (累计 stats, 最早时间, 最晚时间, 累计活跃小时数, 场景聚合)
     type ModelAgg = (
         HourBucketStats,
         Option<DateTime<Utc>>,
         Option<DateTime<Utc>>,
         f64, // cumulative active hours
+        BTreeMap<String, ScenarioStats>,
     );
     let mut agg: BTreeMap<String, ModelAgg> = BTreeMap::new();
 
@@ -311,12 +365,15 @@ fn rebuild_summary(p: &mut PersistedTokenStats) {
         for (model_key, bucket) in models {
             let entry = agg
                 .entry(model_key.clone())
-                .or_insert_with(|| (HourBucketStats::default(), None, None, 0.0));
+                .or_insert_with(|| (HourBucketStats::default(), None, None, 0.0, BTreeMap::new()));
             entry.0.prompt_tokens += bucket.prompt_tokens;
             entry.0.completion_tokens += bucket.completion_tokens;
             entry.0.cache_hit_tokens += bucket.cache_hit_tokens;
             entry.0.calls += bucket.calls;
             entry.0.failures += bucket.failures;
+            for (sc, b) in &bucket.by_scenario {
+                entry.4.entry(sc.clone()).or_default().add_bucket(b);
+            }
 
             // 计算该桶的实际活跃时长
             let bucket_hours = bucket_active_hours(bucket);
@@ -345,7 +402,7 @@ fn rebuild_summary(p: &mut PersistedTokenStats) {
     }
 
     p.summary.by_provider_model.clear();
-    for (model_key, (acc, first, last, active_hours)) in agg {
+    for (model_key, (acc, first, last, active_hours, by_scenario)) in agg {
         let (provider, model) = split_model_key(&model_key);
         let avg_pt = if active_hours > 0.0 {
             acc.prompt_tokens as f64 / active_hours
@@ -384,6 +441,7 @@ fn rebuild_summary(p: &mut PersistedTokenStats) {
                 avg_completion_tokens_per_hour: avg_ct,
                 avg_calls_per_hour: avg_calls,
                 avg_cache_hit_ratio: cache_ratio,
+                by_scenario,
             },
         );
     }
@@ -482,6 +540,13 @@ pub fn persist_and_reset() {
         bucket.cache_hit_tokens += phs.bucket.cache_hit_tokens;
         bucket.calls += phs.bucket.calls;
         bucket.failures += phs.bucket.failures;
+        for (sc, b) in &phs.bucket.by_scenario {
+            bucket
+                .by_scenario
+                .entry(sc.clone())
+                .or_default()
+                .add_bucket(b);
+        }
         // 合并时间戳：取最早 first 和最晚 last
         merge_timestamp(
             &mut bucket.first_record_at,
