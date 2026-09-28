@@ -20,6 +20,8 @@ This file provides guidance to AI coding agents (Claude Code, Zed, Codex, etc.) 
 - **Device-Character Separation**: Supports rebirth, one device manages multiple characters
 - **Built-in Admin Web Panel**: Character creation, state inspection, dream injection, and more
 - **Dedicated-Model Training Data Pipeline**: Structured collection of Agent↔LLM interaction traces into a survival-reward ledger + SFT export pipeline, for fine-tuning a world-specialized model. Reward anchors survival causality only (天道无为); subjective cognition (reputation/relationship/mood) never enters reward
+  - SFT export contract: scans renhun traces only (`traces/soul=renhun`; tianhun goes the label/classification route); a trace is admitted only if its `(agent_id, tick_id, attempt)` joins an **approved** tianhun ruling in `agent_action_logs.soul_cycle_metadata` — others are marked processed with no output. The export checkpoint (`sft_checkpoint.json`) dedupes by trace_id per date bucket with `retain_days=7`; `force_full=true` bypasses the date floor and dedup (a full re-run re-emits already-exported samples; run files stay independent)
+  - Acceptance evaluation: `scripts/eval_sft_mlx.py` (JSON validity / action-type validity / entity-match against the teacher, with base zero-shot and teacher baselines; aligns its lenient JSON parsing with `scripts/parse_tianhun_labels.py`)
 
 See [Readme.md](Readme.md) for full project description and architecture diagrams.
 
