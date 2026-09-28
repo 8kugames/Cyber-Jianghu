@@ -448,7 +448,7 @@ enum FlexibleWallClock {
 }
 
 impl FlexibleWallClock {
-    fn to_epoch_ms(self) -> Option<i64> {
+    fn into_epoch_ms(self) -> Option<i64> {
         match self {
             Self::EpochMs(ms) => Some(ms),
             Self::Rfc3339(text) => chrono::DateTime::parse_from_rfc3339(&text)
@@ -476,7 +476,7 @@ impl From<TraceLine> for TraceEntry {
             prompt_tokens: line.prompt_tokens,
             completion_tokens: line.completion_tokens,
             ok: line.ok,
-            wall_clock: line.wall_clock.and_then(|w| w.to_epoch_ms()),
+            wall_clock: line.wall_clock.and_then(|w| w.into_epoch_ms()),
         }
     }
 }

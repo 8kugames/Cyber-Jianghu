@@ -116,3 +116,109 @@ fn test_metadata_fields_populated() {
     assert_eq!(meta.tianhun_result, Some("approved".to_string()));
     assert_eq!(meta.trace_id, "test-trace-001");
 }
+
+// ---- 历史动作名归一（LEGACY_ACTION_ALIASES / TOOL_TRACE_ACTION_TYPES）----
+
+fn assistant_content(
+    sample: &cyber_jianghu_server::training_export::sft_transform::SftSample,
+) -> &str {
+    sample
+        .messages
+        .iter()
+        .find(|m| m.role == "assistant")
+        .map(|m| m.content.as_str())
+        .expect("应有 assistant 消息")
+}
+
+#[test]
+fn test_legacy_action_names_normalized() {
+    let response = r#"{"actions":[{"action_type":"进食","action_data":{"item_id":"a"}},{"action_type":"打坐","action_data":{}},{"action_type":"说话","action_data":{"content":"hi"}}]}"#;
+    let trace = make_trace(true, response, "张三", "");
+    let sample = transform_entry(TransformInput {
+        entry: &trace,
+        tianhun_result: Some("approved".to_string()),
+    })
+    .expect("应产出样本");
+    let parsed: serde_json::Value =
+        serde_json::from_str(assistant_content(&sample)).expect("归一后仍为合法 JSON");
+    let types: Vec<&str> = parsed["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["action_type"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        types,
+        vec!["吃", "休整", "说话"],
+        "旧动作名必须归一为 v2.0 名"
+    );
+    assert_eq!(
+        parsed["actions"][0]["action_data"]["item_id"], "a",
+        "action_data 原样保留"
+    );
+}
+
+#[test]
+fn test_tool_trace_actions_dropped() {
+    let response = r#"{"actions":[{"action_type":"query_world","action_data":{}},{"action_type":"观察","action_data":{}}]}"#;
+    let trace = make_trace(true, response, "张三", "");
+    let sample = transform_entry(TransformInput {
+        entry: &trace,
+        tianhun_result: Some("approved".to_string()),
+    })
+    .expect("应产出样本");
+    let parsed: serde_json::Value = serde_json::from_str(assistant_content(&sample)).unwrap();
+    let types: Vec<&str> = parsed["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["action_type"].as_str().unwrap())
+        .collect();
+    assert_eq!(types, vec!["观察"], "工具残留丢弃，正常动作保留");
+}
+
+#[test]
+fn test_tool_only_sample_dropped() {
+    let response = r#"{"actions":[{"action_type":"查询状态","action_data":{}}]}"#;
+    let trace = make_trace(true, response, "张三", "");
+    assert_eq!(
+        transform_entry(TransformInput {
+            entry: &trace,
+            tianhun_result: Some("approved".to_string()),
+        }),
+        None,
+        "全部动作是工具残留时丢弃整样本"
+    );
+}
+
+#[test]
+fn test_non_json_response_passthrough() {
+    let trace = make_trace(true, "  出门练剑。  ", "张三", "");
+    let sample = transform_entry(TransformInput {
+        entry: &trace,
+        tianhun_result: Some("approved".to_string()),
+    })
+    .expect("纯文本 response 是合法导出形态");
+    assert_eq!(
+        assistant_content(&sample),
+        "出门练剑。",
+        "非 JSON response 原样透传（含前置 trim）"
+    );
+}
+
+#[test]
+fn test_json_without_legacy_actions_semantics_unchanged() {
+    let response = r#"{"actions":[{"action_type":"说话","action_data":{"content":"hi"}}],"thought_process":"思考"}"#;
+    let trace = make_trace(true, response, "张三", "");
+    let sample = transform_entry(TransformInput {
+        entry: &trace,
+        tianhun_result: None,
+    })
+    .expect("应产出样本");
+    let parsed: serde_json::Value = serde_json::from_str(assistant_content(&sample)).unwrap();
+    let expected: serde_json::Value = serde_json::from_str(response).unwrap();
+    assert_eq!(
+        parsed, expected,
+        "无旧动作名的 JSON 语义不变（允许字段重排）"
+    );
+}
