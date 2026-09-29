@@ -14,6 +14,43 @@ use futures_util::future::BoxFuture;
 use std::sync::Arc;
 use tracing::{error, warn};
 
+/// 判定错误文本是否为 JSON 格式解析错误（serde 错误家族特征）。
+fn is_format_parse_error(msg: &str) -> bool {
+    msg.contains("invalid type")
+        || msg.contains("expected value")
+        || msg.contains("trailing characters")
+        || msg.contains("missing field")
+        || msg.contains("EOF while parsing")
+        || msg.contains("key must be")
+        || msg.contains("duplicate field")
+}
+
+/// 解析失败重试反馈构造。
+///
+/// 格式解析错误不注入 serde 技术细节原文：`invalid type: null ... column 232`
+/// 这类细节会把输出敏感的模型推离分布（2026-09-28 灰度实证：小模型在该反馈
+/// 形态下模仿错误内容、连环崩坏）；保留「格式有误」信号本身即可引导自纠。
+/// 连续第 2 次格式失败起清空反馈干净重试，阻断 in-context 污染累积。
+/// 非格式错误（网络等）维持原行为：携带错误原文注入反馈。
+pub(crate) fn retry_feedback_for_error(
+    err_text: &str,
+    format_fail_streak: usize,
+) -> Option<String> {
+    if is_format_parse_error(err_text) {
+        if format_fail_streak >= 2 {
+            return None;
+        }
+        return Some(
+            "系统提示：你上一次输出格式有误，请确保严格输出合法的JSON对象，不要在JSON外添加任何文本。"
+                .to_string(),
+        );
+    }
+    Some(format!(
+        "系统提示：你上一次输出格式有误（{}），请确保严格输出合法的JSON对象，不要在JSON外添加任何文本。",
+        err_text
+    ))
+}
+
 /// Cognitive 决策配置
 pub struct CognitiveDecisionConfig {
     /// 最大重试次数
@@ -80,6 +117,7 @@ pub fn cognitive_decision_with_chain(
             let mut last_error = String::new();
             let mut last_chain: Option<CognitiveChain> = None;
             let mut failed_attempts: usize = 0;
+            let mut format_fail_streak: usize = 0;
 
             // 墙钟预算：flaky LLM 下 max_retries 次重试 × 120s 请求超时可空转数十分钟
             // （2026-09-15 柳青崖事故）。超预算即跳出循环走休整降级，
@@ -172,11 +210,15 @@ pub fn cognitive_decision_with_chain(
                         last_error = e.to_string();
                         error!("[cognitive] Attempt {} failed: {}", attempt + 1, e);
 
-                        // 将解析错误注入重试 feedback，让 LLM 知道上次哪里错了
-                        feedback = Some(format!(
-                            "系统提示：你上一次输出格式有误（{}），请确保严格输出合法的JSON对象，不要在JSON外添加任何文本。",
-                            last_error
-                        ));
+                        // 将解析错误注入重试 feedback，让 LLM 知道上次哪里错了。
+                        // 格式错误的反馈构造见 retry_feedback_for_error 文档
+                        //（技术细节剥离 + 连续失败干净重试）。
+                        if is_format_parse_error(&last_error) {
+                            format_fail_streak += 1;
+                        } else {
+                            format_fail_streak = 0;
+                        }
+                        feedback = retry_feedback_for_error(&last_error, format_fail_streak);
 
                         // 按统一分类决定是否中止重试
                         // call_with_fallback 已尝试所有可用客户端，继续重试无意义
@@ -218,5 +260,48 @@ pub fn cognitive_decision_with_chain(
             ));
             (idle_intent, last_chain)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::retry_feedback_for_error;
+
+    /// 格式解析错误：反馈不携带 serde 技术细节原文。
+    #[test]
+    fn test_format_error_feedback_strips_technical_detail() {
+        let fb = retry_feedback_for_error(
+            "invalid type: null, expected a string at line 1 column 232",
+            1,
+        )
+        .expect("首次格式失败应保留反馈");
+        assert!(!fb.contains("invalid type"), "不得携带错误原文");
+        assert!(!fb.contains("column"), "不得携带定位细节");
+        assert!(fb.contains("格式有误"), "保留格式有误信号");
+    }
+
+    /// 连续第 2 次格式失败起：反馈清空，干净重试。
+    #[test]
+    fn test_format_error_streak_clears_feedback() {
+        let fb = retry_feedback_for_error("expected value at line 1 column 1", 2);
+        assert!(fb.is_none(), "连续 2 次格式失败后应干净重试");
+        let fb = retry_feedback_for_error("missing field `actions`", 3);
+        assert!(fb.is_none());
+    }
+
+    /// 非格式错误：维持原行为（携带错误原文）。
+    #[test]
+    fn test_non_format_error_keeps_detail() {
+        let fb = retry_feedback_for_error("error sending request for url ...", 0)
+            .expect("非格式错误应保留反馈");
+        assert!(fb.contains("error sending request"), "网络错误保留原文");
+    }
+
+    /// 格式失败计数被非格式错误重置：混合序列下污染阻断仍生效。
+    #[test]
+    fn test_streak_semantics() {
+        assert!(retry_feedback_for_error("invalid type: null", 1).is_some());
+        assert!(retry_feedback_for_error("invalid type: null", 2).is_none());
+        assert!(retry_feedback_for_error("timeout", 0).is_some());
     }
 }
