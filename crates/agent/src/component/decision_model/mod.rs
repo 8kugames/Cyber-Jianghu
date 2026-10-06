@@ -28,6 +28,7 @@ pub use questions::{
     EntityCandidates, ItemProvenance, NONE_OPTION, act1_gate_pass, act2_gate_pass, action_criteria,
     bind_act1, build_act1_question, build_act2_question, build_agent1_question, build_candidates,
     build_item1_question, build_loc1_question, build_state_text, cognition_block, norm_id,
+    validate_binding_against_actions,
 };
 pub use server::{DecisionModelParams, SingleAnswer, choice_confidence, softmax_scaled};
 

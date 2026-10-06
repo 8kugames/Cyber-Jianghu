@@ -32,6 +32,14 @@ pub const BINDABLE_ACTIONS: [&str; 8] = ["休整", "移动", "吃", "喝", "用"
 /// act2 可采纳动作集（无需实体绑定即可构造合法意图）
 pub const ACT2_ADOPTABLE_ACTIONS: [&str; 3] = ["无", "休整", "观察"];
 
+/// 服务器编译期 typed 解析的动作闭集（crates/server/src/actions 的
+/// parse_action_data_by_type match 分支镜像）：这些动作的 action_data 必须
+/// 是对象（空对象合法，None 被拒「缺少 action_data」）；「休整」走无参分支
+/// 不受限。闭集仅在 server 重编译时变化（非 yaml 热更），随版本发布同步。
+const TYPED_ACTIONS: [&str; 11] = [
+    "予", "取", "用", "吃", "喝", "移动", "说话", "观察", "攻击", "制造", "教导",
+];
+
 /// act1 为这些动作时问 item1（与评测 build_entity_questions 的 ITEM_ACTS 一致）
 pub const ITEM_ACTS: [&str; 5] = ["取", "用", "吃", "喝", "予"];
 
@@ -350,6 +358,54 @@ pub fn act2_gate_pass(act1: &str, act2: &str) -> bool {
     act2 != act1 && ACT2_ADOPTABLE_ACTIONS.contains(&act2)
 }
 
+/// dm 构造结果对服务器下发动作契约的运行时动态校验（防静默契约漂移）。
+///
+/// 数据源与决策 prompt 同源（available_actions_snapshot，服务器 actions.yaml
+/// 经 ConfigUpdate 推送）：服务器单方面改契约后此处按新契约自检，不满足即
+/// 显式回退（Err 带原因），避免「本地 metrics 采纳率正常、服务器侧静默拒绝」
+/// 的双真相分叉（2026-10-06 观察缺少 action_data 事故：dm 路径 30/30 被拒
+/// 而 take_rate 显示正常）。
+///
+/// 校验分档对齐服务器 parse_action_data_by_type 行为：
+/// - typed 闭集动作：action_data 必须 Some 且为对象 + required_fields 齐备
+/// - 演化动作（闭集外，服务器 Generic 分支 None→Null 放行）：仅当
+///   required_fields 非空时要求对象 + 字段齐备
+/// - 词表外（available 中无此动作，已下架/更名）：Err
+/// - 不校验未知字段（服务器 schema_validator 是 warning 模式，不拦）
+pub fn validate_binding_against_actions(
+    action_type: &str,
+    action_data: &Option<serde_json::Value>,
+    available: &[AvailableAction],
+) -> Result<(), String> {
+    let Some(action) = available.iter().find(|a| a.action == action_type) else {
+        return Err(format!(
+            "动作「{action_type}」不在服务器可用动作列表（可能已下架或更名）"
+        ));
+    };
+    let typed = TYPED_ACTIONS.contains(&action_type);
+    if action.required_fields.is_empty() && !typed {
+        // 演化动作且无必填字段：服务器 Generic 分支宽松放行
+        return Ok(());
+    }
+    let Some(serde_json::Value::Object(map)) = action_data else {
+        if typed {
+            return Err(format!(
+                "动作「{action_type}」缺少 action_data（服务器 typed 解析要求对象，空对象即可）"
+            ));
+        }
+        return Err(format!(
+            "动作「{action_type}」缺少 action_data（必填字段 {:?} 无法承载）",
+            action.required_fields
+        ));
+    };
+    for f in &action.required_fields {
+        if !map.contains_key(f) {
+            return Err(format!("动作「{action_type}」缺少必需字段「{f}」"));
+        }
+    }
+    Ok(())
+}
+
 /// 决策答案 → Intent 集合构造所需的绑定信息
 #[derive(Debug, Clone)]
 pub struct ActionBinding {
@@ -523,6 +579,107 @@ mod tests {
         let mut shuffled = sample_actions();
         shuffled.reverse();
         assert_eq!(action_criteria(&shuffled)[0].0, "予");
+    }
+
+    // === 运行时动态校验（契约漂移防护）===
+
+    fn contract_actions() -> Vec<AvailableAction> {
+        let mut acts = sample_actions();
+        for a in &mut acts {
+            match a.action.as_str() {
+                "移动" => a.required_fields = vec!["target_location".into()],
+                "攻击" => a.required_fields = vec!["target_agent_id".into()],
+                _ => {}
+            }
+        }
+        // 演化动作：无必填字段（服务器 Generic 宽松）
+        acts.push(AvailableAction {
+            action: "祈雨".into(),
+            name: String::new(),
+            description: "祈雨仪式。".into(),
+            category: String::new(),
+            valid_targets: None,
+            required_fields: vec![],
+            optional_fields: vec![],
+            ooc_risk: cyber_jianghu_protocol::OocRisk::Low,
+            requirements: vec![],
+            effects: vec![],
+        });
+        // 演化动作：带必填字段
+        acts.push(AvailableAction {
+            action: "授业".into(),
+            name: String::new(),
+            description: "传授技艺。".into(),
+            category: String::new(),
+            valid_targets: None,
+            required_fields: vec!["target_agent_id".into(), "skill_id".into()],
+            optional_fields: vec![],
+            ooc_risk: cyber_jianghu_protocol::OocRisk::Low,
+            requirements: vec![],
+            effects: vec![],
+        });
+        acts
+    }
+
+    #[test]
+    fn contract_typed_action_requires_object() {
+        let acts = contract_actions();
+        // 观察 typed：None 被拒（2026-10-06 事故回归）
+        assert!(validate_binding_against_actions("观察", &None, &acts).is_err());
+        // 空对象合法（环顾四周）
+        assert!(
+            validate_binding_against_actions("观察", &Some(serde_json::json!({})), &acts).is_ok()
+        );
+    }
+
+    #[test]
+    fn contract_required_fields_enforced() {
+        let acts = contract_actions();
+        // 移动缺 target_location → 拒
+        let bad = validate_binding_against_actions("移动", &Some(serde_json::json!({})), &acts);
+        assert!(bad.is_err_and(|e| e.contains("target_location")));
+        // 齐备 → 过
+        assert!(
+            validate_binding_against_actions(
+                "移动",
+                &Some(serde_json::json!({ "target_location": "城门口" })),
+                &acts
+            )
+            .is_ok()
+        );
+        // 演化动作带必填：缺 skill_id → 拒
+        let evo = validate_binding_against_actions(
+            "授业",
+            &Some(serde_json::json!({ "target_agent_id": "a1" })),
+            &acts,
+        );
+        assert!(evo.is_err_and(|e| e.contains("skill_id")));
+    }
+
+    #[test]
+    fn contract_evolved_action_without_fields_is_lenient() {
+        let acts = contract_actions();
+        // 演化动作无必填字段：服务器 Generic 分支 None→Null 放行
+        assert!(validate_binding_against_actions("祈雨", &None, &acts).is_ok());
+        assert!(
+            validate_binding_against_actions("祈雨", &Some(serde_json::json!({})), &acts).is_ok()
+        );
+    }
+
+    #[test]
+    fn contract_rest_and_delisted_action() {
+        let acts = contract_actions();
+        // 休整无参：None/对象均放行（服务器 ParsedActionData::None 忽略 data）
+        assert!(validate_binding_against_actions("休整", &None, &acts).is_ok());
+        // 词表外（下架/更名）→ 拒
+        assert!(
+            validate_binding_against_actions("说话", &None, &{
+                let mut a = acts.clone();
+                a.retain(|x| x.action != "说话");
+                a
+            })
+            .is_err()
+        );
     }
 
     #[test]

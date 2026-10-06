@@ -347,7 +347,8 @@ async fn decide_via_model(
 
     // 2. 结构化候选 + 动作词表（WorldState 结构化实体，不用文本正则）
     let candidates = dm::build_candidates(world_state);
-    let criteria = dm::action_criteria(&engine.available_actions_snapshot());
+    let available_actions = engine.available_actions_snapshot();
+    let criteria = dm::action_criteria(&available_actions);
     if criteria.is_empty() {
         anyhow::bail!("动作词表为空（game_rules 未下发），决策模型路径不可用");
     }
@@ -421,6 +422,21 @@ async fn decide_via_model(
         return Ok(None);
     }
 
+    // 6.5 运行时动态校验：按服务器下发动作契约自检构造结果（与决策 prompt
+    // 同源），不满足显式回退，防服务器侧契约变更后的静默拒绝
+    if let Err(reason) = dm::validate_binding_against_actions(
+        &binding.action_type,
+        &binding.action_data,
+        &available_actions,
+    ) {
+        dm::metrics::record_fallback_ineligible();
+        warn!(
+            "[decision_model] tick {} act1=「{}」契约校验失败: {}（回退 LLM 决策路径）",
+            tick_id, act1, reason
+        );
+        return Ok(None);
+    }
+
     // 7. 组装 Intents（act2 仅采纳「无/休整/观察」——无需实体绑定）
     let thought1 = decision_thought(&cog_thought(&cog), act1_answer.confidence);
     let mut intents = Vec::new();
@@ -436,8 +452,19 @@ async fn decide_via_model(
     if dm::act2_gate_pass(&act1, &act2)
         && let Some((act2_type, act2_data)) = act2_intent_payload(&act2)
     {
-        let thought2 = decision_thought(&cog_thought(&cog), act2_answer.confidence);
-        intents.push(Intent::new(agent_id, tick_id, act2_type, act2_data).with_thought(thought2));
+        // act2 契约校验失败仅丢弃后续意图（act1 不受牵连）
+        if let Err(reason) =
+            dm::validate_binding_against_actions(act2_type, &act2_data, &available_actions)
+        {
+            warn!(
+                "[decision_model] tick {} act2=「{}」契约校验失败: {}（丢弃后续意图）",
+                tick_id, act2, reason
+            );
+        } else {
+            let thought2 = decision_thought(&cog_thought(&cog), act2_answer.confidence);
+            intents
+                .push(Intent::new(agent_id, tick_id, act2_type, act2_data).with_thought(thought2));
+        }
     }
 
     // 8. 构造完整认知链（决策阶段补全 4 stage；天魂照常四层审查）
