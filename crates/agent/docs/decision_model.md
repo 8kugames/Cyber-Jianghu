@@ -117,7 +117,19 @@ manifest.json schema（`size`/`bytes` 两种键名均可；`kind`/`quant` 可省
 services:
   decision-model:
     image: ghcr.io/ggml-org/llama.cpp:server
-    command: ["-m", "/models/Cyber-Jianghu-Decision-2B-Q5_K_M.gguf", "--host", "0.0.0.0", "--port", "8081", "-c", "16384", "--parallel", "8"]
+    command:
+      [
+        "-m",
+        "/models/Cyber-Jianghu-Decision-2B-Q5_K_M.gguf",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8081",
+        "-c",
+        "16384",
+        "--parallel",
+        "8",
+      ]
     volumes:
       - ./models:/models
     # agent 侧默认经 docker 网络以 http://decision-model:8081 访问
@@ -125,7 +137,34 @@ services:
 
 - POST /api/v1/decision-model/config 新字段三态语义：
   `mode` 缺省/null = 回到环境自动（容器 remote / 本地 local）；
-  `remote_url` 缺省/空串 = 清除已存 URL；`remote_api_key` 缺省 = 保持已存值（留空即可）。
+  `remote_url` 缺省/空串 = 清除已存 URL；`remote_api_key` 缺省 = 保持已存值（留空即可）；
+  `remote_model` 缺省/空串 = 清除路由名。
+
+### 多模型网关（llama.app / llama-swap）
+
+端点为多模型代理时（如 macOS 的 Llama.app `serve`、llama-swap），必须在请求中携带
+`model` 字段路由到决策模型，否则会打到当前活跃模型。配置：
+
+```yaml
+decision_model:
+  mode: remote
+  remote_url: http://localhost:9931 # Llama.app serve 监听地址
+  remote_model: cyber-jianghu/decision-2b # 网关 preset id，需与 models.user.ini 段名一致
+```
+
+Llama.app 自定义模型登记在 `~/.config/llama/models.user.ini`（重启 app 生效）：
+
+```ini
+[cyber-jianghu/decision-2b]
+model = /path/to/Cyber-Jianghu-Decision-2B-Q5_K_M.gguf
+ctx-size = 4096
+```
+
+行为要点：`/completion`、`/tokenize` 携带 model 字段路由；`/health` 不带（网关全局存活
+信号）。首次请求触发模型加载（冷启动秒级）；`--sleep-idle-seconds` 空闲卸载后下次
+决策自动重载；`--models-max 1` 下其他模型被拉起会挤掉决策模型，但 model 路由保证
+不会把决策 prompt 发错模型。letter token 映射由启动时 /tokenize 逐字母校验兜底，
+网关侧 llama.cpp 版本与训练不一致时自动回退 LLM 路径。
 
 ## 三、配置（agent.yaml）
 
@@ -143,6 +182,10 @@ decision_model:
   port: 0 # 0 = 自动空闲端口
   llama_server_args: [] # 如 ["-ngl", "99"]
   startup_timeout_ms: 180000
+  # remote 模式追加（mode: remote 时）：
+  # remote_url: http://decision-model:8081
+  # remote_api_key: sk-xxx
+  # remote_model: my-gateway/decision-2b  # 多模型网关 preset id（单模型端点留空）
 ```
 
 配置之外的正确性前提：`server` 侧 `actions.yaml` 动作词表需与训练口径一致（12 动作，

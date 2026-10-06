@@ -92,6 +92,8 @@ pub struct LlamaServer {
     remote_base: Option<String>,
     /// remote 端点可选 Bearer 令牌
     remote_api_key: Option<String>,
+    /// remote 多模型网关的路由名（None = 不传 model 字段）
+    remote_model: Option<String>,
     /// 可执行文件解析候选（显式配置 → 安装目录 → 可执行文件同级 → PATH）
     binary_candidates: Vec<PathBuf>,
     extra_args: Vec<String>,
@@ -130,6 +132,11 @@ impl LlamaServer {
                 .as_deref()
                 .filter(|k| !k.trim().is_empty())
                 .map(|k| k.trim().to_string()),
+            remote_model: cfg
+                .remote_model
+                .as_deref()
+                .filter(|m| !m.trim().is_empty())
+                .map(|m| m.trim().to_string()),
             binary_candidates: candidates,
             extra_args: cfg.llama_server_args.clone(),
             preferred_port: cfg.port,
@@ -196,9 +203,15 @@ impl LlamaServer {
             if !health_ok_url(&self.http, &self.auth_header(), &base).await {
                 bail!("远程决策端点不可达: {base}");
             }
-            verify_letter_tokens(&self.http, &self.auth_header(), &base, params)
-                .await
-                .context("远程端点 letter token 校验失败（非项目兼容端点或 tokenizer 漂移）")?;
+            verify_letter_tokens(
+                &self.http,
+                &self.auth_header(),
+                &self.remote_model,
+                &base,
+                params,
+            )
+            .await
+            .context("远程端点 letter token 校验失败（非项目兼容端点或 tokenizer 漂移）")?;
             let port = url_port(&base);
             *guard = Some(Running {
                 child: None,
@@ -291,9 +304,15 @@ impl LlamaServer {
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
 
-        verify_letter_tokens(&self.http, &self.auth_header(), &base_url, params)
-            .await
-            .context("letter token 映射校验失败（tokenizer/chat 模板与训练分布不一致）")?;
+        verify_letter_tokens(
+            &self.http,
+            &self.auth_header(),
+            &self.remote_model,
+            &base_url,
+            params,
+        )
+        .await
+        .context("letter token 映射校验失败（tokenizer/chat 模板与训练分布不一致）")?;
 
         *guard = Some(Running {
             child: Some(child),
@@ -362,13 +381,16 @@ impl LlamaServer {
             .as_ref()
             .ok_or_else(|| anyhow!("llama-server 未启动"))?;
         for n_probs in [256usize, 262_144] {
-            let body = serde_json::json!({
+            let mut body = serde_json::json!({
                 "prompt": prompt_text,
                 "n_predict": 1,
                 "temperature": -1,
                 "n_probs": n_probs,
                 "cache_prompt": false,
             });
+            if let Some(m) = &self.remote_model {
+                body["model"] = serde_json::Value::String(m.clone());
+            }
             let url = format!("{}/completion", running.base_url);
             let mut req = self.http.post(&url).json(&body);
             if let Some(key) = self.auth_header() {
@@ -491,6 +513,7 @@ fn url_port(base_url: &str) -> u16 {
 async fn verify_letter_tokens(
     http: &reqwest::Client,
     auth: &Option<String>,
+    remote_model: &Option<String>,
     base_url: &str,
     params: &DecisionModelParams,
 ) -> Result<()> {
@@ -510,9 +533,13 @@ async fn verify_letter_tokens(
     let tokenize = |content: String| {
         let http = http.clone();
         let auth = auth.clone();
+        let remote_model = remote_model.clone();
         let url = format!("{base_url}/tokenize");
         async move {
-            let body = serde_json::json!({ "content": content, "add_special": false });
+            let mut body = serde_json::json!({ "content": content, "add_special": false });
+            if let Some(m) = remote_model {
+                body["model"] = serde_json::Value::String(m);
+            }
             let mut req = http.post(&url).json(&body);
             if let Some(key) = auth {
                 req = req.bearer_auth(key);
@@ -675,6 +702,24 @@ mod tests {
         assert_eq!(choice_confidence(&flat), 0.0);
         // 单选项 → 1.0
         assert_eq!(choice_confidence(&[1.0]), 1.0);
+    }
+
+    /// remote_model 解析：trim 后非空才生效（多模型网关路由名）
+    #[test]
+    fn remote_model_trimmed_or_none() {
+        let cfg = crate::config::DecisionModelConfig {
+            remote_model: Some("  llama.app/decision-2b  ".into()),
+            ..Default::default()
+        };
+        let srv = LlamaServer::new(&cfg, std::path::Path::new("/tmp"));
+        assert_eq!(srv.remote_model.as_deref(), Some("llama.app/decision-2b"));
+
+        let cfg_blank = crate::config::DecisionModelConfig {
+            remote_model: Some("   ".into()),
+            ..Default::default()
+        };
+        let srv2 = LlamaServer::new(&cfg_blank, std::path::Path::new("/tmp"));
+        assert!(srv2.remote_model.is_none(), "空白字符串应视为未配置");
     }
 
     /// letter_token_ids 与 Qwen 系已知字母表一致（"A".."Z" = id 32..57）

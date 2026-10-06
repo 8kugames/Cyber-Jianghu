@@ -62,6 +62,7 @@ async fn status_snapshot(state: &HttpApiState) -> serde_json::Value {
                 crate::config::DecisionModelMode::Remote => "remote",
             }).unwrap_or(if dm::is_in_container() { "remote" } else { "local" }),
             "remote_url": cfg.as_ref().and_then(|c| c.remote_url.clone()),
+            "remote_model": cfg.as_ref().and_then(|c| c.remote_model.clone()),
             "remote_api_key_set": cfg
                 .as_ref()
                 .and_then(|c| c.remote_api_key.as_deref())
@@ -84,6 +85,7 @@ async fn status_snapshot(state: &HttpApiState) -> serde_json::Value {
         "timeout_ms": manager.config().timeout_ms,
         "deploy": deploy,
         "remote_url": manager.config().remote_url,
+        "remote_model": manager.config().remote_model,
         "remote_api_key_set": manager.config().remote_api_key.as_deref().is_some_and(|k| !k.trim().is_empty()),
         "in_docker": dm::is_in_container(),
         "status": status,
@@ -143,6 +145,9 @@ pub(crate) struct DecisionModelConfigUpdate {
     pub remote_url: Option<String>,
     #[serde(default)]
     pub remote_api_key: Option<String>,
+    /// 多模型网关的路由名（llama.app serve / llama-swap preset id）；空 = 清空
+    #[serde(default)]
+    pub remote_model: Option<String>,
 }
 
 /// POST /api/v1/decision-model/config
@@ -216,6 +221,12 @@ pub(crate) async fn decision_model_config_handler(
         .map(str::trim)
         .filter(|k| !k.is_empty())
         .map(str::to_string);
+    let remote_model = update
+        .remote_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(str::to_string);
 
     // 持久化（读盘 → 备份 → 改 → 原子写盘）
     let mut config = match crate::config::Config::from_file(&state.config_path) {
@@ -238,6 +249,7 @@ pub(crate) async fn decision_model_config_handler(
     config.decision_model.timeout_ms = update.timeout_ms;
     config.decision_model.mode = mode;
     config.decision_model.remote_url = remote_url;
+    config.decision_model.remote_model = remote_model;
     // 密钥留空 = 保持已存值（不回显原值的面板惯例）
     if remote_api_key.is_some() {
         config.decision_model.remote_api_key = remote_api_key;

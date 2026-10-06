@@ -58,6 +58,8 @@ decision_model:
   # mode: remote
   # remote_url: http://decision-model:8081
   # remote_api_key: sk-xxx    # 端点鉴权（可选）
+  # remote_model: my-gateway/decision-2b  # 多模型网关路由名（llama.app serve / llama-swap
+  #                                        # 的 preset id；单模型 llama-server 留空）
   # ModelScope 模型仓（主下载源；默认官方发布仓，含 manifest.json + gguf + decision_config.json）
   modelscope_repo: "8kugames/Cyber-Jianghu-Decision-2B"
   # GitHub Releases 下载基址（备源；latest/download/<file> 兜底，置空串禁用该源）

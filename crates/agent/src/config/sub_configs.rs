@@ -413,6 +413,12 @@ pub struct DecisionModelConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_api_key: Option<String>,
 
+    /// remote 端点的模型路由名（多模型网关用，如 llama.app serve / llama-swap
+    /// 的 preset id）。设置后 /completion 与 /tokenize 请求携带 model 字段；
+    /// 单模型 llama-server 留空（默认不传）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_model: Option<String>,
+
     /// ModelScope 模型仓（主下载源，形如 "owner/repo"；默认官方发布仓）
     #[serde(default = "default_decision_model_modelscope_repo")]
     pub modelscope_repo: String,
@@ -466,6 +472,7 @@ impl Default for DecisionModelConfig {
             mode: None,
             remote_url: None,
             remote_api_key: None,
+            remote_model: None,
             modelscope_repo: default_decision_model_modelscope_repo(),
             github_release_url: default_decision_model_github_release_url(),
             quant: default_decision_model_quant(),
