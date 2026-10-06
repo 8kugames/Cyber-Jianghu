@@ -45,6 +45,8 @@ pub struct CharacterInfoResponse {
     // === 注册信息 ===
     /// 注册时间（ISO 8601 格式）
     pub registered_at: Option<String>,
+    /// 所属设备 ID（设备未注册时为 None）
+    pub device_id: Option<String>,
 
     // === WorldState 实时数据 ===
     /// 当前属性（带叙事描述）
@@ -175,10 +177,17 @@ pub(crate) async fn get_character_handler(State(state): State<HttpApiState>) -> 
     let current_server_url = state.server_http_url.read().await.clone();
     let server_url = character.server_url.clone().or(Some(current_server_url));
 
-    // 7. 构建响应
+    // 7. 构建响应（device_id 取自设备身份，未注册时为 None）
+    let device_id = state
+        .device_config
+        .read()
+        .await
+        .as_ref()
+        .map(|d| d.device_id.to_string());
     let response = CharacterInfoResponse {
         agent_id,
         server_url,
+        device_id,
         name: character.name.clone(),
         age: character.age,
         gender: character.gender.clone(),
@@ -291,10 +300,17 @@ pub(crate) async fn get_character_by_id_handler(
         let attributes = enrich_attributes_with_descriptions(raw_attributes, &narrative_config);
         let current_server_url = state.server_http_url.read().await.clone();
         let server_url = character.server_url.clone().or(Some(current_server_url));
+        let device_id = state
+            .device_config
+            .read()
+            .await
+            .as_ref()
+            .map(|d| d.device_id.to_string());
 
         return Json(CharacterInfoResponse {
             agent_id: character.agent_id.map(|id| id.to_string()),
             server_url,
+            device_id,
             name: character.name.clone(),
             age: character.age,
             gender: character.gender.clone(),
@@ -340,6 +356,12 @@ pub(crate) async fn get_character_by_id_handler(
     // 3. 非当前角色，返回配置文件数据（不包含实时状态）
     let current_server_url = state.server_http_url.read().await.clone();
     let server_url = character.server_url.clone().or(Some(current_server_url));
+    let device_id = state
+        .device_config
+        .read()
+        .await
+        .as_ref()
+        .map(|d| d.device_id.to_string());
 
     // 非当前角色也做属性丰富化，以便前端正确渲染
     let raw_attrs = character
@@ -352,6 +374,7 @@ pub(crate) async fn get_character_by_id_handler(
     let response = CharacterInfoResponse {
         agent_id: character.agent_id.map(|id| id.to_string()),
         server_url,
+        device_id,
         name: character.name.clone(),
         age: character.age,
         gender: character.gender.clone(),

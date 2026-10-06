@@ -427,6 +427,9 @@ function renderBasicInfo(agent) {
     escapeHtml(agent.id) +
     "</span></div>" +
     '<div class="detail-grid">' +
+    '<div class="detail-item"><span class="detail-label">设备 ID:</span> <span style="font-family: monospace; font-size: 12px;">' +
+    escapeHtml(agent.device_id || "-") +
+    "</span></div>" +
     '<div class="detail-item"><span class="detail-label">位置:</span> ' +
     escapeHtml(getLocationName(agent.location)) +
     "</div>" +

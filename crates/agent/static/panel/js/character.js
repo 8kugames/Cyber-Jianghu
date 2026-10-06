@@ -136,6 +136,7 @@ function renderCharHeader(data) {
     const agentId = data.agent_id || '-';
     const registeredAt = formatDateTime(data.registered_at);
     const serverUrl = data.server_url || '-';
+    const deviceId = data.device_id || '-';
     const statusColor = status === 'alive' ? 'var(--success)' : 'var(--danger)';
 
     return `
@@ -152,6 +153,7 @@ function renderCharHeader(data) {
             <div style="font-size:11px;color:var(--text-muted)">
                 注册时间: ${escapeHtml(registeredAt)} · Server: ${escapeHtml(serverUrl)}
             </div>
+            <div style="font-size:11px;color:var(--text-muted)" title="设备 ID">设备: ${escapeHtml(deviceId)}</div>
         </div>
     `;
 }

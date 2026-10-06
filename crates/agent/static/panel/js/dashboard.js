@@ -81,6 +81,7 @@ async function loadCharStatus() {
         const gender = character?.gender || '-';
         const registeredAt = formatDateTime(character?.registered_at);
         const serverUrl = character?.server_url || '-';
+        const deviceId = character?.device_id || '-';
 
         // Group attributes by category
         const categories = meta.categories || {};
@@ -124,6 +125,7 @@ async function loadCharStatus() {
                     <div style="font-size:11px;color:var(--text-muted);margin-top:1px">${escapeHtml(agentId)}</div>
                     <div style="font-size:11px;color:var(--text-muted);margin-top:1px">注册时间: ${escapeHtml(registeredAt)}</div>
                     <div style="font-size:11px;color:var(--text-muted);margin-top:1px">Server: ${escapeHtml(serverUrl)}</div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:1px" title="设备 ID">设备: ${escapeHtml(deviceId)}</div>
                 </div>
             </div>
             ${barsHtml}

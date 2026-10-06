@@ -71,6 +71,8 @@ pub struct AgentDetail {
     pub known_recipes: Vec<AgentKnownRecipe>,
     /// 角色注册时上报的 LLM 模型 ID（如 glm-4、gpt-4o）
     pub model_id: Option<String>,
+    /// 所属设备 ID（agents.device_id 列，NOT NULL）
+    pub device_id: Uuid,
 }
 
 #[derive(Serialize)]
@@ -348,6 +350,7 @@ pub async fn get_agent_details(
         roles,
         known_recipes,
         model_id: agent_row.get("model_id"),
+        device_id: agent_row.get("device_id"),
     }))
 }
 
