@@ -492,6 +492,9 @@ pub fn bind_act1(
                                     .into(),
                                 ),
                             );
+                            // 服务器契约：取 的 required_fields 含 quantity（运行时动态
+                            // 校验 2026-10-06 实战拦截过缺字段构造）
+                            data.insert("quantity".into(), serde_json::Value::from(1));
                             ActionBinding {
                                 action_type: act1.into(),
                                 action_data: Some(serde_json::Value::Object(data)),
@@ -886,10 +889,11 @@ mod tests {
                 .is_some()
         );
         assert!(bind_act1("吃", None, None, None, &c).bind_error.is_some());
-        // 取：地面来源注入 source_type=ground
+        // 取：地面来源注入 source_type=ground + quantity（服务器 required_fields）
         let b = bind_act1("取", Some("野果[aabbccdd]"), None, None, &c);
         let d = b.action_data.expect("取 绑定成功");
         assert_eq!(d["source_type"], "ground");
+        assert_eq!(d["quantity"], serde_json::json!(1));
         // 取：背包物品 → 回退
         assert!(
             bind_act1("取", Some("水壶[b75ef605]"), None, None, &c)
