@@ -433,16 +433,11 @@ async fn decide_via_model(
         )
         .with_thought(thought1),
     );
-    if dm::act2_gate_pass(&act1, &act2) {
+    if dm::act2_gate_pass(&act1, &act2)
+        && let Some((act2_type, act2_data)) = act2_intent_payload(&act2)
+    {
         let thought2 = decision_thought(&cog_thought(&cog), act2_answer.confidence);
-        // 服务器 typed 解析要求观察的 action_data 存在（空对象即可）；休整走无参路径
-        let act2_data = if act2 == "观察" {
-            Some(serde_json::json!({}))
-        } else {
-            None
-        };
-        intents
-            .push(Intent::new(agent_id, tick_id, act2.as_str(), act2_data).with_thought(thought2));
+        intents.push(Intent::new(agent_id, tick_id, act2_type, act2_data).with_thought(thought2));
     }
 
     // 8. 构造完整认知链（决策阶段补全 4 stage；天魂照常四层审查）
@@ -556,9 +551,42 @@ fn cog_thought(cog: &CognitionOutput) -> String {
         .unwrap_or_default()
 }
 
+/// act2 采纳后的 Intent 载荷：act2「无」的采纳语义是本 tick 无后续动作，
+/// 不构造 intent；「观察」需空对象（服务器 typed 解析要求 action_data 存在）；
+/// 「休整」走无参路径。gate 未涵盖的动作一律不构造（防御）。
+fn act2_intent_payload(act2: &str) -> Option<(&str, Option<serde_json::Value>)> {
+    match act2 {
+        "观察" => Some(("观察", Some(serde_json::json!({})))),
+        "休整" => Some(("休整", None)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::retry_feedback_for_error;
+
+    /// act2 采纳语义：「无」不构造后续 intent，「观察」带空对象，「休整」无参。
+    /// 「无」若被构造成 intent，会被天魂以「不在动作词表」驳回并污染整条队列
+    /// （2026-10-06 T18790128 生产事故：观察✓+无✗ → 整体驳回 → 自纠/chaos 链）。
+    #[test]
+    fn act2_none_yields_no_intent() {
+        assert!(super::act2_intent_payload("无").is_none());
+    }
+
+    #[test]
+    fn act2_observe_carries_empty_object() {
+        let (t, d) = super::act2_intent_payload("观察").expect("观察应构造 intent");
+        assert_eq!(t, "观察");
+        assert_eq!(d, Some(serde_json::json!({})));
+    }
+
+    #[test]
+    fn act2_rest_is_parameterless() {
+        let (t, d) = super::act2_intent_payload("休整").expect("休整应构造 intent");
+        assert_eq!(t, "休整");
+        assert!(d.is_none());
+    }
 
     /// 决策来源标注格式
     #[test]
