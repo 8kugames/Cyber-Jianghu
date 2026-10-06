@@ -24,6 +24,7 @@ use http_body_util::StreamBody;
 
 use super::HttpApiState;
 use super::sse_util::{HEARTBEAT_INTERVAL_SECS, sse_frame, sse_response};
+use crate::component::decision_model as dm;
 
 /// GET /api/v1/decision-model/status
 pub(crate) async fn decision_model_status_handler(State(state): State<HttpApiState>) -> Response {
@@ -45,22 +46,46 @@ async fn status_snapshot(state: &HttpApiState) -> serde_json::Value {
         let cfg = crate::config::Config::from_file(&state.config_path)
             .ok()
             .map(|c| c.decision_model);
+        // 停用态同样回填部署字段：面板表单据此渲染，避免下一次保存把
+        // mode/remote_url 静默清掉（与 quant/threshold 回填同因）
         return serde_json::json!({
             "enabled": false,
             "quant_configured": cfg.as_ref().map(|c| c.quant.clone()).unwrap_or_default(),
             "threshold": cfg.as_ref().map(|c| c.threshold).unwrap_or_default(),
             "timeout_ms": cfg.as_ref().map(|c| c.timeout_ms).unwrap_or_default(),
+            "mode": cfg.as_ref().and_then(|c| c.mode).map(|m| match m {
+                crate::config::DecisionModelMode::Local => "local".to_string(),
+                crate::config::DecisionModelMode::Remote => "remote".to_string(),
+            }),
+            "deploy": cfg.as_ref().and_then(|c| c.mode.as_ref()).map(|m| match m {
+                crate::config::DecisionModelMode::Local => "local",
+                crate::config::DecisionModelMode::Remote => "remote",
+            }).unwrap_or(if dm::is_in_container() { "remote" } else { "local" }),
+            "remote_url": cfg.as_ref().and_then(|c| c.remote_url.clone()),
+            "remote_api_key_set": cfg
+                .as_ref()
+                .and_then(|c| c.remote_api_key.as_deref())
+                .is_some_and(|k| !k.trim().is_empty()),
+            "in_docker": dm::is_in_container(),
             "status": { "state": "disabled" },
         });
     };
     let status = serde_json::to_value(manager.status().await).unwrap_or(serde_json::json!({
         "state": "unknown"
     }));
+    let deploy = match manager.deploy() {
+        dm::Deploy::Local => "local",
+        dm::Deploy::Remote { .. } => "remote",
+    };
     serde_json::json!({
         "enabled": manager.is_enabled(),
         "threshold": manager.config().threshold,
         "quant_configured": manager.config().quant,
         "timeout_ms": manager.config().timeout_ms,
+        "deploy": deploy,
+        "remote_url": manager.config().remote_url,
+        "remote_api_key_set": manager.config().remote_api_key.as_deref().is_some_and(|k| !k.trim().is_empty()),
+        "in_docker": dm::is_in_container(),
         "status": status,
     })
 }
@@ -111,6 +136,13 @@ pub(crate) struct DecisionModelConfigUpdate {
     pub quant: String,
     pub threshold: f32,
     pub timeout_ms: u64,
+    /// 部署模式（缺省 = 环境自动：容器内 remote，本地 local）
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub remote_url: Option<String>,
+    #[serde(default)]
+    pub remote_api_key: Option<String>,
 }
 
 /// POST /api/v1/decision-model/config
@@ -156,6 +188,35 @@ pub(crate) async fn decision_model_config_handler(
             .into_response();
     }
 
+    // 部署模式与端点规则（容器内禁 local / remote 需 URL，容器内可缺省发现地址）
+    let mode = match update.mode.as_deref() {
+        None | Some("") => None,
+        Some("local") => Some(crate::config::DecisionModelMode::Local),
+        Some("remote") => Some(crate::config::DecisionModelMode::Remote),
+        Some(other) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                axum::Json(serde_json::json!({
+                    "success": false,
+                    "message": format!("mode 非法: {other}（可选 local / remote）")
+                })),
+            )
+                .into_response();
+        }
+    };
+    let remote_url = update
+        .remote_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .map(str::to_string);
+    let remote_api_key = update
+        .remote_api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+        .map(str::to_string);
+
     // 持久化（读盘 → 备份 → 改 → 原子写盘）
     let mut config = match crate::config::Config::from_file(&state.config_path) {
         Ok(c) => c,
@@ -175,20 +236,24 @@ pub(crate) async fn decision_model_config_handler(
     config.decision_model.quant = quant;
     config.decision_model.threshold = update.threshold;
     config.decision_model.timeout_ms = update.timeout_ms;
-    // 启用时与启动装配同口径：无下载源则拒绝（否则 manager 恒 Failed 且每 tick 回退告警）
-    if update.enabled {
-        let sources_configured = !config.decision_model.modelscope_repo.trim().is_empty()
-            || !config.decision_model.github_release_url.trim().is_empty();
-        if !sources_configured {
-            return (
-                StatusCode::BAD_REQUEST,
-                axum::Json(serde_json::json!({
-                    "success": false,
-                    "message": "modelscope_repo 与 github_release_url 均未配置，无法启用（请在 agent.yaml 配置下载源）"
-                })),
-            )
-                .into_response();
-        }
+    config.decision_model.mode = mode;
+    config.decision_model.remote_url = remote_url;
+    // 密钥留空 = 保持已存值（不回显原值的面板惯例）
+    if remote_api_key.is_some() {
+        config.decision_model.remote_api_key = remote_api_key;
+    }
+    // 启用时与启动装配同口径：全量校验（local 需下载源；容器内禁 local；remote 需 URL）
+    if update.enabled
+        && let Err(msg) = dm::validate_config(&config.decision_model)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({
+                "success": false,
+                "message": format!("决策模型配置不可用: {msg}")
+            })),
+        )
+            .into_response();
     }
     if let Err(e) = config.save_to_file(&state.config_path) {
         tracing::error!("[decision_model] 保存配置文件失败: {e}");

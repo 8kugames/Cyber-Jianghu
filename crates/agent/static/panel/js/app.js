@@ -161,7 +161,7 @@ async function init() {
 
     // Initial route
     if (!window.location.hash) {
-        const configured = appState.setupStatus?.server_configured && appState.setupStatus?.llm_configured;
+        const configured = appState.setupStatus?.has_server && appState.setupStatus?.has_llm;
         window.location.hash = configured ? '#/dashboard' : '#/settings';
     }
 

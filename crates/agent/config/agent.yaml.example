@@ -53,6 +53,11 @@ role: player
 decision_model:
   # 总开关（默认 true；用户可主动关闭）
   enabled: true
+  # 部署模式：local = 下载自启动（本地缺省）；remote = URL 访问已部署端点
+  # （docker 唯一允许；容器内缺省用发现地址 http://decision-model:8081）
+  # mode: remote
+  # remote_url: http://decision-model:8081
+  # remote_api_key: sk-xxx    # 端点鉴权（可选）
   # ModelScope 模型仓（主下载源；默认官方发布仓，含 manifest.json + gguf + decision_config.json）
   modelscope_repo: "8kugames/Cyber-Jianghu-Decision-2B"
   # GitHub Releases 下载基址（备源；latest/download/<file> 兜底，置空串禁用该源）

@@ -98,6 +98,7 @@ enum ManagerState {
 /// 决策模型管理器（Arc 共享；每 agent 进程一个实例）
 pub struct DecisionModelManager {
     cfg: DecisionModelConfig,
+    deploy: Deploy,
     install_dir: PathBuf,
     source: DownloadSource,
     resolved_quant: String,
@@ -122,12 +123,18 @@ impl DecisionModelManager {
             .map(PathBuf::from)
             .unwrap_or_else(|| crate::config::data_base_dir().join("decision-model"));
         let resolved_quant = resolve_quant(&cfg);
+        let deploy = resolve_deploy(&cfg).unwrap_or_else(|e| {
+            warn!("决策模型部署模式不可用（{}），不装配（走既有 LLM 路径）", e);
+            Deploy::Local
+        });
+        let server = LlamaServer::new(&cfg, &install_dir).with_deploy(deploy.clone());
         Self {
+            deploy,
+            server,
             source: DownloadSource {
                 modelscope_repo: cfg.modelscope_repo.clone(),
                 github_release_base: cfg.github_release_url.clone(),
             },
-            server: LlamaServer::new(&cfg, &install_dir),
             downloader: Downloader::new(),
             install_dir,
             cfg,
@@ -146,6 +153,11 @@ impl DecisionModelManager {
 
     pub fn config(&self) -> &DecisionModelConfig {
         &self.cfg
+    }
+
+    /// 生效部署形态（面板/状态端点展示用）
+    pub fn deploy(&self) -> &Deploy {
+        &self.deploy
     }
 
     /// 置信度门控阈值
@@ -206,6 +218,18 @@ impl DecisionModelManager {
             _ => None,
         };
         if let Some(info) = existing {
+            return Ok(info);
+        }
+        // remote 模式无本地资产可装：健康探活由 llama-server 模块首问执行，
+        // 此处直接置就绪（兼容性校验失败会在决策路径回退并冷却）
+        if let Deploy::Remote { ref base_url } = self.deploy {
+            let info = InstallInfo {
+                version: "remote".to_string(),
+                quant: "endpoint".to_string(),
+                gguf_path: std::path::PathBuf::from(base_url),
+                params: project_default_params(),
+            };
+            *self.state.write().await = ManagerState::Ready(info.clone());
             return Ok(info);
         }
         let _guard = self.install_lock.lock().await;
@@ -401,15 +425,30 @@ impl DecisionModelManager {
 
     /// 启动后台任务入口：先尝试本地恢复，失败才下载
     pub async fn install_if_needed(&self) {
-        if let Some(info) = self.try_restore_local().await {
-            info!(
-                "决策模型本地恢复: version={} quant={}",
-                info.version, info.quant
-            );
-            *self.state.write().await = ManagerState::Ready(info);
-            return;
+        match self.deploy {
+            Deploy::Remote { ref base_url } => {
+                // remote：无本地资产；llama-server 模块在首问时做健康检查与
+                // letter 校验，此处即席探活一次让状态尽快可视
+                info!("决策模型 remote 模式: 端点 {base_url}（首问时校验兼容性）");
+                *self.state.write().await = ManagerState::Ready(InstallInfo {
+                    version: "remote".to_string(),
+                    quant: "endpoint".to_string(),
+                    gguf_path: std::path::PathBuf::from(base_url),
+                    params: project_default_params(),
+                });
+            }
+            Deploy::Local => {
+                if let Some(info) = self.try_restore_local().await {
+                    info!(
+                        "决策模型本地恢复: version={} quant={}",
+                        info.version, info.quant
+                    );
+                    *self.state.write().await = ManagerState::Ready(info);
+                    return;
+                }
+                let _ = self.ensure_installed().await;
+            }
         }
-        let _ = self.ensure_installed().await;
     }
 
     /// 单问题决策（一次前向回答一个问题；互斥由 llama-server 模块内锁保证）
@@ -529,6 +568,85 @@ fn manifest_entry() -> manifest::ManifestFile {
 }
 
 /// 量化档位解析：默认取配置；低配（可用内存低于阈值）自动降 q4_k_s
+/// 配置可用性校验（启动装配闸与面板保存共用）：
+/// local 需下载源；remote 需可解析 URL（容器内可用默认发现地址）；
+/// 容器内显式 local 非法。
+pub fn validate_config(cfg: &DecisionModelConfig) -> Result<(), String> {
+    match resolve_deploy(cfg)? {
+        Deploy::Local => {
+            let sources =
+                !cfg.modelscope_repo.trim().is_empty() || !cfg.github_release_url.trim().is_empty();
+            if sources {
+                Ok(())
+            } else {
+                Err("local 模式需要配置下载源（modelscope_repo / github_release_url）".to_string())
+            }
+        }
+        Deploy::Remote { .. } => Ok(()),
+    }
+}
+
+/// 是否运行在容器内（docker 部署仅允许 remote 模式）
+pub fn is_in_container() -> bool {
+    std::path::Path::new("/.dockerenv").exists() || std::path::Path::new("/.containerenv").exists()
+}
+
+/// 解析后的部署形态
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Deploy {
+    /// 下载模型并自启动 llama-server
+    Local,
+    /// 访问外部端点（base_url 已含协议与端口）
+    Remote { base_url: String },
+}
+
+/// 部署模式解析：显式配置优先；缺省按环境（容器内 → remote，本地 → local）。
+/// docker 内显式 local 拒绝（每容器重复下载自部署是被禁止的形态）；
+/// remote 缺 URL 时容器内用 docker 网络发现默认地址，其余环境报错。
+fn resolve_deploy(cfg: &DecisionModelConfig) -> Result<Deploy, String> {
+    let in_docker = is_in_container();
+    let want_remote = match cfg.mode {
+        Some(crate::config::DecisionModelMode::Remote) => true,
+        Some(crate::config::DecisionModelMode::Local) => false,
+        None => in_docker,
+    };
+    if want_remote {
+        let url = cfg
+            .remote_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|u| !u.is_empty());
+        let base_url = match url {
+            Some(u) => u.trim_end_matches('/').to_string(),
+            None if in_docker => {
+                warn!(
+                    "remote 模式未配置 remote_url，使用 docker 网络发现默认地址 {}（compose 服务名约定）",
+                    crate::config::DECISION_MODEL_DOCKER_DEFAULT_URL
+                );
+                crate::config::DECISION_MODEL_DOCKER_DEFAULT_URL.to_string()
+            }
+            None => return Err("remote 模式需要配置 remote_url".to_string()),
+        };
+        return Ok(Deploy::Remote { base_url });
+    }
+    if in_docker {
+        return Err(
+            "docker 部署仅支持 remote 模式（mode=remote + remote_url）：容器内禁止重复下载与自部署"
+                .to_string(),
+        );
+    }
+    Ok(Deploy::Local)
+}
+
+/// remote 模式的项目契约参数（端点须服务项目专用模型；letter ids 与校准温度
+/// 是模型绑定常量，与发布仓 decision_config.json 一致）
+fn project_default_params() -> DecisionModelParams {
+    DecisionModelParams::parse(
+        br#"{"format":"StartLux-Decision-v1","letter_token_ids":[32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57],"temperature_by_type":{"choice":1.3742,"noul":1.3742,"score":1.3742},"max_options_per_pass":26,"wide_choice":{"group":25,"keep":3,"residual":0.001}}"#,
+    )
+    .expect("项目契约参数必须可解析")
+}
+
 fn resolve_quant(cfg: &DecisionModelConfig) -> String {
     let configured = cfg.quant.trim().to_ascii_lowercase();
     let configured = if crate::config::DECISION_MODEL_QUANTS.contains(&configured.as_str()) {
@@ -656,6 +774,51 @@ pub mod metrics {
 
 #[cfg(test)]
 mod tests {
+
+    fn cfg_with(
+        mode: Option<crate::config::DecisionModelMode>,
+        url: Option<&str>,
+    ) -> DecisionModelConfig {
+        DecisionModelConfig {
+            mode,
+            remote_url: url.map(|u| u.to_string()),
+            ..DecisionModelConfig::default()
+        }
+    }
+
+    #[test]
+    fn resolve_deploy_env_defaults_and_rules() {
+        use crate::config::DecisionModelMode as M;
+        // 本地环境：缺省 local；显式 remote 需 URL
+        assert!(matches!(
+            super::resolve_deploy(&cfg_with(None, None)),
+            Ok(super::Deploy::Local)
+        ));
+        assert!(super::resolve_deploy(&cfg_with(Some(M::Remote), None)).is_err());
+        assert!(matches!(
+            super::resolve_deploy(&cfg_with(Some(M::Remote), Some("http://h:8081/"))),
+            Ok(super::Deploy::Remote { ref base_url }) if base_url == "http://h:8081"
+        ));
+        // docker 内显式 local 非法（容器内仅远程）——通过 validate_config 断言
+        // （resolve_deploy 依赖真实 /.dockerenv，无法在单测中切换容器环境）
+        // 本地环境 local 无下载源 → validate_config 拒绝
+        let no_sources = DecisionModelConfig {
+            modelscope_repo: String::new(),
+            github_release_url: String::new(),
+            ..cfg_with(None, None)
+        };
+        assert!(super::validate_config(&no_sources).is_err());
+        // remote 有 URL → validate_config 通过（无需下载源）
+        let remote_ok = cfg_with(Some(M::Remote), Some("http://h:8081"));
+        assert!(super::validate_config(&remote_ok).is_ok());
+    }
+
+    #[test]
+    fn project_default_params_match_contract() {
+        let p = super::project_default_params();
+        assert_eq!(p.letter_token_ids[0], 32);
+        assert_eq!(p.letter_token_ids[25], 57);
+    }
     use super::*;
 
     /// 构造测试归档（files: 相对路径 -> 内容），返回归档路径

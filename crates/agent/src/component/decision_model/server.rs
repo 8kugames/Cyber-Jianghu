@@ -79,7 +79,8 @@ pub struct SingleAnswer {
 }
 
 struct Running {
-    child: tokio::process::Child,
+    /// None = remote 模式（无子进程，base_url 指向外部端点）
+    child: Option<tokio::process::Child>,
     port: u16,
     gguf_path: PathBuf,
     base_url: String,
@@ -87,6 +88,10 @@ struct Running {
 
 /// llama-server 运行时（懒启动；同一时刻至多一个子进程）
 pub struct LlamaServer {
+    /// remote 模式端点基址（配置 mode=remote 时；本地模式为 None）
+    remote_base: Option<String>,
+    /// remote 端点可选 Bearer 令牌
+    remote_api_key: Option<String>,
     /// 可执行文件解析候选（显式配置 → 安装目录 → 可执行文件同级 → PATH）
     binary_candidates: Vec<PathBuf>,
     extra_args: Vec<String>,
@@ -117,7 +122,14 @@ impl LlamaServer {
             candidates.push(dir.join(exe_name));
         }
         candidates.push(PathBuf::from(exe_name)); // PATH 查找
+        // remote_base 由 with_deploy 注入解析结果（单一真相）；构造缺省 Local
         Self {
+            remote_base: None,
+            remote_api_key: cfg
+                .remote_api_key
+                .as_deref()
+                .filter(|k| !k.trim().is_empty())
+                .map(|k| k.trim().to_string()),
             binary_candidates: candidates,
             extra_args: cfg.llama_server_args.clone(),
             preferred_port: cfg.port,
@@ -173,13 +185,39 @@ impl LlamaServer {
         binary_hint_dir: Option<&Path>,
     ) -> Result<u16> {
         let mut guard = self.running.lock().await;
+        // remote 模式：永不拉起子进程，只做健康检查与 letter 校验
+        if let Some(base) = self.remote_base.clone() {
+            if let Some(r) = guard.as_ref()
+                && r.base_url == base
+                && health_ok_url(&self.http, &self.auth_header(), &r.base_url).await
+            {
+                return Ok(r.port);
+            }
+            if !health_ok_url(&self.http, &self.auth_header(), &base).await {
+                bail!("远程决策端点不可达: {base}");
+            }
+            verify_letter_tokens(&self.http, &self.auth_header(), &base, params)
+                .await
+                .context("远程端点 letter token 校验失败（非项目兼容端点或 tokenizer 漂移）")?;
+            let port = url_port(&base);
+            *guard = Some(Running {
+                child: None,
+                port,
+                gguf_path: PathBuf::new(),
+                base_url: base.clone(),
+            });
+            info!("远程决策端点就绪: {base}");
+            return Ok(port);
+        }
         if let Some(r) = guard.as_ref() {
             if r.gguf_path == gguf_path && health_ok(&self.http, r.port).await {
                 return Ok(r.port);
             }
             info!("决策模型权重变更或服务失活，重启 llama-server");
-            if let Some(mut old) = guard.take() {
-                let _ = old.child.kill().await;
+            if let Some(mut old) = guard.take()
+                && let Some(mut child) = old.child.take()
+            {
+                let _ = child.kill().await;
             }
         }
         let binary = self.resolve_binary(binary_hint_dir)?;
@@ -253,12 +291,12 @@ impl LlamaServer {
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
 
-        verify_letter_tokens(&self.http, port, params)
+        verify_letter_tokens(&self.http, &self.auth_header(), &base_url, params)
             .await
             .context("letter token 映射校验失败（tokenizer/chat 模板与训练分布不一致）")?;
 
         *guard = Some(Running {
-            child,
+            child: Some(child),
             port,
             gguf_path: gguf_path.to_path_buf(),
             base_url: base_url.clone(),
@@ -332,7 +370,11 @@ impl LlamaServer {
                 "cache_prompt": false,
             });
             let url = format!("{}/completion", running.base_url);
-            let resp = timeout(self.call_timeout, self.http.post(&url).json(&body).send())
+            let mut req = self.http.post(&url).json(&body);
+            if let Some(key) = self.auth_header() {
+                req = req.bearer_auth(key);
+            }
+            let resp = timeout(self.call_timeout, req.send())
                 .await
                 .map_err(|_| anyhow!("llama-server /completion 超时"))?
                 .with_context(|| "请求 llama-server /completion 失败")?;
@@ -380,8 +422,26 @@ impl LlamaServer {
     pub async fn shutdown(&self) {
         if let Some(mut r) = self.running.lock().await.take() {
             info!("停止 llama-server (port {})", r.port);
-            let _ = r.child.kill().await;
+            if let Some(mut child) = r.child.take() {
+                let _ = child.kill().await;
+            }
         }
+    }
+
+    /// 注入部署解析结果（单一真相）：remote_base 仅在 Deploy::Remote 时生效。
+    /// cfg.remote_url 非空但 mode=local（或本地缺省）时忽略之——显示、下载、
+    /// 推理三种形态必须一致，杜绝「显示 local / 走远程」的静默分叉。
+    pub fn with_deploy(mut self, deploy: super::Deploy) -> Self {
+        self.remote_base = match deploy {
+            crate::component::decision_model::Deploy::Remote { base_url } => Some(base_url),
+            crate::component::decision_model::Deploy::Local => None,
+        };
+        self
+    }
+
+    /// remote 端点鉴权头（None = 无鉴权）
+    fn auth_header(&self) -> Option<String> {
+        self.remote_api_key.clone()
     }
 }
 
@@ -398,7 +458,7 @@ fn binary_file_names() -> Vec<String> {
     ]
 }
 
-/// 健康检查（llama-server /health）
+/// 健康检查（llama-server /health；本地端口便捷形式）
 async fn health_ok(http: &reqwest::Client, port: u16) -> bool {
     let url = format!("http://127.0.0.1:{port}/health");
     matches!(
@@ -407,11 +467,31 @@ async fn health_ok(http: &reqwest::Client, port: u16) -> bool {
     )
 }
 
+/// 健康检查（base_url 形式，remote 端点用；可选 Bearer）
+async fn health_ok_url(http: &reqwest::Client, auth: &Option<String>, base_url: &str) -> bool {
+    let url = format!("{base_url}/health");
+    let mut req = http.get(&url);
+    if let Some(key) = auth {
+        req = req.bearer_auth(key);
+    }
+    matches!(req.send().await, Ok(resp) if resp.status().is_success())
+}
+
+/// 从 base_url 提取端口（默认 80；仅用于日志与返回值）
+fn url_port(base_url: &str) -> u16 {
+    base_url
+        .rsplit(':')
+        .next()
+        .and_then(|p| p.trim_matches('/').parse().ok())
+        .unwrap_or(80)
+}
+
 /// letter token 映射运行时验证（check_tokenizer 语义）：
 /// 探针 prompt 以 THINK_OFF_SUFFIX 结尾，且每个字母恰为一个 token、id 与配置一致。
 async fn verify_letter_tokens(
     http: &reqwest::Client,
-    port: u16,
+    auth: &Option<String>,
+    base_url: &str,
     params: &DecisionModelParams,
 ) -> Result<()> {
     let probe_q = QuestionSpec {
@@ -427,13 +507,17 @@ async fn verify_letter_tokens(
     if !text.ends_with(prompt::THINK_OFF_SUFFIX) {
         bail!("chat 模板渲染缺少 thinking-off assistant 前缀");
     }
-    let base_url = format!("http://127.0.0.1:{port}");
     let tokenize = |content: String| {
         let http = http.clone();
+        let auth = auth.clone();
         let url = format!("{base_url}/tokenize");
         async move {
             let body = serde_json::json!({ "content": content, "add_special": false });
-            let resp = http.post(&url).json(&body).send().await?;
+            let mut req = http.post(&url).json(&body);
+            if let Some(key) = auth {
+                req = req.bearer_auth(key);
+            }
+            let resp = req.send().await?;
             let out: serde_json::Value = resp.json().await?;
             let toks = out
                 .get("tokens")
@@ -613,5 +697,29 @@ mod tests {
         assert!(DecisionModelParams::parse(bad).is_err());
         let dup = br#"{"letter_token_ids": [32,32,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57], "temperature_by_type": {}}"#;
         assert!(DecisionModelParams::parse(dup).is_err(), "重复 id 拒绝");
+    }
+
+    #[test]
+    fn with_deploy_is_single_source_of_remote_endpoint() {
+        // Remote → Some(base)；Local → None（残留 remote_url 不反向污染）
+        let cfg = crate::config::DecisionModelConfig {
+            remote_url: Some("http://stale:9999".to_string()),
+            ..Default::default()
+        };
+        let srv = LlamaServer::new(&cfg, std::path::Path::new("/tmp/x"));
+        assert!(
+            srv.remote_base.is_none(),
+            "构造缺省必须为 Local（remote_url 不直接派生）"
+        );
+        let srv = srv.with_deploy(crate::component::decision_model::Deploy::Local);
+        assert!(srv.remote_base.is_none(), "Local 部署必须忽略 remote_url");
+        let srv = srv.with_deploy(crate::component::decision_model::Deploy::Remote {
+            base_url: "http://decision-model:8081".to_string(),
+        });
+        assert_eq!(
+            srv.remote_base.as_deref(),
+            Some("http://decision-model:8081"),
+            "Remote 部署注入解析后的端点"
+        );
     }
 }

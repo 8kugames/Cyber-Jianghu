@@ -23,14 +23,15 @@ let lastDmStatus = null;
 let dmEventSource = null;
 
 async function loadData() {
-    const isWizard = !appState.setupStatus?.server_configured || !appState.setupStatus?.llm_configured;
-    const [llmConfig, providers, usage, llmDisabled, updateStatus, dmStatus] = await Promise.allSettled([
+    const isWizard = !appState.setupStatus?.has_server || !appState.setupStatus?.has_llm;
+    const [llmConfig, providers, usage, llmDisabled, updateStatus, dmStatus, serverConfig] = await Promise.allSettled([
         get(API.CONFIG_LLM),
         get(API.CONFIG_LLM_PROVIDERS),
         get(API.CONFIG_LLM_USAGE),
         get(API.CONFIG_LLM_DISABLED),
         get(API.UPDATE_STATUS),
         get(API.DECISION_MODEL_STATUS, { retries: 0 }),
+        get(API.CONFIG),
     ]);
 
     // 全局开关状态先行（renderSecondaryCard 的锁定镜像依赖，必须先于卡片渲染）
@@ -55,12 +56,13 @@ async function loadData() {
     }
     renderDecisionCard();
 
-    // Populate server form
-    if (appState.setupStatus) {
+    // Populate server form（数据源：运行时内存配置 GET /api/v1/config，与重连逻辑同源；
+    // setup/status 响应无 ws_url/http_url 字段，不能作回填来源）
+    if (serverConfig.status === 'fulfilled') {
         const wsInput = document.getElementById('s-ws-url');
         const httpInput = document.getElementById('s-http-url');
-        if (wsInput && appState.setupStatus.ws_url) wsInput.value = appState.setupStatus.ws_url;
-        if (httpInput && appState.setupStatus.http_url) httpInput.value = appState.setupStatus.http_url;
+        if (wsInput && serverConfig.value.server_ws_url) wsInput.value = serverConfig.value.server_ws_url;
+        if (httpInput && serverConfig.value.server_http_url) httpInput.value = serverConfig.value.server_http_url;
     }
 
     // Populate LLM form
@@ -185,7 +187,7 @@ async function loadData() {
 }
 
 function render(container) {
-    const isWizard = !appState.setupStatus?.server_configured || !appState.setupStatus?.llm_configured;
+    const isWizard = !appState.setupStatus?.has_server || !appState.setupStatus?.has_llm;
 
     container.innerHTML = `
     <div class="settings-page">
@@ -283,7 +285,7 @@ function render(container) {
                             <textarea class="form-input" id="s-fallback-models" rows="2" placeholder="每行一个模型名称，留空表示无备用"></textarea>
                             <div class="text-muted" style="font-size:12px;margin-top:4px">故障兜底链：主模型 403/超时时自动降级（同 Provider/密钥），连续空闲时按顺序轮换；与下方「从模型」的省钱分流是两套机制</div>
                         </div>
-                        
+
                         <details style="margin-top:12px;border:1px solid var(--border);border-radius:6px;padding:10px">
                             <summary style="cursor:pointer;font-weight:500">高级参数</summary>
                             <div style="margin-top:12px;display:flex;flex-direction:column;gap:12px">
@@ -458,9 +460,29 @@ function render(container) {
                     </div>
                     <div id="s-dm-error" style="display:none;margin-top:10px;padding:8px 10px;border-radius:6px;background:rgba(239,68,68,0.1);color:#ef4444;font-size:12px;word-break:break-all"></div>
                     <form id="dm-form" style="margin-top:14px">
+                        <div class="form-group">
+                            <label class="form-label">部署模式</label>
+                            <div style="display:flex;gap:16px;flex-wrap:wrap">
+                                <label id="s-dm-mode-local-wrap" style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+                                    <input type="radio" name="s-dm-mode" value="local" checked> 本地自部署（下载模型 + 自启动 llama-server）
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+                                    <input type="radio" name="s-dm-mode" value="remote"> 远程 URL（自架或第三方决策端点）
+                                </label>
+                            </div>
+                            <div id="s-dm-mode-docker-note" class="text-muted" style="display:none;font-size:12px;margin-top:4px">
+                                Docker 部署仅支持远程模式（默认从 docker 网络发现 http://decision-model:8081，可在下方显式指定）
+                            </div>
+                        </div>
+                        <div class="form-group" id="s-dm-remote-group" style="display:none">
+                            <label class="form-label">端点 URL</label>
+                            <input class="form-input" type="text" id="s-dm-remote-url" placeholder="如 http://decision-model:8081 或 https://api.example.com">
+                            <label class="form-label" style="margin-top:8px">端点 API Key（可选）</label>
+                            <input class="form-input" type="password" id="s-dm-remote-key" placeholder="端点设置了鉴权时填写；留空保持原值">
+                        </div>
                         <div style="display:flex;gap:12px;flex-wrap:wrap">
                             <div class="form-group" style="flex:1;min-width:130px">
-                                <label class="form-label">量化档位</label>
+                                <label class="form-label">量化档位（仅本地模式）</label>
                                 <select class="form-select" id="s-dm-quant">
                                     <option value="q5_k_m">q5_k_m（推荐）</option>
                                     <option value="q4_k_s">q4_k_s（低内存）</option>
@@ -544,12 +566,20 @@ function bindEvents() {
         const btn = e.target.querySelector('button[type="submit"]');
         btn.disabled = true;
         btn.textContent = '保存中...';
+        const payload = {
+            ws_url: document.getElementById('s-ws-url')?.value?.trim(),
+            // 空串传 undefined，让后端从 ws_url 推导，避免把 http_url 持久化为空
+            http_url: document.getElementById('s-http-url')?.value?.trim() || undefined,
+        };
         try {
-            await post(API.CONFIG_SERVER, {
-                ws_url: document.getElementById('s-ws-url')?.value?.trim(),
-                http_url: document.getElementById('s-http-url')?.value?.trim(),
-            });
-            showSuccess('Server 配置已保存');
+            const r = await post(API.CONFIG_SERVER, payload);
+            // 后端对地址变化默认只返回预览（requires_confirmation=true，不落盘），需二次确认提交
+            if (r.requires_confirmation) {
+                confirmServerSwitch(payload, r);
+                return;
+            }
+            showSuccess(r.message || 'Server 配置已保存');
+            await loadData();
         } catch (err) {
             showError('保存失败: ' + err.message);
         } finally {
@@ -750,6 +780,8 @@ function bindEvents() {
         e.preventDefault();
         const btn = e.target.querySelector('button[type="submit"]');
         if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
+        const deployMode = document.querySelector('input[name="s-dm-mode"]:checked')?.value || null;
+        const remoteKey = (document.getElementById('s-dm-remote-key')?.value || '').trim();
         const payload = {
             enabled: document.getElementById('s-dm-enabled')?.checked ?? false,
             quant: document.getElementById('s-dm-quant')?.value || 'q5_k_m',
@@ -758,6 +790,10 @@ function bindEvents() {
                 ? parseFloat(document.getElementById('s-dm-threshold').value)
                 : 0.7,
             timeout_ms: parseInt(document.getElementById('s-dm-timeout')?.value, 10) || 30000,
+            mode: deployMode,
+            remote_url: (document.getElementById('s-dm-remote-url')?.value || '').trim() || null,
+            // 留空不提交（保持已存值）
+            ...(remoteKey ? { remote_api_key: remoteKey } : {}),
         };
         try {
             // 换装需等旧 manager 回收与新装配任务拉起，放宽超时且不重试以免重复提交
@@ -802,6 +838,33 @@ function bindEvents() {
                 showError('触发安装失败: ' + e.message);
             }
         });
+    });
+}
+
+// 服务器切换二次确认：后端 set_server 对地址变化且未带 confirm=true 的请求只返回预览
+// （requires_confirmation=true，不落盘），此处复述 warning 后带 confirm=true 重新提交
+function confirmServerSwitch(payload, preview) {
+    showModal(`
+        <h3 style="margin-bottom:12px">切换服务器</h3>
+        <p style="margin-bottom:16px;font-size:13px;color:var(--text-secondary)">${escapeHtml(preview.warning || '切换服务器需要确认')}</p>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn" id="s-server-cancel-btn">取消</button>
+            <button class="btn btn-primary" id="s-server-confirm-btn">确认切换</button>
+        </div>`);
+    document.getElementById('s-server-cancel-btn')?.addEventListener('click', hideModal);
+    document.getElementById('s-server-confirm-btn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('s-server-confirm-btn');
+        if (btn) { btn.disabled = true; btn.textContent = '切换中...'; }
+        try {
+            // 切换会触发重连与设备重注册，不重试以免重复提交
+            const r = await post(API.CONFIG_SERVER, { ...payload, confirm: true }, { retries: 0 });
+            hideModal();
+            showSuccess(r.message || 'Server 配置已保存');
+            await loadData();
+        } catch (err) {
+            hideModal();
+            showError('切换失败: ' + err.message);
+        }
     });
 }
 
@@ -1154,6 +1217,30 @@ function renderDecisionCard() {
         if (state === 'failed' && inner.error) { errBox.style.display = ''; errBox.textContent = inner.error; }
         else errBox.style.display = 'none';
     }
+
+    // 部署模式回填（docker 下本地选项锁定；远程组显隐）
+    const inDocker = st.in_docker === true;
+    const dockerNote = document.getElementById('s-dm-mode-docker-note');
+    if (dockerNote) dockerNote.style.display = inDocker ? '' : 'none';
+    const localWrap = document.getElementById('s-dm-mode-local-wrap');
+    if (localWrap) {
+        const localRadio = localWrap.querySelector('input');
+        if (localRadio) {
+            localRadio.disabled = inDocker;
+            localRadio.title = inDocker ? 'Docker 部署仅支持远程模式' : '';
+        }
+    }
+    const deployMode = st.deploy === 'remote' ? 'remote' : (st.deploy === 'local' ? 'local' : (inDocker ? 'remote' : 'local'));
+    const picked = document.querySelector('input[name="s-dm-mode"]:checked');
+    if (picked && document.activeElement?.name !== 's-dm-mode') picked.checked = false;
+    const targetRadio = document.querySelector(`input[name="s-dm-mode"][value="${deployMode}"]`);
+    if (targetRadio) targetRadio.checked = true;
+    // 显隐跟随用户当前已选 radio（焦点守卫下快照可能滞后，避免自相矛盾表单）
+    const selectedMode = document.querySelector('input[name="s-dm-mode"]:checked')?.value || deployMode;
+    const remoteGroup = document.getElementById('s-dm-remote-group');
+    if (remoteGroup) remoteGroup.style.display = selectedMode === 'remote' ? '' : 'none';
+    const urlInput = document.getElementById('s-dm-remote-url');
+    if (urlInput && st.remote_url && document.activeElement !== urlInput) urlInput.value = st.remote_url;
 
     const active = document.activeElement;
     const quantSel = document.getElementById('s-dm-quant');

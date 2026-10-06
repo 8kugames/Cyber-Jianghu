@@ -339,6 +339,20 @@ fn default_decision_model_enabled() -> bool {
     true
 }
 
+/// 部署模式（决策模型）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DecisionModelMode {
+    /// 下载模型并自启动 llama-server（本地 agent 默认）
+    Local,
+    /// 通过 URL 访问已部署端点（docker 部署唯一允许的模式）
+    Remote,
+}
+
+/// 容器内 remote 模式的默认发现地址（compose 服务名约定：decision-model 服务
+/// 暴露 llama-server 8081 端口；部署侧见 docs/decision_model.md 部署模式章节）
+pub const DECISION_MODEL_DOCKER_DEFAULT_URL: &str = "http://decision-model:8081";
+
 fn default_decision_model_quant() -> String {
     "q5_k_m".to_string()
 }
@@ -377,10 +391,27 @@ pub const DECISION_MODEL_QUANTS: [&str; 4] = ["q8_0", "q6_k", "q5_k_m", "q4_k_s"
 pub struct DecisionModelConfig {
     /// 总开关（默认开启；置 false 关闭后走"人魂 LLM 直接写 actions JSON"既有路径）
     ///
-    /// 注意：下载源（modelscope_repo / github_release_url）均未配置时本功能
-    /// 无法装配，run_agent 会一次性告警并保持既有路径——开关本身不产生副作用。
+    /// 注意：local 模式需要下载源（modelscope_repo / github_release_url）；
+    /// remote 模式只需 remote_url。两者均不可用时本功能不装配，保持既有路径。
     #[serde(default = "default_decision_model_enabled")]
     pub enabled: bool,
+
+    /// 部署模式：local = 下载模型并自启动 llama-server（本地 agent 默认）；
+    /// remote = 通过 URL 访问已部署的决策模型端点（自架或第三方，llama-server
+    /// 兼容协议）。缺省按运行环境解析：容器内（/.dockerenv 等）→ remote，
+    /// 否则 local。容器内部署仅允许 remote（拒绝每容器重复下载自部署）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<DecisionModelMode>,
+
+    /// remote 模式端点基址（如 http://decision-model:8081 或 https://api.example.com）。
+    /// 容器内缺省时自动使用 docker 网络发现地址 http://decision-model:8081
+    /// （compose 服务名约定）；本地运行显式配置 remote 时必填。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_url: Option<String>,
+
+    /// remote 端点可选 Bearer 令牌（端点设置了 --api-key 时使用）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_api_key: Option<String>,
 
     /// ModelScope 模型仓（主下载源，形如 "owner/repo"；默认官方发布仓）
     #[serde(default = "default_decision_model_modelscope_repo")]
@@ -432,6 +463,9 @@ impl Default for DecisionModelConfig {
     fn default() -> Self {
         Self {
             enabled: default_decision_model_enabled(),
+            mode: None,
+            remote_url: None,
+            remote_api_key: None,
             modelscope_repo: default_decision_model_modelscope_repo(),
             github_release_url: default_decision_model_github_release_url(),
             quant: default_decision_model_quant(),

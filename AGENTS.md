@@ -550,7 +550,7 @@ Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env v
 
 - `GET /api/v1/decision-model/status` - Lifecycle status snapshot (enabled/quant_configured/threshold/timeout_ms + status{state,...}; disabled state carries disk config so panel form never falls back to defaults)
 - `GET /api/v1/decision-model/events` - Download/install progress SSE (`download_progress`/`disabled`/`heartbeat`; accepts `?token=` for EventSource)
-- `POST /api/v1/decision-model/config` - Save decision_model config section + hot-swap manager (no restart; rejects enable without download sources; timeout bounded 1000-120000ms; disable drops slot and reclaims llama-server via kill_on_drop)
+- `POST /api/v1/decision-model/config` - Save decision_model config section + hot-swap manager (no restart; validates via validate_config: local needs download sources / remote needs URL / local forbidden in containers; accepts mode/remote_url/remote_api_key; panel save auto-reloads)
 - `POST /api/v1/decision-model/install` - Manually trigger download/repair install (idempotent when ready; progress via events SSE)
 
 **Events & Config**:

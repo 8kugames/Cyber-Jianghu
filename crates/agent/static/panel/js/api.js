@@ -46,6 +46,7 @@ export const API = {
     EVENTS: '/api/v1/events',
 
     // Config
+    CONFIG: '/api/v1/config',
     CONFIG_LLM: '/api/v1/config/llm',
     CONFIG_LLM_PROVIDERS: '/api/v1/config/llm/providers',
     CONFIG_LLM_USAGE: '/api/v1/config/llm/usage',

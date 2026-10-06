@@ -380,14 +380,15 @@ pub(crate) async fn run_agent(port: u16, mode: String, server: Option<String>) -
 
     // 决策模型（玩家侧 2B 意图决策；默认启用，装配需 enabled 且至少配置一个下载源。
     // 未装配/未就绪/调用失败一律自动回退既有 LLM 决策路径，不影响 agent 存活）
-    let dm_sources_configured = !config.decision_model.modelscope_repo.trim().is_empty()
-        || !config.decision_model.github_release_url.trim().is_empty();
-    if config.decision_model.enabled && !dm_sources_configured {
+    let dm_usable =
+        cyber_jianghu_agent::component::decision_model::validate_config(&config.decision_model)
+            .is_ok();
+    if config.decision_model.enabled && !dm_usable {
         warn!(
-            "decision_model.enabled=true 但 modelscope_repo 与 github_release_url 均未配置，决策模型不装配（走既有 LLM 决策路径）；配置下载源后重启生效"
+            "decision_model.enabled=true 但配置不可用（local 缺下载源 / remote 缺 URL / 容器内禁 local），决策模型不装配（走既有 LLM 决策路径）"
         );
     }
-    if config.decision_model.enabled && dm_sources_configured {
+    if config.decision_model.enabled && dm_usable {
         let manager = std::sync::Arc::new(
             cyber_jianghu_agent::component::decision_model::DecisionModelManager::new(
                 config.decision_model.clone(),

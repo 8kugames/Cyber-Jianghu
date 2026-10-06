@@ -101,6 +101,32 @@ manifest.json schema（`size`/`bytes` 两种键名均可；`kind`/`quant` 可省
   验证「追加字母恰为单 token 且 id 与 decision_config.json 一致」，不符即判运行时不可用
   （回退 LLM 路径）。
 
+## 二点五、部署模式（本地自部署 vs 远程 URL）
+
+- `mode: local`（本地 agent 缺省）：下载模型 + 自启动 llama-server，全流程零手工。
+- `mode: remote`（docker 部署唯一允许）：通过 `remote_url` 访问已部署的决策模型端点
+  （自架 llama-server 服务项目专用 GGUF，或第三方决策 API；协议为 llama-server 兼容，
+  启动时逐字母校验 letter token 映射，不兼容端点自动回退 LLM 路径）。
+  `remote_api_key` 可选（端点设置了 --api-key 时使用）。
+- 容器内（检测 /.dockerenv 等）缺省 remote 且未配置 URL 时，自动使用 docker 网络
+  发现地址 `http://decision-model:8081`（compose 服务名约定）。**容器内禁止 local
+  模式**——不在每个 agent 容器重复下载与自部署，集中一个端点服务全集群。
+- 端点部署示例（compose 片段，宿主机需 >=4GB 内存）：
+
+```yaml
+services:
+  decision-model:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    command: ["-m", "/models/Cyber-Jianghu-Decision-2B-Q5_K_M.gguf", "--host", "0.0.0.0", "--port", "8081", "-c", "16384", "--parallel", "8"]
+    volumes:
+      - ./models:/models
+    # agent 侧默认经 docker 网络以 http://decision-model:8081 访问
+```
+
+- POST /api/v1/decision-model/config 新字段三态语义：
+  `mode` 缺省/null = 回到环境自动（容器 remote / 本地 local）；
+  `remote_url` 缺省/空串 = 清除已存 URL；`remote_api_key` 缺省 = 保持已存值（留空即可）。
+
 ## 三、配置（agent.yaml）
 
 ```yaml
