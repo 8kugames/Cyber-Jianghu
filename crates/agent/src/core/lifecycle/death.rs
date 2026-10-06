@@ -3,6 +3,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use super::super::Agent;
+use super::super::reconnect::save_character_config_to_fs;
 use crate::models::{WorldEvent, WorldEventType};
 
 /// 在 events_log 中查找「自身」的死亡事件。
@@ -40,6 +41,54 @@ struct RebirthParams {
     context: String,
 }
 
+/// 解析 auto-rebirth 响应，并立即将新一世角色档案落盘为
+/// `characters/<new_agent_id>/character.yaml`。
+///
+/// 不能只依赖主循环 rebirth_notify 分支的落盘：该分支以内存
+/// `character_config` 为基底，进程在 notify 持久化前重启（容器重建/崩溃）
+/// 就没有任何本地档案指向新角色，重启后 select_character 扫不到 alive
+/// 角色 → has_character=false 卡等待创建，甚至触发多余的自动注册
+/// （2026-10-06 生产事故：d10da103 → 95d75b94 失联）。
+/// 此处先落最小档案兜底；主循环 notify 分支随后会用保留旧世人设的
+/// 完整配置覆写同一文件。落盘失败仅 warn 不阻断 rebirth 流程。
+///
+/// 返回 `(new_agent_id, system_prompt)`；`new_agent_id` 缺失/非法时为 nil。
+fn parse_and_persist_rebirth(
+    data: &serde_json::Value,
+    http_url: &str,
+    characters_dir: &std::path::Path,
+) -> (Uuid, Option<String>) {
+    let new_id = data["new_agent_id"]
+        .as_str()
+        .and_then(|s| s.parse::<Uuid>().ok())
+        .unwrap_or(Uuid::nil());
+    let system_prompt = data["system_prompt"].as_str().map(ToOwned::to_owned);
+
+    if new_id != Uuid::nil() {
+        let new_char = crate::config::CharacterConfig {
+            agent_id: Some(new_id),
+            name: "未知".to_string(),
+            status: crate::config::CharacterStatus::Alive,
+            server_url: Some(http_url.to_string()),
+            registered_at: Some(chrono::Utc::now()),
+            system_prompt: system_prompt.clone(),
+            ..Default::default()
+        };
+        let yaml_path = characters_dir
+            .join(new_id.to_string())
+            .join("character.yaml");
+        match save_character_config_to_fs(&new_char, characters_dir) {
+            Ok(()) => info!("自动转世重生: 新角色档案已落盘: {}", yaml_path.display()),
+            Err(e) => warn!(
+                "自动转世重生: 新角色档案落盘失败 ({}): {}",
+                yaml_path.display(),
+                e
+            ),
+        }
+    }
+    (new_id, system_prompt)
+}
+
 fn schedule_auto_rebirth(params: RebirthParams) {
     let RebirthParams {
         old_agent_id,
@@ -72,11 +121,9 @@ fn schedule_auto_rebirth(params: RebirthParams) {
             match client.post(&url).json(&body).send().await {
                 Ok(resp) if resp.status().is_success() => {
                     let data: serde_json::Value = resp.json().await.unwrap_or_default();
-                    let new_id = data["new_agent_id"]
-                        .as_str()
-                        .and_then(|s| s.parse::<Uuid>().ok())
-                        .unwrap_or(Uuid::nil());
-                    let system_prompt = data["system_prompt"].as_str().map(ToOwned::to_owned);
+                    let characters_dir = api_state.character_dir.read().await.clone();
+                    let (new_id, system_prompt) =
+                        parse_and_persist_rebirth(&data, &http_url, &characters_dir);
 
                     info!(
                         "自动转世重生成功: old_agent={} → new_agent={}",
@@ -291,8 +338,10 @@ pub(super) async fn maybe_schedule_auto_rebirth(
 #[cfg(test)]
 mod tests {
     use super::find_self_death;
+    use super::parse_and_persist_rebirth;
     use crate::component::persona::event_mapper::EventContext;
     use crate::component::persona::rules_loader::load_event_trait_rules;
+    use crate::config::CharacterStatus;
     use crate::models::{WorldEvent, WorldEventType};
     use uuid::Uuid;
 
@@ -315,6 +364,63 @@ mod tests {
             description: "采集了野草".to_string(),
             metadata: serde_json::json!({}),
         }
+    }
+
+    // === auto-rebirth 落盘（回归：2026-10-06 转世后失联事故） ===
+
+    #[test]
+    fn auto_rebirth_response_persists_new_life_character_yaml() {
+        let dir = tempfile::tempdir().expect("创建临时目录失败");
+        let characters_dir = dir.path().join("characters");
+        let new_id = Uuid::new_v4();
+        let resp = serde_json::json!({
+            "success": true,
+            "message": "转世成功",
+            "new_agent_id": new_id.to_string(),
+            "old_agent_id": Uuid::new_v4().to_string(),
+            "spawn_location": "龙门客栈",
+            "system_prompt": "你是无名侠客。",
+        });
+
+        let (parsed_id, prompt) =
+            parse_and_persist_rebirth(&resp, "http://127.0.0.1:23333", &characters_dir);
+
+        assert_eq!(parsed_id, new_id);
+        assert_eq!(prompt.as_deref(), Some("你是无名侠客。"));
+
+        let yaml = characters_dir
+            .join(new_id.to_string())
+            .join("character.yaml");
+        assert!(
+            yaml.exists(),
+            "auto-rebirth 成功后必须落盘 character.yaml: {}",
+            yaml.display()
+        );
+
+        let cfg = crate::config::CharacterConfig::from_file(&yaml)
+            .expect("落盘的 character.yaml 必须能被 from_file 重新解析");
+        assert_eq!(cfg.agent_id, Some(new_id));
+        assert_eq!(cfg.status, CharacterStatus::Alive);
+        assert_eq!(cfg.system_prompt.as_deref(), Some("你是无名侠客。"));
+        assert_eq!(cfg.server_url.as_deref(), Some("http://127.0.0.1:23333"));
+        assert!(cfg.registered_at.is_some(), "落盘档案须记录注册时间");
+    }
+
+    #[test]
+    fn auto_rebirth_response_without_valid_agent_id_skips_persist() {
+        let dir = tempfile::tempdir().expect("创建临时目录失败");
+        let characters_dir = dir.path().join("characters");
+        let resp = serde_json::json!({ "success": true, "message": "响应缺 new_agent_id" });
+
+        let (parsed_id, prompt) =
+            parse_and_persist_rebirth(&resp, "http://127.0.0.1:23333", &characters_dir);
+
+        assert_eq!(parsed_id, Uuid::nil());
+        assert_eq!(prompt, None);
+        assert!(
+            !characters_dir.exists(),
+            "无有效 new_agent_id 时不得写盘（避免伪造 nil 角色档案）"
+        );
     }
 
     #[test]
