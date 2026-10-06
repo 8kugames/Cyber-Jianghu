@@ -102,6 +102,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 详见 [数据使用说明](docs/DATA_USAGE.md)。
 
+**训练产物公开**：基于上述 trace 训练的意图决策模型「江湖策（Cyber-Jianghu-Decision-2B）」已在
+[ModelScope 公开发布](https://www.modelscope.cn/models/8kugames/Cyber-Jianghu-Decision-2B)。
+该模型将角色的认知摘要转换为结构化游戏意图（12 类动作 + 实体绑定），供玩家侧本地推理使用；
+训练仅收录经"天魂"审查 approved 的样本（6,338 条决策样本），底座 Qwen/Qwen3.5-2B，全链路 Apache-2.0，
+训练数据不含设备 ID。
+
 **你可以选择关闭**：在 `$CYBER_JIANGHU_CONFIG_DIR/trace.yaml`（默认 `~/.cyber-jianghu/config/trace.yaml`）中：
 
 - `output.enabled: false`：完全不采集（零开销）
@@ -109,4 +115,4 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## 许可证
 
-MIT OR Apache-2.0
+Apache-2.0。完整许可文本见 [LICENSE](LICENSE)。

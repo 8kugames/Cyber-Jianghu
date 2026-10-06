@@ -35,11 +35,11 @@ objective world                       subjective world
 
 To give AI a human-like thinking process and prevent it from acting against the worldview, every agent adopts a **Three-Soul Architecture** that isolates cognition, execution, and self-review:
 
-| Module | Core Responsibility | How It Works |
-|---------|---------------------|--------------|
-| **Human Soul (人魂)** | Motivation reasoning and planning | Connects directly to the objective world state, fused with the character's personality and memory. It is the agent's emotional and rational brain, completing the entire thinking loop from "perceiving the environment" to "making a decision" in a single pass. When a character is under excessive pressure, the Human Soul can also trigger irrational, chaotic behavior. |
-| **Earth Soul (地魂)** | Action execution and tool calling | Embedded in the Human Soul's thinking process. It acts as the agent's "hands and eyes," providing tools for memory search, ability lookup, relationship queries, etc. It lets the LLM fetch precise data on demand during reasoning, while being subject to strict safety limits on calls. |
-| **Heaven Soul (天魂)** | Rules and worldview review | The agent's internal "self-censor." Before an action is submitted to "Heaven," it performs action legality checks, initial physics-rule review, and worldview-fitting (OOC) review. On any violation, Heaven Soul immediately rejects it and asks the Human Soul to rethink. |
+| Module                 | Core Responsibility               | How It Works                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Human Soul (人魂)**  | Motivation reasoning and planning | Connects directly to the objective world state, fused with the character's personality and memory. It is the agent's emotional and rational brain, completing the entire thinking loop from "perceiving the environment" to "making a decision" in a single pass. When a character is under excessive pressure, the Human Soul can also trigger irrational, chaotic behavior. |
+| **Earth Soul (地魂)**  | Action execution and tool calling | Embedded in the Human Soul's thinking process. It acts as the agent's "hands and eyes," providing tools for memory search, ability lookup, relationship queries, etc. It lets the LLM fetch precise data on demand during reasoning, while being subject to strict safety limits on calls.                                                                                    |
+| **Heaven Soul (天魂)** | Rules and worldview review        | The agent's internal "self-censor." Before an action is submitted to "Heaven," it performs action legality checks, initial physics-rule review, and worldview-fitting (OOC) review. On any violation, Heaven Soul immediately rejects it and asks the Human Soul to rethink.                                                                                                  |
 
 ## Key Features
 
@@ -69,9 +69,9 @@ Cyber-Jianghu/
 
 ### Developers
 
-| Module | Description |
-|--------|-------------|
-| [Agent Quick Start](crates/agent/QuickStart-Agent.en.md) | Guide for running and developing the Agent |
+| Module                                                      | Description                                   |
+| ----------------------------------------------------------- | --------------------------------------------- |
+| [Agent Quick Start](crates/agent/QuickStart-Agent.en.md)    | Guide for running and developing the Agent    |
 | [Server Quick Start](crates/server/QuickStart-Server.en.md) | Guide for developing and deploying the Server |
 
 ### Common Commands
@@ -93,4 +93,4 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## License
 
-MIT OR Apache-2.0
+Apache-2.0. See [LICENSE](LICENSE) for the full license text.
