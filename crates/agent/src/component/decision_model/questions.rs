@@ -374,6 +374,8 @@ pub fn bind_act1(
     match act1 {
         "休整" => {}
         "观察" => {
+            // 服务器 typed 解析要求 action_data 必须存在（ObserveData.target_agent_id
+            // 可默认）；无目标时提交空对象（环顾四周），None 会被拒
             if let Some(agent) = agent_answer
                 && agent != NONE_OPTION
             {
@@ -382,6 +384,11 @@ pub fn bind_act1(
                     serde_json::Value::String(agent.into()),
                 );
             }
+            return ActionBinding {
+                action_type: act1.into(),
+                action_data: Some(serde_json::Value::Object(data)),
+                bind_error: None,
+            };
         }
         "移动" => {
             return match loc_answer {
@@ -746,9 +753,16 @@ mod tests {
                 .bind_error
                 .is_some()
         );
-        // 观察：无目标 → 合法空数据（环顾四周）
+        // 观察：无目标 → 空对象（环顾四周；服务器要求 action_data 存在）
         let b = bind_act1("观察", None, Some("无"), None, &c);
-        assert!(b.bind_error.is_none() && b.action_data.is_none());
+        assert!(b.bind_error.is_none());
+        assert_eq!(b.action_data, Some(serde_json::json!({})));
+        // 观察：有目标 → 绑定 target_agent_id
+        let b = bind_act1("观察", None, Some("a1"), None, &c);
+        assert_eq!(
+            b.action_data.unwrap()["target_agent_id"],
+            serde_json::json!("a1")
+        );
         // 休整：无数据
         let b = bind_act1("休整", None, None, None, &c);
         assert!(b.bind_error.is_none() && b.action_data.is_none());

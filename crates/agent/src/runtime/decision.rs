@@ -435,7 +435,14 @@ async fn decide_via_model(
     );
     if dm::act2_gate_pass(&act1, &act2) {
         let thought2 = decision_thought(&cog_thought(&cog), act2_answer.confidence);
-        intents.push(Intent::new(agent_id, tick_id, act2.as_str(), None).with_thought(thought2));
+        // 服务器 typed 解析要求观察的 action_data 存在（空对象即可）；休整走无参路径
+        let act2_data = if act2 == "观察" {
+            Some(serde_json::json!({}))
+        } else {
+            None
+        };
+        intents
+            .push(Intent::new(agent_id, tick_id, act2.as_str(), act2_data).with_thought(thought2));
     }
 
     // 8. 构造完整认知链（决策阶段补全 4 stage；天魂照常四层审查）
