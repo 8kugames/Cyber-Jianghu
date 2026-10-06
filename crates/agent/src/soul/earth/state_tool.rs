@@ -42,7 +42,7 @@ pub fn query_world_definition() -> ToolDefinition {
                 "section": {
                     "type": "string",
                     "enum": ["inventory", "entities", "environment", "state", "events"],
-                    "description": "查询的世界状态部分：inventory=背包, entities=附近实体, environment=环境/位置, state=自身属性, events=事件日志"
+                    "description": "查询的世界状态部分：inventory=背包, entities=附近实体, environment=环境/地面物品/可采集资源, state=自身属性, events=事件日志"
                 },
                 "filter": {
                     "type": "string",
@@ -269,17 +269,59 @@ pub async fn execute_query_world(
                 "entities": entities,
             })
         }
-        "environment" => serde_json::json!({
-            "success": true,
-            "section": "environment",
-            "location": {
-                "node_id": ws.location.node_id,
-                "name": ws.location.name,
-            },
-            "nearby_items_count": ws.nearby_items.len(),
-            "tick_id": ws.tick_id,
-            "world_time": ws.world_time.to_chinese(),
-        }),
+        "environment" => {
+            // 明细必须返回（名称+可照抄引用）：此前只返回 nearby_items_count
+            // 计数，角色（LLM）无从得知附近物品名称/ID，无法构造「取」意图
+            //（2026-10-06 连续两世脱水致死：临终认知"环境查询只吐出'附近
+            // 有2件物品'，不给名称也不给ID，我要取也无从下手"）。
+            // name_ref 与主 prompt 渲染、layer0 校验、inventory 分区同源。
+            let nearby: Vec<_> = ws
+                .nearby_items
+                .iter()
+                .map(|item| {
+                    serde_json::json!({
+                        "item_id": item.item_id,
+                        "name": item.name,
+                        "name_ref": cyber_jianghu_protocol::display_item_ref(
+                            &item.name,
+                            &item.item_id
+                        ),
+                        "quantity": item.quantity,
+                        "item_type": item.item_type,
+                    })
+                })
+                .collect();
+            let gatherable: Vec<_> = ws
+                .location
+                .gatherable_items
+                .iter()
+                .map(|g| {
+                    serde_json::json!({
+                        "item_id": g.item_id,
+                        "name": g.name,
+                        "name_ref": cyber_jianghu_protocol::display_item_ref(
+                            &g.name,
+                            &g.item_id
+                        ),
+                        "item_type": g.item_type,
+                        "stock": g.stock,
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "success": true,
+                "section": "environment",
+                "location": {
+                    "node_id": ws.location.node_id,
+                    "name": ws.location.name,
+                },
+                "nearby_items_count": ws.nearby_items.len(),
+                "nearby_items": nearby,
+                "gatherable_items": gatherable,
+                "tick_id": ws.tick_id,
+                "world_time": ws.world_time.to_chinese(),
+            })
+        }
         "state" => {
             let attrs: serde_json::Map<String, serde_json::Value> = ws
                 .self_state
@@ -633,6 +675,47 @@ mod tests {
         assert_eq!(result["total"], 1);
         let items = result["items"].as_array().unwrap();
         assert_eq!(items[0]["name"], "馒头");
+    }
+
+    /// environment 必须返回地面物品/可采集资源明细（名称 + 可照抄引用），
+    /// 只返回计数会导致角色无法构造取/采集意图（2026-10-06 连续两世脱水事故）
+    #[tokio::test]
+    async fn test_query_world_environment_returns_item_details() {
+        let store = WorldStateStore::new();
+        let mut ws = make_test_world_state();
+        ws.nearby_items = vec![cyber_jianghu_protocol::SceneItem {
+            item_id: "a65df604-1234-5678-9abc-def012345678".to_string(),
+            name: "清水".to_string(),
+            quantity: 2,
+            item_type: "consumable".to_string(),
+        }];
+        ws.location.gatherable_items = vec![cyber_jianghu_protocol::GatherableItem {
+            item_id: "b75ef605-1234-5678-9abc-def012345678".to_string(),
+            name: "井水".to_string(),
+            item_type: "consumable".to_string(),
+            stock: Some(10),
+        }];
+        store.update(ws).await;
+        let result = execute_query_world("environment", None, &store).await;
+        assert!(result["success"].as_bool().unwrap());
+        assert_eq!(result["nearby_items_count"], 1);
+        let nearby = result["nearby_items"]
+            .as_array()
+            .expect("地面物品明细必须返回");
+        assert_eq!(nearby[0]["name"], "清水");
+        assert_eq!(nearby[0]["quantity"], 2);
+        assert_eq!(
+            nearby[0]["name_ref"],
+            cyber_jianghu_protocol::display_item_ref(
+                "清水",
+                "a65df604-1234-5678-9abc-def012345678"
+            )
+        );
+        let gatherable = result["gatherable_items"]
+            .as_array()
+            .expect("可采集资源明细必须返回");
+        assert_eq!(gatherable[0]["name"], "井水");
+        assert_eq!(gatherable[0]["stock"], 10);
     }
 
     #[tokio::test]
