@@ -5,14 +5,25 @@
 // 人魂直连 WorldState，单次 LLM 调用输出结构化 Intent。
 // CognitiveValidator 在内部重试循环中执行质量审查。
 // 天魂翻译步骤已消除。
+//
+// 决策模型两段式管线（decision_model.enabled 时优先尝试，失败/低置信整体
+// 回退本文件的既有 LLM 路径）：
+//   1. 人魂认知-only 调用（think_cognition_only，不写 actions）
+//   2. 决策模型逐问题读出（act1 → act2 → 实体绑定，一次一问）
+//   3. 置信度门控（act1 ≥ threshold 且可绑定）→ 构造 Intents
+//   4. 天魂四层照常审查（本模块零改动感知）
 
+use crate::component::decision_model::{self as dm, DecisionModelManager};
 use crate::component::llm::{ErrorAction, classify_llm_error};
-use crate::soul::actor::{CognitiveChain, CognitiveEngine};
+use crate::soul::actor::engine::cognition::CognitionOutput;
+use crate::soul::actor::{CognitiveChain, CognitiveEngine, CognitiveStage, StageOutput};
 use crate::soul::reflector::cognitive_validator::CognitiveValidator;
 use cyber_jianghu_protocol::{Intent, WorldState};
 use futures_util::future::BoxFuture;
 use std::sync::Arc;
-use tracing::{error, warn};
+use std::time::Instant;
+use tokio::sync::RwLock;
+use tracing::{error, info, warn};
 
 /// 判定错误文本是否为 JSON 格式解析错误（serde 错误家族特征）。
 fn is_format_parse_error(msg: &str) -> bool {
@@ -91,10 +102,15 @@ pub fn cognitive_decision(
 ///
 /// 人魂直接接收 WorldState，输出结构化 Intent（action_type + action_data 精确 ID）。
 /// CognitiveChain 供 soul_cycle_recorder 记录用。
+///
+/// `decision_model_slot` 为共享槽位（`RwLock<Option<Arc<Manager>>>`，与 HTTP API 状态
+/// 同源）：每 tick 读取一次，面板换装/开关新 manager 后下一 tick 即热生效；槽位为空
+/// 或 enabled=false 时直接走既有 LLM 路径（完整 JSON + 重试机制），既有路径行为一字不变。
 #[allow(clippy::type_complexity)]
 pub fn cognitive_decision_with_chain(
     engine: Arc<CognitiveEngine>,
     max_retries: usize,
+    decision_model_slot: Arc<RwLock<Option<Arc<DecisionModelManager>>>>,
 ) -> impl Fn(
     &WorldState,
     &str,
@@ -112,8 +128,45 @@ pub fn cognitive_decision_with_chain(
         let world_state = world_state.clone();
         let memory_context = memory_context.to_string();
         let mut feedback = feedback.map(|s| s.to_string());
+        let decision_model_slot = decision_model_slot.clone();
 
         Box::pin(async move {
+            // ── 决策模型两段式路径（每 tick 从共享槽位读取；面板热换装下一 tick 生效）──
+            let decision_model = decision_model_slot.read().await.clone();
+            if let Some(ref model) = decision_model
+                && model.is_enabled()
+            {
+                dm::metrics::record_tick_attempt();
+                match decide_via_model(
+                    &engine,
+                    model,
+                    &world_state,
+                    &memory_context,
+                    feedback.as_deref(),
+                    soul_cycle_attempt,
+                )
+                .await
+                {
+                    Ok(Some((intent, chain))) => {
+                        dm::metrics::record_taken();
+                        return (intent, Some(chain));
+                    }
+                    Ok(None) => {
+                        info!(
+                            "[decision_model] tick {} 门控未通过，回退 LLM 决策路径",
+                            world_state.tick_id
+                        );
+                    }
+                    Err(e) => {
+                        dm::metrics::record_fallback_error();
+                        warn!(
+                            "[decision_model] tick {} 决策路径失败（回退 LLM 决策路径）: {:#}",
+                            world_state.tick_id, e
+                        );
+                    }
+                }
+            }
+
             let mut last_error = String::new();
             let mut last_chain: Option<CognitiveChain> = None;
             let mut failed_attempts: usize = 0;
@@ -263,9 +316,251 @@ pub fn cognitive_decision_with_chain(
     }
 }
 
+// ============================================================================
+// 决策模型两段式路径
+// ============================================================================
+
+/// 决策模型意图的 thought_log 来源标注
+fn decision_thought(thought_process: &str, confidence: f64) -> String {
+    format!("{thought_process}（来源=decision_model conf={confidence:.3}）")
+}
+
+/// 决策模型门控结果：Some((intent, chain)) = 采用；None = 门控未过（回退）
+#[allow(clippy::too_many_arguments)]
+async fn decide_via_model(
+    engine: &Arc<CognitiveEngine>,
+    model: &Arc<DecisionModelManager>,
+    world_state: &WorldState,
+    memory_context: &str,
+    feedback: Option<&str>,
+    soul_cycle_attempt: i32,
+) -> anyhow::Result<Option<(Intent, CognitiveChain)>> {
+    let started = Instant::now();
+    let tick_id = world_state.tick_id;
+    let agent_id = world_state.agent_id.unwrap_or_default();
+
+    // 1. 人魂认知-only（LLM 调用；失败即整体回退）
+    let cog = engine
+        .think_cognition_only(world_state, memory_context, feedback, soul_cycle_attempt)
+        .await?;
+    dm::metrics::record_cognition(cog.duration_ms);
+
+    // 2. 结构化候选 + 动作词表（WorldState 结构化实体，不用文本正则）
+    let candidates = dm::build_candidates(world_state);
+    let criteria = dm::action_criteria(&engine.available_actions_snapshot());
+    if criteria.is_empty() {
+        anyhow::bail!("动作词表为空（game_rules 未下发），决策模型路径不可用");
+    }
+    let state_text =
+        dm::build_state_text(&cog.system_message, &cog.tick_message, &cog.cognition_block);
+
+    // 3. act1（12 选 1）
+    let act1_answer = model
+        .decide_one(&state_text, &dm::build_act1_question(&criteria))
+        .await?;
+    dm::metrics::record_act1_confidence(act1_answer.confidence);
+    let act1 = act1_answer.choice.clone();
+    if !dm::act1_gate_pass(&act1, act1_answer.confidence, model.threshold()) {
+        if dm::BINDABLE_ACTIONS.contains(&act1.as_str()) {
+            dm::metrics::record_fallback_low_conf();
+        } else {
+            dm::metrics::record_fallback_ineligible();
+        }
+        return Ok(None);
+    }
+
+    // 4. act2（选项含「无」；一次一问顺序调用）
+    let act2_answer = model
+        .decide_one(&state_text, &dm::build_act2_question(&criteria))
+        .await?;
+    let act2 = act2_answer.choice.clone();
+
+    // 5. 实体绑定问题（按第 1 动作语义需要才问；候选为空则不问）
+    let item_opts: Vec<(String, String)> = candidates
+        .items
+        .iter()
+        .map(|(display, key, _)| (display.clone(), key.clone()))
+        .collect();
+    let item_answer = match dm::build_item1_question(&act1, &item_opts) {
+        Some(q) => Some(model.decide_one(&state_text, &q).await?.choice),
+        None => None,
+    };
+    let agent_opts: Vec<(String, String)> = candidates
+        .agents
+        .iter()
+        .map(|(id, key)| (id.clone(), key.clone()))
+        .collect();
+    let agent_answer = match dm::build_agent1_question(&act1, &agent_opts) {
+        Some(q) => Some(model.decide_one(&state_text, &q).await?.choice),
+        None => None,
+    };
+    let loc_opts: Vec<(String, String)> = candidates
+        .locs
+        .iter()
+        .map(|(id, key)| (id.clone(), key.clone()))
+        .collect();
+    let loc_answer = match dm::build_loc1_question(&act1, &loc_opts) {
+        Some(q) => Some(model.decide_one(&state_text, &q).await?.choice),
+        None => None,
+    };
+
+    // 6. 绑定主意图 action_data（绑定失败整体回退——宁走 LLM 不出坏意图）
+    let binding = dm::bind_act1(
+        &act1,
+        item_answer.as_deref(),
+        agent_answer.as_deref(),
+        loc_answer.as_deref(),
+        &candidates,
+    );
+    if let Some(ref err) = binding.bind_error {
+        dm::metrics::record_fallback_ineligible();
+        info!(
+            "[decision_model] tick {} act1=「{}」绑定失败: {}（回退 LLM 决策路径）",
+            tick_id, act1, err
+        );
+        return Ok(None);
+    }
+
+    // 7. 组装 Intents（act2 仅采纳「无/休整/观察」——无需实体绑定）
+    let thought1 = decision_thought(&cog_thought(&cog), act1_answer.confidence);
+    let mut intents = Vec::new();
+    intents.push(
+        Intent::new(
+            agent_id,
+            tick_id,
+            binding.action_type.as_str(),
+            binding.action_data,
+        )
+        .with_thought(thought1),
+    );
+    if dm::act2_gate_pass(&act1, &act2) {
+        let thought2 = decision_thought(&cog_thought(&cog), act2_answer.confidence);
+        intents.push(Intent::new(agent_id, tick_id, act2.as_str(), None).with_thought(thought2));
+    }
+
+    // 8. 构造完整认知链（决策阶段补全 4 stage；天魂照常四层审查）
+    let thought_text = cog_thought(&cog);
+    let mut chain = cog.chain;
+    let primary = &intents[0];
+    let decision_content = format!(
+        "思考: {}\n决策: {} {:?}{}（决策模型 conf={:.3}）",
+        thought_text,
+        primary.action_type.as_str(),
+        primary.action_data,
+        if intents.len() > 1 {
+            format!(" (+{} 后续)", intents.len() - 1)
+        } else {
+            String::new()
+        },
+        act1_answer.confidence,
+    );
+    let decision_stage = StageOutput::with_metadata(
+        CognitiveStage::Decision,
+        decision_content,
+        serde_json::json!({
+            "source": "decision_model",
+            "act1": {
+                "choice": act1,
+                "confidence": act1_answer.confidence,
+                "probabilities": act1_answer.probabilities,
+            },
+            "act2": {
+                "choice": act2,
+                "confidence": act2_answer.confidence,
+            },
+            "bindings": {
+                "item": item_answer,
+                "agent": agent_answer,
+                "loc": loc_answer,
+            },
+        }),
+    );
+    chain.add_stage(decision_stage);
+    chain.final_intent = intents[0].clone();
+    chain.should_remember = cog.should_remember;
+    chain.memory_content = cog.memory_content;
+    chain.multi_intents = if intents.len() > 1 {
+        Some(intents[1..].to_vec())
+    } else {
+        None
+    };
+    chain.duration_ms = cog.duration_ms + started.elapsed().as_millis() as u64;
+
+    // 9. 认知链质量校验（与既有路径同口径；不过则回退）
+    let validator = CognitiveValidator::new(chain.persona.clone());
+    let validation = validator.validate(&chain);
+    if !validation.is_valid {
+        warn!(
+            "[decision_model] tick {} 认知链校验未过: {}（回退 LLM 决策路径）",
+            tick_id,
+            validation.reason.unwrap_or_default()
+        );
+        return Ok(None);
+    }
+
+    // 10. 对话历史（与既有路径同口径：user=世界摘要，assistant=动作摘要）
+    let ws_summary = format!(
+        "Tick {} @ {}",
+        world_state.tick_id, world_state.location.node_id
+    );
+    const ASSISTANT_SUMMARY_CHAR_LIMIT: usize = 200;
+    let assistant_summary = match primary
+        .action_data
+        .as_ref()
+        .and_then(|d| d.get("content"))
+        .and_then(|v| v.as_str())
+    {
+        Some(content) if !content.is_empty() => format!(
+            "{}: {}",
+            primary.action_type,
+            content
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(ASSISTANT_SUMMARY_CHAR_LIMIT)
+                .collect::<String>()
+        ),
+        _ => primary.action_type.to_string(),
+    };
+    engine.push_conversation_turn(
+        tick_id,
+        ws_summary,
+        assistant_summary,
+        engine.take_last_reasoning_content(),
+    );
+
+    info!(
+        "[decision_model] tick {} 采用决策输出: {} (+{} 后续), act1_conf={:.3}, 耗时 {}ms",
+        tick_id,
+        primary.action_type.as_str(),
+        intents.len() - 1,
+        act1_answer.confidence,
+        chain.duration_ms
+    );
+    Ok(Some((intents[0].clone(), chain)))
+}
+
+/// 认知思考过程（决策阶段内容/复用）
+fn cog_thought(cog: &CognitionOutput) -> String {
+    // cognition_block 已含思考过程行（与训练状态文本同源），直接引用
+    cog.cognition_block
+        .lines()
+        .find(|l| l.starts_with("思考过程: "))
+        .map(|l| l["思考过程: ".len()..].to_string())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::retry_feedback_for_error;
+
+    /// 决策来源标注格式
+    #[test]
+    fn decision_thought_marks_source() {
+        let t = super::decision_thought("先找些吃的", 0.941);
+        assert!(t.starts_with("先找些吃的"));
+        assert!(t.contains("来源=decision_model"));
+        assert!(t.contains("conf=0.941"));
+    }
 
     /// 格式解析错误：反馈不携带 serde 技术细节原文。
     #[test]

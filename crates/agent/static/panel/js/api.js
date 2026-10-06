@@ -68,6 +68,12 @@ export const API = {
     UPDATE_CHECK: '/api/v1/update/check',
     UPDATE_APPLY: '/api/v1/update/apply',
 
+    // Decision Model (2B 意图决策)
+    DECISION_MODEL_STATUS: '/api/v1/decision-model/status',
+    DECISION_MODEL_EVENTS: '/api/v1/decision-model/events',
+    DECISION_MODEL_CONFIG: '/api/v1/decision-model/config',
+    DECISION_MODEL_INSTALL: '/api/v1/decision-model/install',
+
     // Context
     CONTEXT: '/api/v1/context',
 

@@ -546,19 +546,28 @@ Agent embedder provider selection (via `CYBER_JIANGHU_EMBEDDER_REMOTE_URL` env v
 - `POST /api/v1/update/check` - Check latest GitHub release now
 - `POST /api/v1/update/apply` - Download + install latest release and restart (refused inside containers and for cargo `target/` builds)
 
+**Decision Model (2B intent decision)**:
+
+- `GET /api/v1/decision-model/status` - Lifecycle status snapshot (enabled/quant_configured/threshold/timeout_ms + status{state,...}; disabled state carries disk config so panel form never falls back to defaults)
+- `GET /api/v1/decision-model/events` - Download/install progress SSE (`download_progress`/`disabled`/`heartbeat`; accepts `?token=` for EventSource)
+- `POST /api/v1/decision-model/config` - Save decision_model config section + hot-swap manager (no restart; rejects enable without download sources; timeout bounded 1000-120000ms; disable drops slot and reclaims llama-server via kill_on_drop)
+- `POST /api/v1/decision-model/install` - Manually trigger download/repair install (idempotent when ready; progress via events SSE)
+
 **Events & Config**:
 
 - `GET /api/v1/events` - Death events SSE stream
 - `GET /api/v1/version` - Protocol handshake (public, no auth; `protocol_version` is an independent semver `PROTOCOL_VERSION`, `server_version` proxied live from server, null when unreachable)
 - `GET /api/v1/state/stream` - WorldState + IntentSnapshot composite SSE stream (桌面窗口消费; view-shape payload per `docs/contracts/state_stream.schema.json`; accepts `?token=` for EventSource)
 
-**Agent HTTP Auth**: all agent HTTP endpoints (except public paths `/`, `/api/v1`, `/api/v1/health`, `/api/v1/version`, `/api/v1/setup`, static assets) require `Authorization: Bearer <token>`. Accepted tokens are the UNION of env `CYBER_JIANGHU_AGENT_TOKEN` (static token, enables auth before device registration for external clients) and the device `auth_token` from server registration (used by the local panel). SSE endpoints (`/api/v1/events`, `/api/v1/state/stream`) additionally accept `?token=<token>`. No token configured at all -> 503 (fail-closed).
+**Agent HTTP Auth**: all agent HTTP endpoints (except public paths `/`, `/api/v1`, `/api/v1/health`, `/api/v1/version`, `/api/v1/setup`, static assets) require `Authorization: Bearer <token>`. Accepted tokens are the UNION of env `CYBER_JIANGHU_AGENT_TOKEN` (static token, enables auth before device registration for external clients) and the device `auth_token` from server registration (used by the local panel). SSE endpoints (`/api/v1/events`, `/api/v1/state/stream`, `/api/v1/decision-model/events`) additionally accept `?token=<token>`. No token configured at all -> 503 (fail-closed).
 
 **Agent Self-Update**: agent can self-update from GitHub Releases (`update` section in `agent.yaml`: `enabled`/`auto_apply`/`check_interval_secs`/`repo`, defaults `true`/`true`/`21600`/`8kugames/Cyber-Jianghu`). Update decision is digest identity (current exe sha256 vs latest release platform asset `digest`) because release tags carry the SERVER version while agent crate versions are independent. Download is sha256-verified (missing digest => refuse to install). Background loop auto-applies and restarts (unix execve / Windows `*.exe.old` + spawn). Auto-apply is skipped inside containers (`/.dockerenv` / `/.containerenv` — update the image instead) and for cargo builds (exe under `target/`). Env `CYBER_JIANGHU_SELF_UPDATE=0` hard-disables all update network activity. The CLI `update` subcommand installs but never restarts itself.
 
+**Events & Config**:
+
 - `GET/POST /api/v1/config/llm-disabled` - LLM disable toggle
 - `GET/POST /api/v1/config/auto-rebirth` - Auto-rebirth toggle
-- `GET/POST /api/v1/config/llm` - Get/update LLM config
+- `GET/POST /api/v1/config/llm` - Get/update LLM config (includes cross-provider `llm_secondary` secondary model + effective `scenario_routing` per-scenario primary/secondary selection + `scenario_keys` whitelist; secondary defaults to mirror-primary; light scenarios default to secondary; panel save auto-reloads to hot-apply)
 - `GET /api/v1/config/llm/providers` - Get LLM providers
 - `GET /api/v1/config/llm/usage` - Get LLM token usage
 - `POST /api/v1/config/reload` - Hot reload config

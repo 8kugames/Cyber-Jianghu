@@ -8,6 +8,7 @@ pub mod conversation;
 pub mod direct_client;
 mod model_adaptation;
 mod openai_types;
+pub mod routed;
 pub mod scenario;
 pub mod streaming;
 pub mod token_tracking;
@@ -212,6 +213,15 @@ fn build_direct_client_with_max_tokens(
     if let Some(m) = model {
         client_config = client_config.with_model(m);
     }
+    // 防抖：文件直改路径的未知场景路由键告警（拼错键永不命中且无报错）；
+    // API 路径已在 handler 层拦截
+    for key in llm_config.scenario_routing.keys() {
+        if !scenario::CONFIGURABLE_SCENARIO_KEYS.contains(&key.as_str()) {
+            tracing::warn!(
+                "[llm] scenario_routing 含未知场景键 {key}（永不命中，请检查拼写；合法键见 scenario.rs）"
+            );
+        }
+    }
     client_config = client_config
         .with_temperature(llm_config.temperature)
         .with_max_tokens(max_tokens)
@@ -219,23 +229,7 @@ fn build_direct_client_with_max_tokens(
         .with_context_window_tokens(context_window_tokens)
         // 从 LlmConfig 透传 timeout，agent.yaml 改值即可生效
         .with_request_timeout_secs(llm_config.request_timeout_secs)
-        .with_connect_timeout_secs(llm_config.connect_timeout_secs)
-        // 场景级模型路由（辅助任务 → 便宜模型），全部 fallback 客户端共享同一份
-        .with_scenario_overrides(
-            llm_config
-                .scenario_overrides
-                .iter()
-                .map(|(k, v)| {
-                    (
-                        k.clone(),
-                        direct_client::ScenarioOverride {
-                            model: v.model.clone(),
-                            max_tokens: v.max_tokens,
-                        },
-                    )
-                })
-                .collect(),
-        );
+        .with_connect_timeout_secs(llm_config.connect_timeout_secs);
 
     let mut client = DirectLlmClient::new(client_config)?;
     if let Some(esc) = earth_soul_config {
@@ -243,6 +237,46 @@ fn build_direct_client_with_max_tokens(
     }
     client = client.with_breaker(shared_breaker);
     Ok(client)
+}
+
+/// 构建完整 LLM 栈：主链（llm）+ 可选从链（llm_secondary，跨 Provider）+
+/// 场景主/从分发（scenario_routing，未配置场景按内置默认）。
+///
+/// 启动与热重载的统一入口：llm_secondary 未配置（与主一致）时不包装
+/// RoutedLlmClient（从即主，零开销）；包装后从链失败自动回退主链。
+pub fn build_llm_stack(
+    config: &crate::config::Config,
+    earth_soul_config: Option<crate::soul::earth::config::EarthSoulConfig>,
+) -> Result<Arc<dyn LlmClient>> {
+    let primary = build_fallback_client(
+        &config.llm,
+        config.llm.enable_streaming,
+        earth_soul_config.clone(),
+    )?;
+    let Some(secondary_cfg) = config.llm_secondary.as_ref() else {
+        return Ok(primary);
+    };
+    match build_fallback_client(
+        secondary_cfg,
+        secondary_cfg.enable_streaming,
+        earth_soul_config,
+    ) {
+        Ok(secondary) => {
+            info!(
+                "[llm] 从模型链已装配: provider={}, model={:?}（轻量场景默认走从，失败自动回退主）",
+                secondary_cfg.provider, secondary_cfg.model
+            );
+            Ok(Arc::new(routed::RoutedLlmClient::new(
+                primary,
+                Some(secondary),
+                config.llm.scenario_routing.clone(),
+            )))
+        }
+        Err(e) => {
+            warn!("[llm] 从模型链构建失败（{}），全部场景保持主模型", e);
+            Ok(primary)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -279,7 +313,7 @@ mod tests {
             request_timeout_secs: 90, // 自定义非默认值，断言端到端传播
             connect_timeout_secs: 15,
             cache_diagnostics: crate::config::CacheDiagnosticsConfig::default(),
-            scenario_overrides: std::collections::HashMap::new(),
+            scenario_routing: std::collections::HashMap::new(),
         };
 
         let breaker = Arc::new(client::SharedBreaker::default());
@@ -328,44 +362,40 @@ model: test-model
         );
     }
 
-    /// 验证：scenario_overrides 从 LlmConfig（yaml）端到端传播到 DirectLlmClientConfig，
-    /// 供请求构建时的场景路由使用。
+    /// 验证：scenario_routing 从 yaml 解析（via 缺省 secondary），并验证
+    /// 未配置场景的内置默认（轻量走从）。
     #[test]
-    fn test_scenario_overrides_propagate_to_direct_client() {
+    fn test_scenario_routing_parses_from_yaml() {
         let yaml = r#"
 provider: ollama
 model: main-model
-scenario_overrides:
+scenario_routing:
   reflector_l3:
-    model: cheap-model
+    via: primary
     max_tokens: 1024
   daily_summary:
-    model: cheap-model
+    max_tokens: 512
 "#;
         let cfg: LlmConfig =
-            serde_yaml::from_str(yaml).expect("must parse scenario_overrides from yaml");
-        assert_eq!(cfg.scenario_overrides.len(), 2);
+            serde_yaml::from_str(yaml).expect("must parse scenario_routing from yaml");
+        assert_eq!(cfg.scenario_routing.len(), 2);
         assert_eq!(
-            cfg.scenario_overrides.get("reflector_l3").unwrap().model,
-            Some("cheap-model".to_string())
+            cfg.scenario_routing.get("reflector_l3").unwrap().via,
+            crate::config::ScenarioVia::Primary
         );
         assert_eq!(
-            cfg.scenario_overrides
-                .get("reflector_l3")
+            cfg.scenario_routing.get("daily_summary").unwrap().via,
+            crate::config::ScenarioVia::Secondary,
+            "via 缺省应为 secondary"
+        );
+        assert_eq!(
+            cfg.scenario_routing
+                .get("daily_summary")
                 .unwrap()
                 .max_tokens,
-            Some(1024)
+            Some(512)
         );
-
-        let breaker = Arc::new(client::SharedBreaker::default());
-        let client = build_direct_client(&cfg, Some("main-model"), false, None, breaker)
-            .expect("build_direct_client must succeed");
-        let overrides = &client.config().scenario_overrides;
-        assert_eq!(
-            overrides.get("reflector_l3").unwrap().model,
-            Some("cheap-model".to_string()),
-            "scenario_overrides 必须传到 DirectLlmClientConfig"
-        );
-        assert_eq!(overrides.get("daily_summary").unwrap().max_tokens, None);
+        assert!(scenario::defaults_to_secondary("daily_summary"));
+        assert!(!scenario::defaults_to_secondary("think"));
     }
 }

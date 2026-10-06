@@ -47,6 +47,36 @@ memory:
 # 角色类型: player | npc
 role: player
 
+# 玩家侧意图决策模型（两段式：人魂 LLM 出认知 -> 2B 决策模型出结构化意图 -> 天魂审查不变）
+# 默认开启；模型未就绪/调用失败自动回退既有"人魂 LLM 直接写 actions JSON"路径。
+# 两个下载源均留空时功能不装配（一次性告警，走既有路径）；不想用本功能置 enabled: false。
+decision_model:
+  # 总开关（默认 true；用户可主动关闭）
+  enabled: true
+  # ModelScope 模型仓（主下载源；默认官方发布仓，含 manifest.json + gguf + decision_config.json）
+  modelscope_repo: "8kugames/Cyber-Jianghu-Decision-2B"
+  # GitHub Releases 下载基址（备源；latest/download/<file> 兜底，置空串禁用该源）
+  github_release_url: "https://github.com/8kugames/Cyber-Jianghu-Decision-2B/releases"
+  # 量化档位: q8_0 | q6_k | q5_k_m | q4_k_s（默认 q5_k_m）
+  quant: q5_k_m
+  # 置信度门控阈值：act1 confidence >= 阈值才采用决策输出，否则回退 LLM 决策路径
+  threshold: 0.70
+  # 单次决策调用超时（毫秒）；超时/失败一律回退既有路径，不影响 agent 存活
+  timeout_ms: 30000
+  # 模型安装目录（null = ~/.cyber-jianghu/decision-model/；版本子目录 model-v1/，current.json 记录当前版本）
+  install_dir: null
+  # 低配自动降档：系统可用内存（MB）低于此值时改用 q4_k_s（0 = 关闭）
+  low_memory_threshold_mb: 6144
+  # llama-server 可执行文件（null = 自动从分发仓按平台下载并解压，推荐；
+  # 显式路径则跳过自动装配。PATH 中的 llama-server 仅作最后兜底）
+  llama_server_path: null
+  # llama-server 端口（0 = 自动选择空闲端口）
+  port: 0
+  # llama-server 附加参数（如 ["-ngl", "99"] 开 GPU 卸载）
+  llama_server_args: []
+  # llama-server 启动 + 模型加载超时（毫秒）
+  startup_timeout_ms: 180000
+
 # 角色生成配置（schema-driven，prompt 和 validate 共享同一约束定义）
 character_generation:
   world_setting: "时代：武侠架空世界，冷兵器时代。世界使用独立\"天道历\"纪年，与现实朝代无关。允许的概念：内力、轻功、武功、点穴，暗器、毒术、医术、易容、阵法。禁止的概念：魔法、仙术、法术、热武器、现代科技、超能力、穿越。"
@@ -111,3 +141,29 @@ character_generation:
       required: false
       max_chars: 100
       prompt_text: "long-term goal (max {max_chars} chars), ambitious"
+
+# ── LLM 主/从分流（可选，设置页「场景分流」与「从模型」卡片同一通道）─────────
+# llm_secondary: 从模型（轻量路由目标）。省略 = 与主模型一致（动态跟随）；
+# 显式定义 = 可跨 Provider 完整重写（provider/base_url/api_key/model 均可不同）。
+# 从模型失败时自动回退主模型。llm.scenario_routing: 场景 → 主/从（via），
+# 未配置的场景按内置默认（轻量场景走从：reflector_l3 / session_triage /
+# daily_summary / conversation_summary / relationship_eval /
+# relationship_narrative；主决策与质量敏感场景走主）。
+# max_tokens 仅工具循环类路径生效；摘要类走从模型自身 max_tokens。
+# 场景键拼错会被配置 API 400 拦截，文件直改会在构建期告警；
+# via 拼错则整个 yaml 解析失败（fail-fast，agent 拒绝启动）。
+# 工具循环（think 的 tool loop）随 think 场景整链路由，轮次不单独分流。
+#
+# llm_secondary:
+#   provider: openai_compatible
+#   base_url: https://api.minimaxi.com/v1
+#   api_key: sk-xxx                    # 同 Provider 可复用主模型密钥
+#   model: MiniMax-M2.7
+#   max_tokens: 1024
+# llm:
+#   scenario_routing:
+#     conversation_summary:
+#       via: secondary
+#       max_tokens: 512
+#     think:
+#       via: primary

@@ -1,9 +1,9 @@
 [package]
 name = "cyber-jianghu-agent"
-version = "0.1.407"
+version = "0.1.408"
 edition = "2024"
 authors = ["Cyber-Jianghu Community"]
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 description = "Agent SDK for Cyber-Jianghu MMO-MAS - connects to game server with multiple decision modes"
 
 [dependencies]
@@ -87,6 +87,14 @@ governor = "0.6.3"
 
 # 安全内存清理（API密钥）
 zeroize = "1.9.0"
+
+# 决策模型：llama-server 运行时归档（tar.gz）解压
+tar = "0.4.44"
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+
+# 决策模型：macOS 物理内存探测（低配自动降档判据）
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2.175"
 
 [dev-dependencies]
 tokio-test = "0.4.5"

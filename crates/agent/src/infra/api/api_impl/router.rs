@@ -127,6 +127,23 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/characters/{agent_id}/biography",
             post(handlers::generate_biography_by_id_handler),
         ) // 生成指定角色传记（LLM 纪传体）
+        // === 决策模型（玩家侧 2B 意图决策）===
+        .route(
+            "/api/v1/decision-model/status",
+            get(handlers::decision_model_status_handler),
+        ) // 生命周期状态
+        .route(
+            "/api/v1/decision-model/events",
+            get(handlers::decision_model_events_handler),
+        ) // 下载进度 SSE 流
+        .route(
+            "/api/v1/decision-model/config",
+            post(handlers::decision_model_config_handler),
+        ) // 面板配置（持久化 + 热换装）
+        .route(
+            "/api/v1/decision-model/install",
+            post(handlers::decision_model_install_handler),
+        ) // 手动触发下载/修复安装
         // === 实时事件端点（SSE）===
         .route("/api/v1/events", get(handlers::death_events_handler)) // 死亡事件 SSE 流
         .route("/api/v1/state/stream", get(handlers::state_stream_handler)) // WorldState+IntentSnapshot 复合 SSE 流（桌面 client 消费）

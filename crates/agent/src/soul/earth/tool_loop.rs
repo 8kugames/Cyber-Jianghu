@@ -27,6 +27,22 @@ use super::config::EarthSoulConfig;
 use super::content_fallback;
 use super::loop_guard::{LoopGuard, LoopGuardAction};
 
+/// 前置轮上界（含）：round ≤ 此值的轮次以查状态类工具为主（低难）。
+/// 早/晚轮标签仅用于 by_scenario 记账维度（轮次成本归因）；
+/// 路由不在此层发生——tool loop 在 DirectLlmClient 内部消化，
+/// 场景级主/从路由按外层 think 场景在 RoutedLlmClient 分发。
+const TOOL_ROUND_EARLY_LAST: usize = 1;
+
+/// 轮次 → 记账标签：前置轮打 early 标签，其余轮次与强制文本退出
+/// （收尾综合决策，高难）保持 think_tool_round。
+fn tool_round_scenario(round: usize) -> crate::component::llm::scenario::Scenario {
+    if round <= TOOL_ROUND_EARLY_LAST {
+        crate::component::llm::scenario::THINK_TOOL_ROUND_EARLY
+    } else {
+        crate::component::llm::scenario::THINK_TOOL_ROUND
+    }
+}
+
 /// 共享 tool calling 循环
 ///
 /// 接收预构建的消息列表，执行多轮 tool-calling 直到 LLM 返回文本或超时。
@@ -88,7 +104,7 @@ pub(crate) async fn run_tool_loop(
         }
 
         let response = crate::component::llm::scenario::with_scenario(
-            crate::component::llm::scenario::THINK_TOOL_ROUND,
+            tool_round_scenario(round),
             llm.send_chat_exchange(messages.clone(), Some(tools), llm_config.clone()),
         )
         .await?;
@@ -470,5 +486,14 @@ mod tests {
         let extracted = extract_json_object(content).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
         assert_eq!(parsed["b"], 2);
+    }
+
+    #[test]
+    fn tool_round_scenario_splits_early_and_late() {
+        use crate::component::llm::scenario;
+        assert_eq!(tool_round_scenario(0).0, scenario::THINK_TOOL_ROUND_EARLY.0);
+        assert_eq!(tool_round_scenario(1).0, scenario::THINK_TOOL_ROUND_EARLY.0);
+        assert_eq!(tool_round_scenario(2).0, scenario::THINK_TOOL_ROUND.0);
+        assert_eq!(tool_round_scenario(9).0, scenario::THINK_TOOL_ROUND.0);
     }
 }

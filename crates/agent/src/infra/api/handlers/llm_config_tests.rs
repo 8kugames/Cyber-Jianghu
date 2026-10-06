@@ -96,3 +96,61 @@ fn resolve_api_key_request_takes_precedence_over_blank_saved() {
     // 即使 saved 为空，req 非空仍用 req
     assert_eq!(resolve_api_key("sk-new", Some("")), "sk-new");
 }
+
+#[test]
+fn scenario_routing_validation_rejects_unknown_key() {
+    use crate::component::llm::scenario::validate_routing;
+    use crate::config::{ScenarioRouteConfig, ScenarioVia};
+    let mut m = std::collections::HashMap::new();
+    m.insert(
+        "daily_summry".to_string(), // 拼写错误：应为 daily_summary
+        ScenarioRouteConfig {
+            via: ScenarioVia::Secondary,
+            max_tokens: Some(512),
+        },
+    );
+    let err = validate_routing(&m).expect_err("未知键应被拒绝");
+    assert!(err.contains("未知场景键"), "错误信息应指明未知键: {err}");
+    assert!(err.contains("daily_summary"), "错误信息应列出合法键: {err}");
+}
+
+#[test]
+fn scenario_routing_validation_rejects_zero_tokens() {
+    use crate::component::llm::scenario::validate_routing;
+    use crate::config::{ScenarioRouteConfig, ScenarioVia};
+    let mut m = std::collections::HashMap::new();
+    m.insert(
+        "reflector_l3".to_string(),
+        ScenarioRouteConfig {
+            via: ScenarioVia::Secondary,
+            max_tokens: Some(0),
+        },
+    );
+    assert!(
+        validate_routing(&m)
+            .expect_err("max_tokens=0 应被拒绝")
+            .contains("max_tokens")
+    );
+}
+
+#[test]
+fn scenario_routing_validation_accepts_legal_config() {
+    use crate::component::llm::scenario::validate_routing;
+    use crate::config::{ScenarioRouteConfig, ScenarioVia};
+    let mut m = std::collections::HashMap::new();
+    m.insert(
+        "conversation_summary".to_string(),
+        ScenarioRouteConfig {
+            via: ScenarioVia::Secondary,
+            max_tokens: Some(512),
+        },
+    );
+    m.insert(
+        "think".to_string(),
+        ScenarioRouteConfig {
+            via: ScenarioVia::Primary,
+            max_tokens: None,
+        },
+    );
+    assert!(validate_routing(&m).is_ok());
+}

@@ -3,6 +3,7 @@
 // ============================================================================
 
 pub mod attention;
+pub mod decision_model;
 pub mod delta_engine;
 pub mod dialogue;
 pub mod emotion;

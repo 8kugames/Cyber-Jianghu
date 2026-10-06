@@ -200,6 +200,12 @@ pub struct LlmConfigResponse {
     pub reflector: Option<LlmConfigInfo>,
     pub reflector_inherits_actor: bool,
     pub runtime_mode: String,
+    /// 从模型（轻量路由目标）：None = 与主模型一致（动态跟随）
+    pub llm_secondary: Option<LlmConfigInfo>,
+    /// 生效场景路由（显式配置与内置默认合并后的全量视图；键白名单见 scenario.rs）
+    pub scenario_routing: std::collections::HashMap<String, crate::config::ScenarioRouteConfig>,
+    /// 可配置场景键白名单（前端渲染行与防抖共用）
+    pub scenario_keys: Vec<String>,
 }
 
 /// LLM 配置更新请求
@@ -208,6 +214,24 @@ pub struct LlmConfigUpdate {
     pub actor: LlmConfigUpdateDetails,
     pub reflector: Option<LlmConfigUpdateDetails>,
     pub reflector_inherits_actor: bool,
+    /// 从模型更新：None（缺字段）= 保持现状不改；mode=mirror 清除独立从模型
+    /// （回到与主一致）；mode=custom 按 config 完整重定义（可跨 provider）。
+    #[serde(default)]
+    pub llm_secondary: Option<SecondaryLlmUpdate>,
+    /// 场景路由全量替换：None（缺字段）= 保持现状；Some（含空 map）= 整体替换。
+    /// 键白名单校验在 handler 层；生效路由含内置默认（轻量场景走从）。
+    #[serde(default)]
+    pub scenario_routing:
+        Option<std::collections::HashMap<String, crate::config::ScenarioRouteConfig>>,
+}
+
+/// 从模型更新载荷（显式区分 mirror/custom，避免 None 语义歧义）
+#[derive(Debug, Deserialize)]
+pub struct SecondaryLlmUpdate {
+    /// "mirror" = 与主模型一致；"custom" = 使用 config 独立定义
+    pub mode: String,
+    #[serde(default)]
+    pub config: Option<LlmConfigUpdateDetails>,
 }
 
 /// LLM 配置更新详情

@@ -126,6 +126,9 @@ pub fn create_http_state(
     // death_event: 100 = 并发在线 agent 数量上限; tick_update: 64 = 每个 tick 周期的订阅者上限
     let (death_event_tx, _) = broadcast::channel(100);
     let (tick_update_tx, _) = broadcast::channel(64);
+    // 决策模型下载进度（SSE /api/v1/decision-model/events）
+    let (decision_model_progress_tx, _) =
+        broadcast::channel::<crate::component::decision_model::DownloadProgress>(32);
 
     // 预注册当前角色的记录器
     let soul_cycle_registrar = Arc::new(RwLock::new(HashMap::new()))
@@ -156,19 +159,22 @@ pub fn create_http_state(
     }
     let data_dir_clone = data_dir.clone();
 
-    let (auto_rebirth_init, llm_disabled_init, update_config) =
+    let (auto_rebirth_init, llm_disabled_init, secondary_disabled_init, update_config) =
         crate::config::Config::from_file(&config_path)
             .map(|c| {
                 (
                     c.runtime.auto_rebirth,
                     c.runtime.llm_disabled,
+                    c.runtime.secondary_llm_disabled,
                     c.update.clone(),
                 )
             })
-            .unwrap_or((true, false, crate::config::UpdateConfig::default()));
+            .unwrap_or((true, false, false, crate::config::UpdateConfig::default()));
 
-    // 将持久化的 llm_disabled 同步到运行时全局标志，保持与 auto_rebirth 的读写对称
+    // 将持久化的 llm_disabled / secondary_llm_disabled 同步到运行时全局标志，
+    // 保持与 auto_rebirth 的读写对称
     crate::component::llm::direct_client::set_llm_disabled(llm_disabled_init);
+    crate::component::llm::direct_client::set_secondary_disabled(secondary_disabled_init);
 
     let api_state = HttpApiState {
         current_state: Arc::new(RwLock::new(None)),
@@ -210,6 +216,8 @@ pub fn create_http_state(
         decision_context_snapshot: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         world_state_store: Arc::new(std::sync::RwLock::new(None)),
         updater: std::sync::Arc::new(crate::infra::updater::Updater::new(update_config)),
+        decision_model: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        decision_model_progress_tx: decision_model_progress_tx.clone(),
     };
 
     let decision_state = Arc::new(HttpDecisionState {

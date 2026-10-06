@@ -67,6 +67,7 @@ fn test_reflector_llm_inheritance() {
         runtime: RuntimeConfig::default(),
         llm,
         llm_reflector: None,
+        llm_secondary: None,
         memory: MemoryConfig::default(),
         game_rules: None,
         config_path: PathBuf::from("/test/config.yaml"),
@@ -74,6 +75,7 @@ fn test_reflector_llm_inheritance() {
         earth_soul: crate::soul::earth::config::EarthSoulConfig::default(),
         token_optimization: TokenOptimizationConfig::default(),
         update: UpdateConfig::default(),
+        decision_model: DecisionModelConfig::default(),
         character_generation: test_cg(),
     };
     assert_eq!(
@@ -97,6 +99,7 @@ fn test_reflector_llm_override() {
         runtime: RuntimeConfig::default(),
         llm,
         llm_reflector: Some(llm_reflector),
+        llm_secondary: None,
         memory: MemoryConfig::default(),
         game_rules: None,
         config_path: PathBuf::from("/test/config.yaml"),
@@ -104,6 +107,7 @@ fn test_reflector_llm_override() {
         earth_soul: crate::soul::earth::config::EarthSoulConfig::default(),
         token_optimization: TokenOptimizationConfig::default(),
         update: UpdateConfig::default(),
+        decision_model: DecisionModelConfig::default(),
         character_generation: test_cg(),
     };
     assert_eq!(

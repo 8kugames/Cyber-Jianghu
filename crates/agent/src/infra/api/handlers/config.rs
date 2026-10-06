@@ -100,9 +100,11 @@ pub(crate) async fn get_config_handler(State(state): State<HttpApiState>) -> imp
 ///
 /// GET /api/v1/config/llm-disabled
 pub(crate) async fn get_llm_disabled_handler(_state: State<HttpApiState>) -> impl IntoResponse {
-    // 从全局标志读取状态
-    let disabled = crate::component::llm::direct_client::is_llm_disabled();
-    Json(serde_json::json!({"llm_disabled": disabled}))
+    // 从全局标志读取状态（llm_disabled=全局闸断一切；secondary_disabled=仅暂停从链分流）
+    Json(serde_json::json!({
+        "llm_disabled": crate::component::llm::direct_client::is_llm_disabled(),
+        "secondary_disabled": crate::component::llm::direct_client::is_secondary_disabled(),
+    }))
 }
 
 /// 设置 LLM 停止状态
@@ -112,17 +114,28 @@ pub(crate) async fn set_llm_disabled_handler(
     State(state): State<HttpApiState>,
     Json(req): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    let disabled = req
-        .get("llm_disabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    // 两开关均为可选字段（缺省 = 不改动，仅回显当前值）：
+    // llm_disabled 全局闸断一切；secondary_disabled 仅暂停从链分流
+    let disabled = req.get("llm_disabled").and_then(|v| v.as_bool());
+    let secondary_disabled = req.get("secondary_disabled").and_then(|v| v.as_bool());
 
     // 立即设置全局标志（立即生效）
-    crate::component::llm::direct_client::set_llm_disabled(disabled);
+    if let Some(disabled) = disabled {
+        crate::component::llm::direct_client::set_llm_disabled(disabled);
+    }
+    if let Some(sec) = secondary_disabled {
+        crate::component::llm::direct_client::set_secondary_disabled(sec);
+        if sec {
+            tracing::warn!("[llm-disabled] 从模型链已停用（场景分流暂停，全部走主模型）");
+        } else {
+            tracing::info!("[llm-disabled] 从模型链已恢复");
+        }
+    }
 
     // 异步保存配置到文件
     let config_path = state.config_path.clone();
     let config_disabled = disabled;
+    let config_secondary = secondary_disabled;
     tokio::spawn(async move {
         let mut config = match crate::config::Config::from_file(&config_path) {
             Ok(c) => c,
@@ -131,22 +144,28 @@ pub(crate) async fn set_llm_disabled_handler(
                 return;
             }
         };
-        config.runtime.llm_disabled = config_disabled;
+        if let Some(d) = config_disabled {
+            config.runtime.llm_disabled = d;
+        }
+        if let Some(sec) = config_secondary {
+            config.runtime.secondary_llm_disabled = sec;
+        }
         if let Err(e) = config.save_to_file(&config_path) {
             error!("[llm-disabled] 保存配置失败: {}", e);
         }
     });
 
-    if disabled {
+    if let Some(true) = disabled {
         tracing::warn!("[llm-disabled] LLM 调用已停止");
-    } else {
+    } else if let Some(false) = disabled {
         tracing::info!("[llm-disabled] LLM 调用已恢复");
     }
 
     Json(serde_json::json!({
         "success": true,
-        "llm_disabled": disabled,
-        "message": if disabled { "LLM 调用已停止" } else { "LLM 调用已恢复" }
+        "llm_disabled": crate::component::llm::direct_client::is_llm_disabled(),
+        "secondary_disabled": crate::component::llm::direct_client::is_secondary_disabled(),
+        "message": "LLM 开关状态已更新"
     }))
     .into_response()
 }
@@ -408,9 +427,8 @@ pub(crate) async fn reload_config_handler(
                 guard.clone()
             };
             if let Some(container) = container {
-                match crate::component::llm::build_fallback_client(
-                    &config.llm,
-                    config.llm.enable_streaming,
+                match crate::component::llm::build_llm_stack(
+                    &config,
                     Some(config.earth_soul.clone()),
                 ) {
                     Ok(new_client) => {

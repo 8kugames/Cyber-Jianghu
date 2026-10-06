@@ -260,6 +260,60 @@ pub(crate) async fn api_list_handler(State(state): State<HttpApiState>) -> impl 
                 }]
             })),
         },
+        // === 决策模型（玩家侧 2B 意图决策） ===
+        ApiEndpoint {
+            path: "/api/v1/decision-model/status".to_string(),
+            method: "GET".to_string(),
+            description: "决策模型生命周期状态（未安装/下载中/就绪/失败；功能关闭返回 disabled）"
+                .to_string(),
+            request_example: None,
+            response_example: Some(serde_json::json!({
+                "enabled": true,
+                "threshold": 0.70,
+                "quant_configured": "q5_k_m",
+                "status": { "state": "ready", "version": "model-v1", "quant": "q5_k_m", "gguf": "/path/decision-2b-Q5_K_M.gguf" }
+            })),
+        },
+        ApiEndpoint {
+            path: "/api/v1/decision-model/events".to_string(),
+            method: "GET".to_string(),
+            description: "决策模型下载进度 SSE 流（connected / download_progress / disabled / heartbeat；EventSource 走 ?token=）"
+                .to_string(),
+            request_example: None,
+            response_example: Some(serde_json::json!({
+                "event": "download_progress",
+                "data": { "file": "decision-2b-Q5_K_M.gguf", "downloaded_bytes": 1048576, "total_bytes": 2480000000u64, "done": false }
+            })),
+        },
+        ApiEndpoint {
+            path: "/api/v1/decision-model/config".to_string(),
+            method: "POST".to_string(),
+            description: "面板保存决策模型配置（持久化 decision_model 段 + 热换装 manager，无需重启；enabled=false 时停用并回收 llama-server）"
+                .to_string(),
+            request_example: Some(serde_json::json!({
+                "enabled": true,
+                "quant": "q5_k_m",
+                "threshold": 0.7,
+                "timeout_ms": 30000
+            })),
+            response_example: Some(serde_json::json!({
+                "success": true,
+                "message": "决策模型配置已更新并生效",
+                "config": { "enabled": true, "quant": "q5_k_m", "threshold": 0.7, "timeout_ms": 30000 },
+                "status": { "state": "downloading", "file": "Cyber-Jianghu-Decision-2B-Q5_K_M.gguf", "downloaded_bytes": 0, "total_bytes": 1411120576u64 }
+            })),
+        },
+        ApiEndpoint {
+            path: "/api/v1/decision-model/install".to_string(),
+            method: "POST".to_string(),
+            description: "手动触发决策模型下载/修复安装（Failed 或 NotInstalled 后重试；已就绪时幂等不重下；进度见 events SSE）"
+                .to_string(),
+            request_example: None,
+            response_example: Some(serde_json::json!({
+                "success": true,
+                "message": "安装任务已触发，进度见 /api/v1/decision-model/events"
+            })),
+        },
         // === 自更新（GitHub Release） ===
         ApiEndpoint {
             path: "/api/v1/update/status".to_string(),

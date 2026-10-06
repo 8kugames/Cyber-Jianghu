@@ -37,18 +37,6 @@ pub struct DirectLlmClientConfig {
     pub request_timeout_secs: u64,
     /// HTTP 连接超时（与 Server LlmConfig.connect_timeout_secs 对齐，默认 30s）
     pub connect_timeout_secs: u64,
-    /// 场景级模型路由 + 输出上限覆盖（key = scenario 标签）
-    pub scenario_overrides: std::collections::HashMap<String, ScenarioOverride>,
-}
-
-/// 场景级覆盖：辅助任务路由到便宜模型 / 收紧输出上限
-///
-/// `model` 覆盖请求模型（同 provider/base_url/api_key，仅换模型名）；
-/// `max_tokens` 覆盖 per-call 输出上限（调用方未显式指定时生效）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScenarioOverride {
-    pub model: Option<String>,
-    pub max_tokens: Option<u32>,
 }
 
 /// Prompt 配置（D8 reasoning 剥离 + D9 schema 规范化开关）
@@ -101,17 +89,7 @@ impl DirectLlmClientConfig {
             prompt: PromptConfig::default(),
             request_timeout_secs: crate::config::DEFAULT_LLM_REQUEST_TIMEOUT_SECS,
             connect_timeout_secs: crate::config::DEFAULT_LLM_CONNECT_TIMEOUT_SECS,
-            scenario_overrides: std::collections::HashMap::new(),
         }
-    }
-
-    /// 设置场景级模型路由 + 输出上限覆盖
-    pub fn with_scenario_overrides(
-        mut self,
-        overrides: std::collections::HashMap<String, ScenarioOverride>,
-    ) -> Self {
-        self.scenario_overrides = overrides;
-        self
     }
 
     /// 覆盖 HTTP 请求整体超时（秒）。

@@ -794,4 +794,36 @@ mod tests {
         );
         assert_eq!(cooldown_secs_for_reason(""), MODEL_DISABLE_COOLDOWN_SECS);
     }
+
+    // ── 熔断键写入 ─────────────────────────────────────────────
+
+    /// 固定身份 mock：model_name/provider_name 恒定
+    struct NamedModelMock;
+
+    #[async_trait::async_trait]
+    impl LlmClient for NamedModelMock {
+        async fn complete(&self, _prompt: &str) -> Result<String> {
+            Ok("ok".to_string())
+        }
+        async fn complete_with_system(&self, _system: &str, _prompt: &str) -> Result<String> {
+            Ok("ok".to_string())
+        }
+        fn model_name(&self) -> String {
+            "Main-Model".to_string()
+        }
+        fn provider_name(&self) -> String {
+            "prov".to_string()
+        }
+    }
+
+    #[test]
+    fn failure_breaks_default_model_key() {
+        let breaker = std::sync::Arc::new(SharedBreaker::new());
+        let fb = FallbackLlmClient::new(vec![Arc::new(NamedModelMock)])
+            .with_shared_breaker(breaker.clone());
+
+        fb.disable_model(0, "empty_response");
+
+        assert!(breaker.is_disabled("prov/Main-Model").is_some());
+    }
 }

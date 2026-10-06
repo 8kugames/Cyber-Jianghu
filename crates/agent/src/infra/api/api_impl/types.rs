@@ -120,6 +120,16 @@ pub struct HttpApiState {
         Arc<std::sync::RwLock<Option<Arc<crate::component::state_store::WorldStateStore>>>>,
     /// 自更新器（GitHub Release；见 infra/updater.rs）
     pub updater: std::sync::Arc<crate::infra::updater::Updater>,
+    /// 决策模型管理器（run_agent 按 config.decision_model.enabled 装配；
+    /// None = 功能关闭，状态/事件端点返回 disabled 视图）
+    pub decision_model: std::sync::Arc<
+        tokio::sync::RwLock<
+            Option<std::sync::Arc<crate::component::decision_model::DecisionModelManager>>,
+        >,
+    >,
+    /// 决策模型下载进度广播（state_factory 创建；manager 构造时接管发送端）
+    pub decision_model_progress_tx:
+        tokio::sync::broadcast::Sender<crate::component::decision_model::DownloadProgress>,
 }
 
 /// 决策上下文快照（lifecycle 每轮写入，HTTP API 读取）

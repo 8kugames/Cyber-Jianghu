@@ -85,9 +85,10 @@ pub fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
 /// - token 匹配任一候选 → `Ok(())`
 ///
 /// `uri` 为完整 URI（含 query），用于支持 SSE 端点的 query token。
-/// 浏览器 `EventSource` 不支持自定义 header，故对 `/api/v1/events` 与
-/// `/api/v1/state/stream` 额外接受 `?token=<token>` 作为 Bearer 的等价物。
-/// query token 仅对这两个 SSE 端点生效。
+/// 浏览器 `EventSource` 不支持自定义 header，故对 `/api/v1/events`、
+/// `/api/v1/state/stream` 与 `/api/v1/decision-model/events` 额外接受
+/// `?token=<token>` 作为 Bearer 的等价物。
+/// query token 仅对这三个 SSE 端点生效。
 pub fn check_auth(
     expected_tokens: &[&str],
     headers: &HeaderMap,
@@ -120,7 +121,8 @@ pub fn check_auth(
     }
 
     // SSE 端点退化接受 query token（EventSource 无法带 header）
-    // 注意：仅 /api/v1/events 与 /api/v1/state/stream 开放此通道，且仅作 Bearer 的等价物。
+    // 注意：仅 /api/v1/events、/api/v1/state/stream 与 /api/v1/decision-model/events
+    // 开放此通道，且仅作 Bearer 的等价物。
     // 前端用 encodeURIComponent(token) 编码（app.js），后端须 percent-decode 后比较，
     // 否则含 + / / = 等保留字符的 token 格式会静默失配（SSE 永久 401）。
     if is_sse_query_token_path(path)
@@ -151,7 +153,9 @@ pub fn check_auth(
 
 /// 接受 query token 的 SSE 端点（EventSource 无法携带自定义 header）
 fn is_sse_query_token_path(path: &str) -> bool {
-    path == "/api/v1/events" || path == "/api/v1/state/stream"
+    path == "/api/v1/events"
+        || path == "/api/v1/state/stream"
+        || path == "/api/v1/decision-model/events"
 }
 
 /// axum 中间件：要求请求携带有效 token。
@@ -431,6 +435,41 @@ mod tests {
         assert_eq!(
             check_auth(&["my-secret"], &headers, "/api/v1/state/stream", &uri),
             Ok(())
+        );
+    }
+
+    #[test]
+    fn test_check_auth_decision_model_events_accepts_query_token() {
+        // 决策模型进度流同为 SSE 端点，接受 query token（面板 EventSource 消费）
+        let headers = HeaderMap::new();
+        let uri = "/api/v1/decision-model/events?token=my-secret"
+            .parse::<axum::http::Uri>()
+            .unwrap();
+        assert_eq!(
+            check_auth(
+                &["my-secret"],
+                &headers,
+                "/api/v1/decision-model/events",
+                &uri
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn test_check_auth_decision_model_events_rejects_wrong_query_token() {
+        let headers = HeaderMap::new();
+        let uri = "/api/v1/decision-model/events?token=wrong"
+            .parse::<axum::http::Uri>()
+            .unwrap();
+        assert_eq!(
+            check_auth(
+                &["correct"],
+                &headers,
+                "/api/v1/decision-model/events",
+                &uri
+            ),
+            Err(StatusCode::UNAUTHORIZED)
         );
     }
 

@@ -123,26 +123,39 @@ pub struct LlmConfig {
     #[serde(default)]
     pub cache_diagnostics: CacheDiagnosticsConfig,
 
-    /// 场景级模型路由 + 输出上限覆盖（消费层成本分层）
+    /// 场景级主/从路由 + 可选输出上限（消费层成本分层）
     ///
-    /// key 为场景标签，合法值见 `component::llm::scenario`：
-    /// reflector_l3 / daily_summary / session_triage / narrative /
-    /// conversation_summary / relationship_eval / relationship_narrative /
-    /// biography / character_generation。
-    /// `model` 将该场景请求路由到同 provider 下的指定（更便宜）模型；
-    /// `max_tokens` 收紧该场景输出上限（completion cap）。
-    /// think / think_tool_round（主决策）不配置即保持主模型。
+    /// key 为场景标签，合法键白名单见 `component::llm::scenario::CONFIGURABLE_SCENARIO_KEYS`。
+    /// `via` 选择该场景走主模型（llm）还是从模型（Config.llm_secondary）；
+    /// 未配置的场景按内置默认（轻量场景走从，见 scenario::defaults_to_secondary）；
+    /// llm_secondary 未配置（与主一致）时从即主，路由无实际效果。
+    /// `max_tokens` 覆盖该场景输出上限，仅在携带请求配置的路径
+    /// （send_chat_exchange / tool loop）生效；complete 族走从模型自身 max_tokens。
+    /// 配置面：agent.yaml，或设置页「场景分流」编辑区（保存后自动 reload 热生效）。
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
-    pub scenario_overrides: std::collections::HashMap<String, ScenarioOverrideConfig>,
+    pub scenario_routing: std::collections::HashMap<String, ScenarioRouteConfig>,
 }
 
-/// 场景级覆盖配置（agent.yaml / LLM 配置 API）
+/// 场景路由项（agent.yaml 或设置页场景分流编辑区；保存后 reload 生效）
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ScenarioOverrideConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
+pub struct ScenarioRouteConfig {
+    /// 本场景走主模型还是从模型（缺省 secondary：轻量场景配置时通常意图是从）
+    #[serde(default = "default_scenario_via")]
+    pub via: ScenarioVia,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+}
+
+/// 场景路由目标端
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ScenarioVia {
+    Primary,
+    Secondary,
+}
+
+fn default_scenario_via() -> ScenarioVia {
+    ScenarioVia::Secondary
 }
 
 /// Cache 诊断配置 (测量用)
@@ -326,7 +339,7 @@ impl Default for LlmConfig {
                 DEFAULT_LLM_CONNECT_TIMEOUT_SECS,
             ),
             cache_diagnostics: CacheDiagnosticsConfig::default(),
-            scenario_overrides: std::collections::HashMap::new(),
+            scenario_routing: std::collections::HashMap::new(),
         }
     }
 }

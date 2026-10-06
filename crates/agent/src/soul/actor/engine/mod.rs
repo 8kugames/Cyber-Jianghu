@@ -37,6 +37,9 @@ mod prompt_template;
 mod skill_cache;
 mod think;
 
+// 决策模型两段式管线的认知-only 阶段（人魂不写 actions，动作交决策模型）
+pub(crate) mod cognition;
+
 /// 认知引擎配置
 ///
 /// persona 不在此处：真相源是 `Agent.persona`（`ThreadSafePersona`），
@@ -473,6 +476,16 @@ impl CognitiveEngine {
     ) {
         let mut guard = self.available_actions.write().expect("rwlock poisoned");
         *guard = actions;
+    }
+
+    /// 可用动作快照（决策模型问题构造读取动作词表用）
+    pub fn available_actions_snapshot(
+        &self,
+    ) -> Vec<cyber_jianghu_protocol::types::entities::AvailableAction> {
+        self.available_actions
+            .read()
+            .expect("rwlock poisoned")
+            .clone()
     }
 
     /// 更新当前 tick 的 FocusSummary（由 lifecycle 在每 tick 写入）

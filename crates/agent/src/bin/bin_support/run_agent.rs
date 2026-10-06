@@ -378,10 +378,39 @@ pub(crate) async fn run_agent(port: u16, mode: String, server: Option<String>) -
 
     let cognitive_engine = Arc::new(engine);
 
-    // 决策回调
+    // 决策模型（玩家侧 2B 意图决策；默认启用，装配需 enabled 且至少配置一个下载源。
+    // 未装配/未就绪/调用失败一律自动回退既有 LLM 决策路径，不影响 agent 存活）
+    let dm_sources_configured = !config.decision_model.modelscope_repo.trim().is_empty()
+        || !config.decision_model.github_release_url.trim().is_empty();
+    if config.decision_model.enabled && !dm_sources_configured {
+        warn!(
+            "decision_model.enabled=true 但 modelscope_repo 与 github_release_url 均未配置，决策模型不装配（走既有 LLM 决策路径）；配置下载源后重启生效"
+        );
+    }
+    if config.decision_model.enabled && dm_sources_configured {
+        let manager = std::sync::Arc::new(
+            cyber_jianghu_agent::component::decision_model::DecisionModelManager::new(
+                config.decision_model.clone(),
+                api_state.decision_model_progress_tx.clone(),
+            ),
+        );
+        // 后台安装（本地恢复优先，缺失走双源下载）；失败不阻塞主流程
+        let manager_for_install = manager.clone();
+        tokio::spawn(async move {
+            manager_for_install.install_if_needed().await;
+        });
+        *api_state.decision_model.write().await = Some(manager);
+        info!(
+            "决策模型已启用: quant={} threshold={:.2}（未就绪时自动回退 LLM 决策路径）",
+            config.decision_model.quant, config.decision_model.threshold
+        );
+    }
+
+    // 决策回调（每 tick 从共享槽位读取 manager：面板换装/开关下一 tick 热生效）
     let decision_with_chain: DecisionWithChainCallback = Arc::new(cognitive_decision_with_chain(
         cognitive_engine.clone(),
         CognitiveDecisionConfig::default().max_retries,
+        api_state.decision_model.clone(),
     ));
 
     let cognitive_engine_for_memory = cognitive_engine.clone();

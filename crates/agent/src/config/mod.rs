@@ -263,6 +263,9 @@ pub struct RuntimeConfig {
     /// 停止 LLM 调用
     #[serde(default)]
     pub llm_disabled: bool,
+    /// 从链独立停用（暂停场景分流，全部走主模型；正交于 llm_disabled）
+    #[serde(default)]
+    pub secondary_llm_disabled: bool,
 
     /// 自动重生开关：角色死亡后自动转世重生（复用角色信息）
     #[serde(default = "default_true")]
@@ -285,6 +288,7 @@ impl Default for RuntimeConfig {
             mode: RuntimeMode::Cognitive,
             port: 0,
             llm_disabled: false,
+            secondary_llm_disabled: false,
             auto_rebirth: true,
             auto_register_timeout_secs: default_auto_register_timeout_secs(),
         }

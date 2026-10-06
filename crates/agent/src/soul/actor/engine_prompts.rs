@@ -112,6 +112,19 @@ impl super::CognitiveEngine {
     /// 仅在初始化和人设更新时调用。输出在 tick 间 byte-identical。
     /// feedback_section 明确排除 — 它是 volatile 内容。
     pub(super) fn build_system_message(&self, use_tool_calling: bool) -> String {
+        self.build_system_message_inner(use_tool_calling, None)
+    }
+
+    /// 带 output_format 覆盖的 system message 构造
+    ///
+    /// 决策模型两段式管线用：认知-only 阶段以 COGNITION_OUTPUT_FORMAT 覆盖
+    /// 模板的 output_format 段（去掉 actions 输出要求，保留认知字段），
+    /// 其余 section（persona/规则/task）保持 byte-identical 以共享 prefix cache。
+    pub(super) fn build_system_message_inner(
+        &self,
+        use_tool_calling: bool,
+        output_format_override: Option<&str>,
+    ) -> String {
         let (agent_name, persona_desc) = {
             let cfg = self.config.read().expect("rwlock poisoned");
             let persona_for_prompt = {
@@ -169,16 +182,22 @@ impl super::CognitiveEngine {
             if let Some(rendered) = tmpl.render_section("task", &empty_vars) {
                 parts.push_str(&rendered);
             }
-            // output_format 需要 tool_calling_guidance + action_field_hints
-            let mut vars = std::collections::HashMap::new();
-            vars.insert("tool_calling_guidance".to_string(), tool_calling_guidance);
-            vars.insert("action_field_hints".to_string(), String::new());
-            if let Some(rendered) = tmpl.render_section("output_format", &vars) {
-                parts.push_str(&rendered);
+            // output_format：模板渲染或认知-only 覆盖
+            match output_format_override {
+                Some(fmt) => parts.push_str(fmt),
+                None => {
+                    // output_format 需要 tool_calling_guidance + action_field_hints
+                    let mut vars = std::collections::HashMap::new();
+                    vars.insert("tool_calling_guidance".to_string(), tool_calling_guidance);
+                    vars.insert("action_field_hints".to_string(), String::new());
+                    if let Some(rendered) = tmpl.render_section("output_format", &vars) {
+                        parts.push_str(&rendered);
+                    }
+                }
             }
         } else {
             // 降级：无模板时用硬编码内容
-            parts.push_str(&tool_calling_guidance);
+            parts.push_str(output_format_override.unwrap_or(&tool_calling_guidance));
         }
 
         parts

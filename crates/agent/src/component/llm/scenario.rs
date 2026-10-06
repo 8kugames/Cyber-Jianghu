@@ -7,13 +7,14 @@
 // task-local 场景，落盘到 token_cost_count.tmp 的 by_scenario 维度。
 //
 // 同时驱动场景级模型路由：DirectLlmClient 构建请求时按当前场景查
-// `scenario_overrides`，辅助任务（审查/摘要/叙事）可路由到更便宜的模型。
+// `scenario_routing`，辅助任务（审查/摘要/叙事）可路由到更便宜的模型。
 //
 // 传播机制选 task-local 而非方法签名透传的原因：
 // - LlmClientExt 的 complete_json* 族方法签名已被 10+ 调用点使用，
 //   逐层加参会污染所有中间层（fallback / streaming / tool_loop）；
 // - task-local 在同一 tokio task 内自动贯通 await 链，fallback 切换客户端
-//   不影响标签；嵌套 scope 内层覆盖外层（tool loop 轮次覆盖 think 外层）。
+//   不影响标签；嵌套 scope 内层覆盖外层（tool loop 轮次标签覆盖 think 外层，
+//   仅影响记账维度——路由按外层 think 场景在 RoutedLlmClient 分发）。
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -29,6 +30,9 @@ pub struct Scenario(pub &'static str);
 pub const THINK: Scenario = Scenario("think");
 /// 地魂 tool loop 每轮 LLM 调用（含强制文本退出）
 pub const THINK_TOOL_ROUND: Scenario = Scenario("think_tool_round");
+/// 地魂 tool loop 前置轮（round 0-1，查状态轮）：仅记账维度（路由按外层
+/// think 场景分发，轮次标签不参与路由）
+pub const THINK_TOOL_ROUND_EARLY: Scenario = Scenario("think_tool_round_early");
 /// 天魂 Layer 3 LLM 审查
 pub const REFLECTOR_L3: Scenario = Scenario("reflector_l3");
 /// 每游戏日 triage 批量分诊
@@ -49,6 +53,59 @@ pub const BIOGRAPHY: Scenario = Scenario("biography");
 pub const CHARACTER_GENERATION: Scenario = Scenario("character_generation");
 /// 未标记场景（调用点未包裹时兜底）
 pub const UNKNOWN: Scenario = Scenario("unknown");
+
+/// 可配置路由的场景键全集（scenario_routing 合法键）。
+/// 供配置 API 校验与客户端构建期告警共用，防拼写静默失效；
+/// 不含 unknown（未标记调用的兜底桶，配置它几乎必然是误操作）。
+pub const CONFIGURABLE_SCENARIO_KEYS: [&str; 10] = [
+    THINK.0,
+    REFLECTOR_L3.0,
+    SESSION_TRIAGE.0,
+    DAILY_SUMMARY.0,
+    NARRATIVE.0,
+    CONVERSATION_SUMMARY.0,
+    RELATIONSHIP_EVAL.0,
+    RELATIONSHIP_NARRATIVE.0,
+    BIOGRAPHY.0,
+    CHARACTER_GENERATION.0,
+];
+
+/// 内置默认走从模型的轻量场景（机械/可验证/小输入；主决策与质量敏感场景不列）。
+/// scenario_routing 未显式配置的场景按此默认，配置可逐场景覆盖回主。
+pub const DEFAULT_SECONDARY_SCENARIOS: [&str; 6] = [
+    REFLECTOR_L3.0,
+    SESSION_TRIAGE.0,
+    DAILY_SUMMARY.0,
+    CONVERSATION_SUMMARY.0,
+    RELATIONSHIP_EVAL.0,
+    RELATIONSHIP_NARRATIVE.0,
+];
+
+/// 场景未显式配置时的默认路由端：true = 从模型
+pub fn defaults_to_secondary(scenario: &str) -> bool {
+    DEFAULT_SECONDARY_SCENARIOS.contains(&scenario)
+}
+
+/// 场景路由配置校验（防抖：拼错键静默失效是已知坑，改后只能靠记账间接发现）。
+/// 键必须在白名单内；max_tokens 若存在必须大于 0。
+pub fn validate_routing(
+    routing: &std::collections::HashMap<String, crate::config::ScenarioRouteConfig>,
+) -> Result<(), String> {
+    for (key, r) in routing {
+        if !CONFIGURABLE_SCENARIO_KEYS.contains(&key.as_str()) {
+            return Err(format!(
+                "未知场景键: {key}（合法键: {}）",
+                CONFIGURABLE_SCENARIO_KEYS.join(", ")
+            ));
+        }
+        if let Some(t) = r.max_tokens
+            && t == 0
+        {
+            return Err(format!("场景 {key} 的 max_tokens 必须大于 0"));
+        }
+    }
+    Ok(())
+}
 
 /// 在指定场景标签下执行 future（嵌套时内层覆盖外层）
 pub async fn with_scenario<R>(scenario: Scenario, fut: impl std::future::Future<Output = R>) -> R {
@@ -103,6 +160,18 @@ pub fn snapshot_forced_text_exits() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configurable_keys_complete_and_distinct() {
+        // 白名单必须与常量一一对应且互不重复（配置 API 校验与构建期告警共用）
+        let mut seen = std::collections::HashSet::new();
+        for k in CONFIGURABLE_SCENARIO_KEYS {
+            assert!(!k.is_empty());
+            assert!(seen.insert(k), "重复场景键: {k}");
+        }
+        assert_eq!(CONFIGURABLE_SCENARIO_KEYS.len(), 10);
+        assert!(!CONFIGURABLE_SCENARIO_KEYS.contains(&UNKNOWN.0));
+    }
 
     #[tokio::test]
     async fn test_with_scenario_sets_and_restores() {

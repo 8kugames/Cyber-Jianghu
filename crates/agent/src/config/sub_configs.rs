@@ -332,6 +332,122 @@ impl Default for UpdateConfig {
 }
 
 // ============================================================================
+// 决策模型配置（玩家侧 2B 意图决策模型：下载 + llama.cpp 读出运行时）
+// ============================================================================
+
+fn default_decision_model_enabled() -> bool {
+    true
+}
+
+fn default_decision_model_quant() -> String {
+    "q5_k_m".to_string()
+}
+
+fn default_decision_model_threshold() -> f32 {
+    0.70
+}
+
+fn default_decision_model_timeout_ms() -> u64 {
+    30_000
+}
+
+fn default_decision_model_startup_timeout_ms() -> u64 {
+    180_000
+}
+
+/// 低配自动降档：系统可用内存低于此值（MB）时改用 q4_k_s
+fn default_decision_model_low_memory_threshold_mb() -> u64 {
+    6144
+}
+
+/// ModelScope 主源（官方发布仓，与 GitHub Release 备源同构）
+fn default_decision_model_modelscope_repo() -> String {
+    "8kugames/Cyber-Jianghu-Decision-2B".to_string()
+}
+
+/// GitHub Release 备源基址（latest/download/<file>）
+fn default_decision_model_github_release_url() -> String {
+    "https://github.com/8kugames/Cyber-Jianghu-Decision-2B/releases".to_string()
+}
+
+/// 支持的量化档位（与 ModelScope/GitHub Release 资产命名一致）
+pub const DECISION_MODEL_QUANTS: [&str; 4] = ["q8_0", "q6_k", "q5_k_m", "q4_k_s"];
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DecisionModelConfig {
+    /// 总开关（默认开启；置 false 关闭后走"人魂 LLM 直接写 actions JSON"既有路径）
+    ///
+    /// 注意：下载源（modelscope_repo / github_release_url）均未配置时本功能
+    /// 无法装配，run_agent 会一次性告警并保持既有路径——开关本身不产生副作用。
+    #[serde(default = "default_decision_model_enabled")]
+    pub enabled: bool,
+
+    /// ModelScope 模型仓（主下载源，形如 "owner/repo"；默认官方发布仓）
+    #[serde(default = "default_decision_model_modelscope_repo")]
+    pub modelscope_repo: String,
+
+    /// GitHub Releases 下载基址（备源，形如 "https://github.com/owner/repo/releases"；
+    /// 默认官方发布仓，置空串可禁用该源）
+    #[serde(default = "default_decision_model_github_release_url")]
+    pub github_release_url: String,
+
+    /// 量化档位：q8_0 / q6_k / q5_k_m / q4_k_s（默认 q5_k_m；低配自动降 q4_k_s）
+    #[serde(default = "default_decision_model_quant")]
+    pub quant: String,
+
+    /// 置信度门控阈值：act1 confidence >= 阈值才采用决策输出，否则回退 LLM 路径
+    #[serde(default = "default_decision_model_threshold")]
+    pub threshold: f32,
+
+    /// 单次决策调用的 HTTP 超时（毫秒）
+    #[serde(default = "default_decision_model_timeout_ms")]
+    pub timeout_ms: u64,
+
+    /// 模型安装目录（None 使用数据目录下 decision-model/）
+    #[serde(default)]
+    pub install_dir: Option<String>,
+
+    /// 低配自动降档阈值：系统可用内存（MB）低于此值时改用 q4_k_s（0 = 关闭降档）
+    #[serde(default = "default_decision_model_low_memory_threshold_mb")]
+    pub low_memory_threshold_mb: u64,
+
+    /// llama-server 可执行文件路径（None 依次搜索安装目录 / 可执行文件同级 / PATH）
+    #[serde(default)]
+    pub llama_server_path: Option<String>,
+
+    /// llama-server 监听端口（0 = 自动选择空闲端口）
+    #[serde(default)]
+    pub port: u16,
+
+    /// llama-server 附加命令行参数（如 ["-ngl", "99"] 开 GPU 卸载）
+    #[serde(default)]
+    pub llama_server_args: Vec<String>,
+
+    /// llama-server 启动 + 模型加载超时（毫秒）
+    #[serde(default = "default_decision_model_startup_timeout_ms")]
+    pub startup_timeout_ms: u64,
+}
+
+impl Default for DecisionModelConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_decision_model_enabled(),
+            modelscope_repo: default_decision_model_modelscope_repo(),
+            github_release_url: default_decision_model_github_release_url(),
+            quant: default_decision_model_quant(),
+            threshold: default_decision_model_threshold(),
+            timeout_ms: default_decision_model_timeout_ms(),
+            install_dir: None,
+            low_memory_threshold_mb: default_decision_model_low_memory_threshold_mb(),
+            llama_server_path: None,
+            port: 0,
+            llama_server_args: Vec::new(),
+            startup_timeout_ms: default_decision_model_startup_timeout_ms(),
+        }
+    }
+}
+
+// ============================================================================
 // 完整配置
 // ============================================================================
 
@@ -353,6 +469,13 @@ pub struct Config {
     /// ReflectorSoul LLM 配置（可选，未配置时继承 llm）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub llm_reflector: Option<LlmConfig>,
+
+    /// 从模型（轻量路由目标）配置：None = 与主模型一致（动态跟随 llm）；
+    /// Some = 完整独立定义（可换 provider/base_url/api_key/model）。
+    /// 场景路由（llm.scenario_routing 的 via=secondary）分发到此客户端；
+    /// 从模型失败时 RoutedLlmClient 自动回退主模型。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub llm_secondary: Option<LlmConfig>,
 
     /// 记忆系统配置
     #[serde(default)]
@@ -382,6 +505,11 @@ pub struct Config {
     /// 自动更新配置（GitHub Release 自更新）
     #[serde(default)]
     pub update: UpdateConfig,
+
+    /// 玩家侧决策模型（2B 意图决策：下载管理 + llama.cpp 读出，默认开启、
+    /// 源未配置或模型未就绪时自动回退既有 LLM 决策路径）
+    #[serde(default)]
+    pub decision_model: DecisionModelConfig,
 
     /// 角色生成约束（必填，缺失时 serde 报错 fail-fast）
     pub character_generation: CharacterGenerationConfig,

@@ -20,7 +20,7 @@ mod http;
 mod openclaw;
 mod provider;
 
-pub use config::{DirectLlmClientConfig, PromptConfig, ScenarioOverride};
+pub use config::{DirectLlmClientConfig, PromptConfig};
 pub use openclaw::OpenClawConfig;
 pub use provider::LlmProvider;
 
@@ -35,6 +35,23 @@ pub fn is_llm_disabled() -> bool {
 /// 设置 LLM 停止状态
 pub fn set_llm_disabled(disabled: bool) {
     LLM_DISABLED.store(disabled, Ordering::Relaxed);
+}
+
+/// 从链独立停用标志：暂停场景分流（全部回主链），不影响主模型调用。
+/// 与全局 LLM_DISABLED 正交：全局停止在 DirectLlmClient 各入口（complete 族与
+/// send_chat_exchange）闸断主/从一切调用；本标志只把 RoutedLlmClient 的
+/// 分发目标从从链拨回主链（轻量场景临时走主）。
+static SECONDARY_DISABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// 查询从链是否被独立停用
+pub fn is_secondary_disabled() -> bool {
+    SECONDARY_DISABLED.load(Ordering::Relaxed)
+}
+
+/// 设置从链独立停用状态（立即生效：RoutedLlmClient pick 每次调用读取）
+pub fn set_secondary_disabled(disabled: bool) {
+    SECONDARY_DISABLED.store(disabled, Ordering::Relaxed);
 }
 
 use super::LlmClient;
@@ -104,35 +121,6 @@ impl DirectLlmClient {
         &self.config
     }
 
-    /// 场景级模型解析：当前 task-local 场景命中 override 且配置了 model 时
-    /// 返回覆盖模型，否则原样返回请求模型。
-    /// 记账（http.rs 按 request.model 记）与路由天然一致。
-    fn resolve_scenario_model(&self, requested: &str) -> String {
-        let scenario = super::scenario::current();
-        match self.config.scenario_overrides.get(scenario.0) {
-            Some(o) if o.model.as_deref().is_some_and(|m| !m.is_empty()) => {
-                debug!(
-                    "[llm] scenario 路由: {} -> model {} (was {})",
-                    scenario.0,
-                    o.model.as_deref().unwrap_or_default(),
-                    requested
-                );
-                o.model.clone().unwrap_or_else(|| requested.to_string())
-            }
-            _ => requested.to_string(),
-        }
-    }
-
-    /// 场景级输出上限解析：override 配置了 max_tokens 时覆盖，
-    /// 否则保留调用方/全局值。
-    fn resolve_scenario_max_tokens(&self, requested: Option<u32>) -> Option<u32> {
-        let scenario = super::scenario::current();
-        match self.config.scenario_overrides.get(scenario.0) {
-            Some(o) => o.max_tokens.or(requested),
-            None => requested,
-        }
-    }
-
     /// 创建新的 Direct LLM 客户端
     pub fn new(mut config: DirectLlmClientConfig) -> Result<Self> {
         // 对于 OpenClaw，自动加载配置文件
@@ -168,15 +156,17 @@ impl DirectLlmClient {
 
     /// 检查共享 breaker：命中则直接返回 Err，不发起 HTTP 请求
     fn check_breaker(&self) -> Result<()> {
-        if let Some(breaker) = &self.breaker
-            && let Some(remaining) = breaker.is_disabled(&self.breaker_key())
-        {
-            anyhow::bail!(
-                "LLM model {}/{} is in cooldown ({}s remaining)",
-                self.config.provider.as_str(),
-                self.config.get_model_with_default(),
-                remaining
-            );
+        if let Some(breaker) = &self.breaker {
+            // 现场解析：pre-check 发生在请求构建前，task-local 场景此刻已确定，
+            // 现场解析保证键与本次请求的实际模型一致
+            let key = self.breaker_key();
+            if let Some(remaining) = breaker.is_disabled(&key) {
+                anyhow::bail!(
+                    "LLM model {} is in cooldown ({}s remaining)",
+                    key,
+                    remaining
+                );
+            }
         }
         Ok(())
     }
@@ -290,10 +280,10 @@ impl DirectLlmClient {
         prompt: &str,
     ) -> Result<super::streaming::LlmStream> {
         let request = OpenAIRequest {
-            model: self.resolve_scenario_model(&self.config.get_model_with_default()),
+            model: self.config.get_model_with_default(),
             messages: vec![ChatMessage::system(system), ChatMessage::user(prompt)],
             temperature: Some(self.config.temperature),
-            max_tokens: self.resolve_scenario_max_tokens(Some(self.config.max_tokens)),
+            max_tokens: Some(self.config.max_tokens),
             tools: None,
             tool_choice: None,
             enable_thinking: self.config.enable_thinking,
@@ -321,10 +311,10 @@ impl DirectLlmClient {
             self.config.prompt.strip_reasoning_content,
         );
         let request = OpenAIRequest {
-            model: self.resolve_scenario_model(&self.config.get_model_with_default()),
+            model: self.config.get_model_with_default(),
             messages,
             temperature: Some(self.config.temperature),
-            max_tokens: self.resolve_scenario_max_tokens(Some(self.config.max_tokens)),
+            max_tokens: Some(self.config.max_tokens),
             tools: None,
             tool_choice: None,
             enable_thinking: self.config.enable_thinking,
@@ -337,10 +327,10 @@ impl DirectLlmClient {
     /// 构造无工具、非流式的 OpenAI 兼容请求（消息列表由调用方决定）
     fn plain_request(&self, messages: Vec<ChatMessage>) -> OpenAIRequest {
         OpenAIRequest {
-            model: self.resolve_scenario_model(&self.config.get_model_with_default()),
+            model: self.config.get_model_with_default(),
             messages,
             temperature: Some(self.config.temperature),
-            max_tokens: self.resolve_scenario_max_tokens(Some(self.config.max_tokens)),
+            max_tokens: Some(self.config.max_tokens),
             tools: None,
             tool_choice: None,
             enable_thinking: self.config.enable_thinking,
@@ -499,15 +489,20 @@ impl LlmClient for DirectLlmClient {
         tools: Option<&[ToolDefinition]>,
         config: super::openai_types::ChatExchangeConfig,
     ) -> Result<super::openai_types::ChatExchangeResponse> {
+        // 全局停止守门（与 complete 族入口同口径；历史上此路径缺失，
+        // 导致全局停止后 tool loop 轮次仍发起真实 HTTP 调用）
+        if is_llm_disabled() {
+            anyhow::bail!("LLM 调用已被停止");
+        }
+
         // 共享 breaker 守门：模型在冷却期直接拒绝
         self.check_breaker()?;
 
         let request = OpenAIRequest {
-            model: self.resolve_scenario_model(&config.model),
+            model: config.model,
             messages,
             temperature: Some(config.temperature),
-            max_tokens: self
-                .resolve_scenario_max_tokens(config.max_tokens.or(Some(self.config.max_tokens))),
+            max_tokens: config.max_tokens.or(Some(self.config.max_tokens)),
             tools: tools.map(|t| {
                 t.iter()
                     .map(|tool| {
@@ -677,7 +672,7 @@ impl LlmClient for DirectLlmClient {
             Ok(super::streaming::wrap_usage_tracking(
                 stream,
                 self.config.provider,
-                self.resolve_scenario_model(&self.config.get_model_with_default()),
+                self.config.get_model_with_default(),
                 system_hash,
                 prompt_chars,
             ))
@@ -718,7 +713,7 @@ impl LlmClient for DirectLlmClient {
             Ok(super::streaming::wrap_usage_tracking(
                 stream,
                 self.config.provider,
-                self.resolve_scenario_model(&self.config.get_model_with_default()),
+                self.config.get_model_with_default(),
                 system_hash,
                 prompt_chars,
             ))

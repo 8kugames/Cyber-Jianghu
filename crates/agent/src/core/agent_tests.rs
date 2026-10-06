@@ -10,6 +10,7 @@ fn test_config() -> Config {
         runtime: crate::config::RuntimeConfig::default(),
         llm: crate::config::LlmConfig::default(),
         llm_reflector: None,
+        llm_secondary: None,
         memory: crate::config::MemoryConfig::default(),
         game_rules: None,
         config_path: PathBuf::from("/tmp/test-agent-config.yaml"),
@@ -17,6 +18,7 @@ fn test_config() -> Config {
         earth_soul: crate::soul::earth::config::EarthSoulConfig::default(),
         token_optimization: crate::config::TokenOptimizationConfig::default(),
         update: crate::config::UpdateConfig::default(),
+        decision_model: crate::config::DecisionModelConfig::default(),
         character_generation: crate::config::CharacterGenerationConfig {
             world_setting: "测试世界".to_string(),
             fields: Vec::new(),
