@@ -23,10 +23,8 @@ pub fn available_memory_mb() -> Option<u64> {
 
 #[cfg(target_os = "linux")]
 fn linux_available_mb() -> Option<u64> {
-    let proc_avail = parse_proc_meminfo().unwrap_or_else(|| {
-        // 非常规内核：无法解析时按 0 处理会误触发降档，返回 None 保持原档
-        None
-    });
+    // 非常规内核：无法解析时按 0 处理会误触发降档，保持 None 维持原档
+    let proc_avail = parse_proc_meminfo();
     let cgroup_avail = cgroup_available_mb();
     match (proc_avail, cgroup_avail) {
         (Some(a), Some(c)) => Some(a.min(c)),
