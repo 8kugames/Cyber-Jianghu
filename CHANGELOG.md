@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+## [0.1.369] - 2026-10-06
+
+### Features
+
+- **本地 2B 决策模型管线**（agent）：专用小模型出结构化意图、LLM 仅出认知摘要的两段式路径——认知-only 阶段（think_cognition_only）→ act1/act2/实体绑定逐问题读出（letter token 映射，与评测脚本逐字一致）→ 置信度门控（默认 0.7）→ 构造 Intents；任何阶段失败回退既有 LLM 路径（60s 冷却防抖）。新增 `component/decision_model/` 七模块：manifest（sha256 流式校验/子目录路径防御）、downloader（ModelScope 主源+GitHub 备源/Range 断点续传）、server（llama-server 子进程懒启动/健康检查/tokenize 校验）、prompt（jevfmt 逐字移植）、questions（结构化候选+门控绑定纯函数）、sys_memory（MemAvailable+cgroup v2，低配自动降档 q4_k_s）、metrics（/api/v1/metrics decision_model 小节）；管理端点 /api/v1/decision-model/{status,events}（SSE 下载进度）。生产实测：eligible 口径采纳率 ~82%，采纳意图服务器侧 100% 接受，2B 推理 avg ~1.7s。
+- **主从跨 Provider 场景分流与面板模型管理**（agent）：llm_secondary 从模型支持独立 Provider/密钥/参数，场景级路由 scenario_routing 主/从选择（轻量场景默认走从）；面板主/从模型独立配置块（统计/状态/启停/流式/高级参数/备用）、场景分流独立配置块；启停开关同时生效主从，从模型跟随态时开关锁定镜像主模型。
+- **决策模型双部署模式**（agent）：local（下载 GGUF+llama-server 自启动）与 remote（URL 端点，remote_model 多模型网关路由，支持第三方 API）分列配置；docker 部署默认 remote 模式（网络发现 `http://decision-model:8081`，不重复下载）；未就绪/端点不可达/配置非法均干净回退 LLM（死端口实测每 tick 回退+冷却防抖）。
+- **dm 管线运行时动态校验**（agent）：构造结果按服务器下发动作契约（available_actions，与决策 prompt 同源）自检——typed 闭集必须对象+required_fields 齐备、演化动作按 required_fields 分档、下架动作显式回退；上线当日拦截「取」缺 quantity 真实契约缺口。
+- **LLM 场景级成本分层**（agent）：task-local 场景标签、按场景 token 记账与 scenario_overrides 模型路由。
+- **SFT 导出归一历史动作名**（server）：丢弃工具残留，导出样本动作名与现行词表对齐。
+- **SFT 数据准备格式纠错反馈合成增强**（training）：错误样本合成纠错反馈增强训练信号。
+- **训练脚本入库**（training）：天魂标签解析、SFT 数据准备、评测脚本入库替代交接文档。
+
+### Bug Fixes
+
+- **决策模型观察缺 action_data**（agent）：dm 路径「观察」（无目标环顾/act2）此前提交 None 被服务器 typed 解析全量拒绝（生产实测 30/30 失败而本地采纳率正常，双真相分叉）；补空对象修复，服务器侧 16/16 全过。
+- **act2 答「无」不再构造后续 intent**（agent）：「无」是 act2 选项（无后续动作语义），此前被当作 action_type 提交致天魂驳回并污染整条原子队列（触发自纠/chaos 多耗两轮 LLM）。
+- **dm 取 动作补 quantity 字段**（agent）：动态校验实战拦截的 required_fields 缺口，补默认 quantity:1。
+- **auto-rebirth 成功后立即落盘**（agent）：此前只写内存 pending，进程在主循环持久化前重启即永久丢档（转世后失联、触发多余自动注册）；现成功分支先落最小档案兜底。
+- **query_world environment 返回物品明细**（agent）：此前只返回 nearby_items_count 计数，角色拿不到物品名称/ID 无法构造取/采集意图（连续两世脱水致死的直接断点）；补 nearby_items（name_ref 可照抄）与 gatherable_items（含存量）明细。
+- **sys_memory Linux 分支两处编译/lint 修复**（agent）：unwrap_or_else(|| None) 类型错误（5×E0308）与冗余 trim() lint——macOS 本地 clippy 不覆盖 cfg(linux) 分支，均已用 clippy-driver --target musl 建立交叉验证。
+- **认知重试格式错误反馈剥离技术细节**（agent）：serde 报错原文不进重试 prompt，连续失败干净重试。
+- **trace 回传 sender 可重注入**（agent）：server 重启后回传不再静默失效。
+- **训练导出参数绑定修复**（server）：SET LOCAL 绑定参数与 wall_clock 双格式解析。
+
 ## [0.1.366] - 2026-09-18
 
 ### Features
