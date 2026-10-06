@@ -4,7 +4,11 @@
 
 ## [Unreleased]
 
-## [0.1.369] - 2026-10-06
+## [0.1.370] - 2026-10-06
+
+### License
+
+- **许可证迁移至 Apache-2.0 单许可**：MIT OR Apache-2.0 双许可收敛为 Apache-2.0——LICENSE 全文替换，移除 LICENSE-MIT/LICENSE-APACHE，三个 crate 的 Cargo.toml license 字段与中英文 Readme、WHITEPAPER 合规章节同步更新。
 
 ### Features
 
